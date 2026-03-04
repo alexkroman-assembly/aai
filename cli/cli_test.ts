@@ -1,6 +1,9 @@
 import { expect } from "@std/expect";
 import { main } from "./cli.ts";
 
+const denoConfig = await import("../deno.json", { with: { type: "json" } });
+const VERSION: string = denoConfig.default.version;
+
 function withConsoleSpy(
   fn: (logged: string[]) => void | Promise<void>,
 ) {
@@ -24,7 +27,7 @@ Deno.test("cli main", async (t) => {
     "prints version with --version",
     withConsoleSpy(async (logged) => {
       expect(await main(["--version"])).toBe(0);
-      expect(logged).toEqual(["0.1.0"]);
+      expect(logged).toEqual([VERSION]);
     }),
   );
 
