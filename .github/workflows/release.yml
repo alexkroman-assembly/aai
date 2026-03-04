@@ -84,41 +84,8 @@ jobs:
             dist/${{ matrix.artifact }}.tar.gz
             dist/${{ matrix.artifact }}.sha256
 
-  build-server:
-    needs: version
-    if: needs.version.outputs.exists == 'false'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: denoland/setup-deno@v2
-        with:
-          deno-version: ${{ env.DENO_VERSION }}
-
-      - name: Compile server binary
-        run: |
-          deno compile \
-            --allow-all \
-            --unstable-worker-options \
-            --target x86_64-unknown-linux-gnu \
-            --output dist/server \
-            server/main.ts
-
-      - name: Create tarball
-        run: |
-          cd dist
-          tar czf aai-server-linux-x64.tar.gz server
-          shasum -a 256 aai-server-linux-x64.tar.gz > aai-server-linux-x64.sha256
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: aai-server-linux-x64
-          path: |
-            dist/aai-server-linux-x64.tar.gz
-            dist/aai-server-linux-x64.sha256
-
   release:
-    needs: [version, build, build-server]
+    needs: [version, build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

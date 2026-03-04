@@ -1,12 +1,18 @@
-FROM curlimages/curl AS fetch
+FROM denoland/deno:2.2.2 AS build
 
-RUN curl -fsSL -o /tmp/server.tar.gz \
-  "https://github.com/alexkroman/aai/releases/latest/download/aai-server-linux-x64.tar.gz" \
-  && tar xz -C /tmp -f /tmp/server.tar.gz
+WORKDIR /app
+COPY . .
+
+RUN deno compile \
+  --allow-all \
+  --unstable-worker-options \
+  --target x86_64-unknown-linux-gnu \
+  --output /app/server \
+  server/main.ts
 
 FROM gcr.io/distroless/cc-debian12:nonroot
 
-COPY --from=fetch /tmp/server /server
+COPY --from=build /app/server /server
 
 EXPOSE 8080
 
