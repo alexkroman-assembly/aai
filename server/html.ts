@@ -54,7 +54,14 @@ brew install aai
 <span class="dim"># create an agent</span>
 aai new my-agent --template simple
 cd my-agent
-aai dev</code></pre>
+aai dev
+
+<span class="dim"># deploy an agent</span>
+aai deploy
+
+<span class="dim"># create an agent with claude code</span>
+aai skill install
+claude "/new-agent a voice agent that helps plan weekend trips"</code></pre>
       <p style="margin-top:1.5rem;font-size:.85rem">
         <a href="https://github.com/alexkroman/aai">GitHub</a>
       </p>
