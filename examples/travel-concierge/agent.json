@@ -2,7 +2,6 @@
   "slug": "travel-concierge",
   "env": {
     "ASSEMBLYAI_API_KEY": null,
-    "ASSEMBLYAI_TTS_API_KEY": null,
     "LLM_MODEL": "claude-haiku-4-5-20251001",
     "BRAVE_API_KEY": null
   }

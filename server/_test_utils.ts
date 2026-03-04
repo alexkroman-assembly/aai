@@ -263,7 +263,6 @@ export function createMockSttEvents(
 
 export const VALID_ENV = {
   ASSEMBLYAI_API_KEY: "test-key",
-  ASSEMBLYAI_TTS_API_KEY: "test-tts-key",
 };
 
 // --- From _s3_test_utils.ts ---

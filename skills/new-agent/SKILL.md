@@ -95,7 +95,6 @@ After creating `agent.ts`, also create:
 2. **`.env`** with required API keys:
 ```
 ASSEMBLYAI_API_KEY=<user needs to add>
-ASSEMBLYAI_TTS_API_KEY=<user needs to add>
 ```
 
 3. **`deno.json`** with the SDK import:

@@ -21,7 +21,6 @@ function resolveFromCaller(path: string): string {
 // deno-fmt-ignore
 const ENV_VARS = [
   `    ${cyan("ASSEMBLYAI_API_KEY")}       AssemblyAI API key for speech-to-text ${red("(required)")}`,
-  `    ${cyan("ASSEMBLYAI_TTS_API_KEY")}   AssemblyAI API key for text-to-speech ${red("(required)")}`,
   `    ${cyan("LLM_MODEL")}                LLM model to use ${dim("(default: claude-haiku-4-5-20251001)")}`,
   `    ${cyan("PORT")}                     Server port ${dim("(default: 3000)")}`,
   `    ${cyan("BRAVE_API_KEY")}            Brave Search API key ${dim("(optional, for web tools)")}`,
