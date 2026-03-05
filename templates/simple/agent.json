@@ -1,6 +1,4 @@
 {
   "slug": "simple",
-  "env": {
-    "ASSEMBLYAI_API_KEY": null
-  }
+  "env": ["ASSEMBLYAI_API_KEY"]
 }

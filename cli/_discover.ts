@@ -19,27 +19,47 @@ const TransportEnum = z.enum(["websocket", "twilio"]);
 
 const AgentJsonSchema = z.object({
   slug: z.string(),
-  env: z.record(z.string(), z.union([z.string(), z.null()])),
+  env: z.union([
+    z.array(z.string()),
+    z.record(z.string(), z.union([z.string(), z.null()])),
+  ]),
   transport: z.union([TransportEnum, z.array(TransportEnum)]).optional(),
 });
 
 export async function loadAgent(dir: string): Promise<AgentEntry | null> {
+  let hasAgentTs = false;
   try {
     await Deno.stat(join(dir, "agent.ts"));
-  } catch {
-    return null;
-  }
+    hasAgentTs = true;
+  } catch { /* missing */ }
 
-  let raw: string;
+  let hasAgentJson = false;
   try {
-    raw = await Deno.readTextFile(join(dir, "agent.json"));
-  } catch {
-    return null;
+    await Deno.stat(join(dir, "agent.json"));
+    hasAgentJson = true;
+  } catch { /* missing */ }
+
+  if (!hasAgentTs && !hasAgentJson) return null;
+  if (!hasAgentTs) {
+    throw new Error(`found agent.json but no agent.ts in ${dir}`);
+  }
+  if (!hasAgentJson) {
+    throw new Error(`found agent.ts but no agent.json in ${dir}`);
   }
 
+  const raw = await Deno.readTextFile(join(dir, "agent.json"));
   const parsed = AgentJsonSchema.safeParse(JSON.parse(raw));
-  if (!parsed.success) return null;
-  const { slug, env: declared } = parsed.data;
+  if (!parsed.success) {
+    const issues = parsed.error.issues
+      .map((i) => `${i.path.join(".")}: ${i.message}`)
+      .join(", ");
+    throw new Error(`invalid agent.json: ${issues}`);
+  }
+  const { slug } = parsed.data;
+
+  const declared = Array.isArray(parsed.data.env)
+    ? parsed.data.env
+    : Object.keys(parsed.data.env);
   const transport: ("websocket" | "twilio")[] =
     parsed.data.transport === undefined
       ? ["websocket"]
@@ -53,9 +73,9 @@ export async function loadAgent(dir: string): Promise<AgentEntry | null> {
   const env: Record<string, string> = {};
   const missing: string[] = [];
 
-  for (const [key, defaultVal] of Object.entries(declared)) {
-    const resolved = dotenv[key] ?? Deno.env.get(key) ?? defaultVal;
-    if (resolved === null || resolved === undefined) {
+  for (const key of declared) {
+    const resolved = dotenv[key] ?? Deno.env.get(key);
+    if (resolved === undefined) {
       missing.push(key);
     } else {
       env[key] = resolved;

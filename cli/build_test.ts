@@ -22,6 +22,7 @@ Deno.test("runBuild", async (t) => {
         bundled.push(agent.slug);
         return Promise.resolve({ workerBytes: 1024, clientBytes: 512 });
       },
+      () => Promise.resolve({ errors: [] }),
     );
     expect(bundled).toEqual(["test-agent"]);
   });
@@ -36,6 +37,7 @@ Deno.test("runBuild", async (t) => {
         dirs.push(outDir);
         return Promise.resolve({ workerBytes: 100, clientBytes: 100 });
       },
+      () => Promise.resolve({ errors: [] }),
     );
     expect(dirs).toEqual(["/custom/path/test-agent"]);
   });

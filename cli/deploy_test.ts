@@ -15,8 +15,18 @@ Deno.test("runDeploy", async (t) => {
   await t.step("deploys all bundles found in bundleDir", async () => {
     const fetched: { url: string; authHeader: string | null }[] = [];
     const doFetch: typeof globalThis.fetch = (input, init) => {
+      const url = String(input);
+      // Mock health check endpoint
+      if (url.endsWith("/health")) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ status: "ok", slug: "agent-a" }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
       fetched.push({
-        url: String(input),
+        url,
         authHeader:
           (init?.headers as Record<string, string>)?.["Authorization"] ?? null,
       });

@@ -48,6 +48,19 @@ export function createWebSocketRoutes(ctx: {
     return slot;
   }
 
+  app.get("/:slug/health", async (c) => {
+    const slug = c.req.param("slug");
+    const slot = await resolveSlot(slug);
+    if (!slot) return c.json({ error: "Not found", slug }, 404);
+    try {
+      const info = await ensureAgent(slot, (s) => store.getFile(s, "worker"));
+      return c.json({ status: "ok", slug, name: info.name });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return c.json({ status: "error", slug, error: msg }, 500);
+    }
+  });
+
   app.get("/:slug/", async (c) => {
     const slug = c.req.param("slug");
     const slot = await resolveSlot(slug);

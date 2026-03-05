@@ -1,7 +1,8 @@
 import { debounce } from "@std/async/debounce";
 import { log } from "./_output.ts";
-import { loadAgent } from "./_discover.ts";
+import { type AgentEntry, loadAgent } from "./_discover.ts";
 import { bundleAgent } from "./_bundler.ts";
+import { validateAgent } from "./_validate.ts";
 
 export interface DevOpts {
   agentDir: string;
@@ -51,6 +52,53 @@ async function deploy(
   }
 }
 
+function printSummary(agent: AgentEntry, tools: string[]): void {
+  const envKeys = Object.keys(agent.env);
+  if (envKeys.length > 0) {
+    log.stepInfo("Secrets", envKeys.join(", "));
+  }
+  if (tools.length > 0) {
+    log.stepInfo("Tools", tools.join(", "));
+  }
+}
+
+function printUrls(agent: AgentEntry, serverUrl: string): void {
+  if (agent.transport.includes("websocket")) {
+    log.stepInfo("Listen", `${serverUrl}/${agent.slug}/`);
+  }
+  if (agent.transport.includes("twilio")) {
+    log.stepInfo("Twilio", `${serverUrl}/twilio/${agent.slug}/voice`);
+  }
+}
+
+/** Validate, bundle, and deploy an agent. Returns tool names on success. */
+async function buildAndDeploy(
+  agent: AgentEntry,
+  serverUrl: string,
+  tmpDir: string,
+): Promise<string[]> {
+  log.step("Check", agent.slug);
+  const validation = await validateAgent(agent);
+  if (validation.errors.length > 0) {
+    for (const e of validation.errors) {
+      log.error(`${e.field}: ${e.message}`);
+    }
+    throw new Error("agent validation failed — fix the errors above");
+  }
+
+  const allTools = [
+    ...(validation.builtinTools ?? []),
+    ...(validation.tools ?? []),
+  ];
+
+  log.step("Bundle", agent.slug);
+  await bundleAgent(agent, `${tmpDir}/${agent.slug}`);
+  log.step("Deploy", `${agent.slug} → ${serverUrl}`);
+  await deploy(serverUrl, tmpDir, agent.slug, agent.env.ASSEMBLYAI_API_KEY);
+
+  return allTools;
+}
+
 export async function runDev(opts: DevOpts): Promise<void> {
   const agent = await loadAgent(opts.agentDir);
   if (!agent) {
@@ -59,24 +107,15 @@ export async function runDev(opts: DevOpts): Promise<void> {
     );
   }
 
-  const apiKey = agent.env.ASSEMBLYAI_API_KEY;
   const tmpDir = await Deno.makeTempDir({ prefix: "aai-dev-" });
 
-  // Build + deploy
-  log.step("Bundle", agent.slug);
-  await bundleAgent(agent, `${tmpDir}/${agent.slug}`);
-  log.step("Deploy", `${agent.slug} → ${opts.serverUrl}`);
-  await deploy(opts.serverUrl, tmpDir, agent.slug, apiKey);
-
-  const agentUrl = `${opts.serverUrl}/${agent.slug}/`;
-  if (agent.transport.includes("websocket")) {
-    log.stepInfo("Listen", agentUrl);
-  }
-  if (agent.transport.includes("twilio")) {
-    log.stepInfo("Listen", `${opts.serverUrl}/${agent.slug}/twilio/voice`);
-  }
+  const tools = await buildAndDeploy(agent, opts.serverUrl, tmpDir);
+  printSummary(agent, tools);
+  log.step("Ready", agent.slug);
+  printUrls(agent, opts.serverUrl);
 
   // Open in browser (only for newly created agents)
+  const agentUrl = `${opts.serverUrl}/${agent.slug}/`;
   if (opts.openBrowser) {
     const openCmd = Deno.build.os === "darwin"
       ? "open"
@@ -93,11 +132,6 @@ export async function runDev(opts: DevOpts): Promise<void> {
         log.cyan("claude")
       } to change your agent, or edit agent.ts directly.`,
     );
-    console.log(
-      `  Run ${log.cyan("aai install-skill")} to add the ${
-        log.cyan("/voice-agent")
-      } skill to Claude Code.`,
-    );
     console.log(`  Run ${log.cyan("aai --watch")} to auto-reload on changes.`);
     console.log();
     Deno.removeSync(tmpDir, { recursive: true });
@@ -113,10 +147,13 @@ export async function runDev(opts: DevOpts): Promise<void> {
     try {
       const freshAgent = await loadAgent(opts.agentDir);
       if (!freshAgent) throw new Error("agent not found after change");
-      log.step("Bundle", freshAgent.slug);
-      await bundleAgent(freshAgent, `${tmpDir}/${freshAgent.slug}`);
-      log.step("Deploy", `${freshAgent.slug} → ${opts.serverUrl}`);
-      await deploy(opts.serverUrl, tmpDir, freshAgent.slug, apiKey);
+      const freshTools = await buildAndDeploy(
+        freshAgent,
+        opts.serverUrl,
+        tmpDir,
+      );
+      printSummary(freshAgent, freshTools);
+      log.step("Ready", freshAgent.slug);
     } catch (err: unknown) {
       log.error(err instanceof Error ? err.message : String(err));
     }
