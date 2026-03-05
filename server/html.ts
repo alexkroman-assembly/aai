@@ -33,10 +33,10 @@ export function renderLandingPage(): string {
     <style>
       *{margin:0;padding:0;box-sizing:border-box}
       body{font-family:-apple-system,system-ui,sans-serif;background:#0a0a0a;color:#e5e5e5;min-height:100vh;display:flex;align-items:center;justify-content:center}
-      .wrap{max-width:640px;padding:2rem}
+      .wrap{max-width:800px;padding:2rem}
       h1{font-size:2rem;font-weight:700;margin-bottom:.5rem}
       p{color:#999;margin-bottom:2rem;line-height:1.6}
-      pre{background:#161616;border:1px solid #262626;border-radius:8px;padding:1rem;font-size:.9rem;overflow-x:auto;line-height:1.7}
+      pre{background:#161616;border:1px solid #262626;border-radius:8px;padding:1rem;font-size:.9rem;overflow-x:auto;line-height:1.7;white-space:pre-wrap;word-wrap:break-word}
       code{font-family:'SF Mono',Menlo,monospace}
       .dim{color:#666}
       a{color:#60a5fa;text-decoration:none}
@@ -46,7 +46,7 @@ export function renderLandingPage(): string {
   <body>
     <div class="wrap">
       <h1>aai</h1>
-      <p>Build voice agents with a single command.</p>
+      <p>Build and deploy a voice agent in 5 seconds.</p>
       <pre><code><span class="dim"># install and run</span>
 curl -fsSL https://aai-agent.fly.dev/install | sh
 aai
