@@ -16,6 +16,8 @@ deno compile \
   --unstable-worker-options \
   --include templates/ \
   --include skills/ \
+  --include server/ \
+  --include ui/ \
   --output /tmp/aai-compile-check \
   cli/cli.ts || exit 1
 /tmp/aai-compile-check --version || exit 1

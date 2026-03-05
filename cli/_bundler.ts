@@ -1,8 +1,20 @@
-import { build, type BuildOptions, type Plugin } from "esbuild";
+import { build, type BuildOptions, initialize, type Plugin } from "esbuild";
 import { denoPlugin } from "@deno/esbuild-plugin";
 import { dirname, fromFileUrl, resolve, toFileUrl } from "@std/path";
 import type { AgentEntry } from "./_discover.ts";
-import { agentToolsToSchemas } from "../server/agent_types.ts";
+
+let esbuildReady: Promise<void> | null = null;
+
+/** Ensure esbuild-wasm is initialized (needed inside deno compile). */
+function ensureInit() {
+  if (!esbuildReady) {
+    esbuildReady = initialize({}).catch(() => {
+      // Already initialized — ignore
+      esbuildReady = null;
+    });
+  }
+  return esbuildReady;
+}
 
 /** Root of the aai framework (parent of cli/). */
 const AAI_ROOT = resolve(dirname(fromFileUrl(import.meta.url)), "..");
@@ -57,7 +69,7 @@ export function clientBuildOptions(
 }
 
 async function precomputeSchemas(agent: AgentEntry) {
-  // Inject SDK globals so import-free agent files can use defineAgent, z, etc.
+  const { agentToolsToSchemas } = await import("../server/agent_types.ts");
   const { defineAgent } = await import("../server/agent.ts");
   const { fetchJSON } = await import("../server/fetch_json.ts");
   const { z } = await import("zod");
@@ -84,6 +96,7 @@ export async function bundleAgent(
   outDir: string,
   opts?: { skipClient?: boolean },
 ): Promise<BundleResult> {
+  await ensureInit();
   await Deno.mkdir(outDir, { recursive: true });
 
   const schemas = await precomputeSchemas(agent);

@@ -57,6 +57,8 @@ jobs:
             --unstable-worker-options \
             --include templates/ \
             --include skills/ \
+            --include server/ \
+            --include ui/ \
             --target ${{ matrix.target }} \
             --output dist/aai \
             cli/cli.ts
