@@ -8,7 +8,23 @@ let esbuildReady: Promise<void> | null = null;
 /** Ensure esbuild-wasm is initialized (needed inside deno compile). */
 function ensureInit() {
   if (!esbuildReady) {
-    esbuildReady = initialize({}).catch(() => {
+    esbuildReady = (async () => {
+      // The browser ESM build of esbuild-wasm needs the WASM binary loaded
+      // explicitly. Provide it as a compiled WebAssembly.Module.
+      const wasmPath = resolve(
+        dirname(fromFileUrl(import.meta.url)),
+        "..",
+        "node_modules",
+        ".deno",
+        "esbuild-wasm@0.27.3",
+        "node_modules",
+        "esbuild-wasm",
+        "esbuild.wasm",
+      );
+      const wasmBytes = await Deno.readFile(wasmPath);
+      const wasmModule = new WebAssembly.Module(wasmBytes);
+      await initialize({ wasmModule, worker: false });
+    })().catch(() => {
       // Already initialized — ignore
       esbuildReady = null;
     });
@@ -42,6 +58,7 @@ const workletTextPlugin: Plugin = {
 
 const BASE: BuildOptions = {
   bundle: true,
+  write: false,
   format: "esm",
   platform: "neutral",
   mainFields: ["module", "main"],
@@ -53,6 +70,16 @@ const BASE: BuildOptions = {
   drop: ["debugger"],
   logOverride: { "commonjs-variable-in-esm": "silent" },
 };
+
+/** Write esbuild output files to disk (browser ESM build doesn't support write:true). */
+async function writeOutputFiles(
+  result: { outputFiles?: { path: string; contents: Uint8Array }[] },
+): Promise<void> {
+  if (!result.outputFiles) return;
+  for (const file of result.outputFiles) {
+    await Deno.writeFile(file.path, file.contents);
+  }
+}
 
 export function clientBuildOptions(
   clientEntry: string,
@@ -151,6 +178,7 @@ export async function bundleAgent(
       ".html": "text",
     },
   });
+  await writeOutputFiles(workerResult);
 
   let clientBytes = 0;
   if (!opts?.skipClient) {
@@ -159,6 +187,7 @@ export async function bundleAgent(
       inject: [clientShimPath],
       metafile: true,
     });
+    await writeOutputFiles(clientResult);
     clientBytes = jsBytes(clientResult.metafile!);
   }
 

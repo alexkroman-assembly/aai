@@ -59,6 +59,8 @@ jobs:
             --include skills/ \
             --include server/ \
             --include ui/ \
+            --include cli/deno.json \
+            --include node_modules/.deno/esbuild-wasm@0.27.3/node_modules/esbuild-wasm/esbuild.wasm \
             --target ${{ matrix.target }} \
             --output dist/aai \
             cli/cli.ts

@@ -1409,8 +1409,7 @@
     "members": {
       "cli": {
         "dependencies": [
-          "jsr:@deno/esbuild-plugin@^1.2.1",
-          "npm:esbuild-wasm@~0.27.3"
+          "jsr:@deno/esbuild-plugin@^1.2.1"
         ]
       },
       "server": {

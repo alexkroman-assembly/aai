@@ -79,7 +79,7 @@ export async function main(args: string[]): Promise<number> {
     const { runDev } = await import("./dev.ts");
     await runDev({
       agentDir: cwd,
-      serverUrl: "https://voice-agent-api.fly.dev",
+      serverUrl: "https://aai-agent.fly.dev",
     });
 
     return 0;
@@ -131,7 +131,7 @@ ${bold("USAGE:")}
 
 ${bold("OPTIONS:")}
     ${cyan("-u, --url")} <url>          Orchestrator URL ${
-            dim("(default: https://voice-agent-api.fly.dev)")
+            dim("(default: https://aai-agent.fly.dev)")
           }
     ${cyan("--bundle-dir")} <dir>   Bundle directory ${
             dim("(default: ~/.aai/bundles)")
@@ -152,7 +152,7 @@ ${bold("OPTIONS:")}
       const { runDev } = await import("./dev.ts");
       await runDev({
         agentDir,
-        serverUrl: "https://voice-agent-api.fly.dev",
+        serverUrl: "https://aai-agent.fly.dev",
       });
       return 0;
     }
@@ -203,7 +203,7 @@ ${bold("OPTIONS:")}
       const apiKey = agent.env.ASSEMBLYAI_API_KEY;
       const { runDeploy } = await import("./deploy.ts");
       await runDeploy({
-        url: flags.url || "https://voice-agent-api.fly.dev",
+        url: flags.url || "https://aai-agent.fly.dev",
         bundleDir,
         slug: agent.slug,
         dryRun: !!flags["dry-run"],

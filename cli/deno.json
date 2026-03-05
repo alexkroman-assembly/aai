@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "exports": "./mod.ts",
   "imports": {
-    "esbuild": "npm:esbuild-wasm@^0.27.3",
+    "esbuild": "./esbuild_wasm.ts",
     "@deno/esbuild-plugin": "jsr:@deno/esbuild-plugin@^1.2.1"
   }
 }
