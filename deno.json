@@ -1,17 +1,15 @@
 {
-  "version": "0.1.1",
-  "workspace": ["sdk", "server", "ui", "cli"],
+  "version": "0.1.2",
+  "workspace": ["server", "ui", "cli"],
   "tasks": {
     "setup": "git config core.hooksPath .githooks",
     "dev": "deno run --allow-net --allow-env --allow-read --allow-write --allow-run --unstable-worker-options cli/cli.ts dev",
     "serve": "deno run --allow-net --allow-env --allow-read --unstable-worker-options server/main.ts",
-    "prod": "deno run --allow-net --allow-env --allow-read --allow-write --allow-run --unstable-worker-options cli/cli.ts prod",
-    "build": "deno run --allow-net --allow-env --allow-read --allow-write --allow-run cli/cli.ts build",
-    "compile": "deno run --allow-net --allow-env --allow-read --allow-write --allow-run cli/cli.ts compile",
+    "types": "deno run --allow-write --allow-env --allow-read cli/cli.ts types",
     "deploy": "deno run --allow-net --allow-env --allow-read --allow-write --allow-run cli/cli.ts deploy",
     "test": "deno test --allow-net --allow-read --allow-write --allow-env --allow-run --unstable-worker-options",
-    "check": "deno check sdk/**/*.ts server/**/*.ts ui/**/*.ts ui/**/*.tsx cli/**/*.ts examples/**/*.ts mod.ts && deno lint && deno fmt --check && deno publish --dry-run --allow-dirty && deno test --allow-net --allow-read --allow-write --allow-env --allow-run --unstable-worker-options --ignore=examples/math-buddy/e2e_test.ts",
-    "test:e2e": "deno test --allow-all --unstable-worker-options examples/math-buddy/e2e_test.ts"
+    "check": "deno check server/**/*.ts ui/**/*.ts ui/**/*.tsx cli/**/*.ts templates/**/*.ts && deno lint && deno fmt --check && deno test --quiet --allow-net --allow-read --allow-write --allow-env --allow-run --unstable-worker-options",
+    "install-dev": "echo '#!/bin/sh\nINIT_CWD=\"$(pwd)\" exec deno run --allow-all --unstable-worker-options '\"$(pwd)/cli/cli.ts\"' \"$@\"' > \"$HOME/.deno/bin/aai-dev\" && chmod +x \"$HOME/.deno/bin/aai-dev\" && echo 'Installed aai-dev to ~/.deno/bin/aai-dev'"
   },
   "imports": {
     "@std/testing": "jsr:@std/testing@^1.0.17",
@@ -37,28 +35,32 @@
   "nodeModulesDir": "auto",
   "compilerOptions": {
     "strict": true,
-    "lib": ["deno.ns", "deno.unstable", "deno.window", "dom", "dom.iterable", "esnext"],
+    "types": ["./types.d.ts"],
+    "lib": [
+      "deno.ns",
+      "deno.unstable",
+      "deno.window",
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
     "jsx": "react-jsx",
     "jsxImportSource": "preact"
   },
   "fmt": {
     "include": [
-      "sdk/",
       "server/",
       "ui/",
       "cli/",
-      "examples/",
-      "mod.ts"
+      "templates/"
     ]
   },
   "lint": {
     "include": [
-      "sdk/",
       "server/",
       "ui/",
       "cli/",
-      "examples/",
-      "mod.ts"
+      "templates/"
     ],
     "rules": {
       "include": ["no-slow-types"]

@@ -86,7 +86,7 @@ Deno.test("VoiceSession", async (t) => {
         });
         const url = ws.url.toString();
         expect(url).toContain("wss://");
-        expect(url).toContain("session");
+        expect(url).toContain("websocket");
         session.disconnect();
       }),
     );

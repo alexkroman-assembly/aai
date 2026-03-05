@@ -1,9 +1,6 @@
 import { expect } from "@std/expect";
-import {
-  ControlMessageSchema,
-  LLMResponseSchema,
-  SttMessageSchema,
-} from "./types.ts";
+import { ClientMessageSchema } from "./protocol.ts";
+import { LLMResponseSchema, SttMessageSchema } from "./types.ts";
 
 Deno.test("SttMessageSchema", async (t) => {
   await t.step("validates a Transcript message", () => {
@@ -44,29 +41,42 @@ Deno.test("SttMessageSchema", async (t) => {
   });
 });
 
-Deno.test("ControlMessageSchema", async (t) => {
+Deno.test("ClientMessageSchema", async (t) => {
   await t.step("validates audio_ready", () => {
-    const result = ControlMessageSchema.safeParse({ type: "audio_ready" });
+    const result = ClientMessageSchema.safeParse({ type: "audio_ready" });
     expect(result.success).toBe(true);
   });
 
   await t.step("validates cancel", () => {
-    const result = ControlMessageSchema.safeParse({ type: "cancel" });
+    const result = ClientMessageSchema.safeParse({ type: "cancel" });
     expect(result.success).toBe(true);
   });
 
   await t.step("validates reset", () => {
-    const result = ControlMessageSchema.safeParse({ type: "reset" });
+    const result = ClientMessageSchema.safeParse({ type: "reset" });
+    expect(result.success).toBe(true);
+  });
+
+  await t.step("validates ping", () => {
+    const result = ClientMessageSchema.safeParse({ type: "ping" });
+    expect(result.success).toBe(true);
+  });
+
+  await t.step("validates history", () => {
+    const result = ClientMessageSchema.safeParse({
+      type: "history",
+      messages: [{ role: "user", text: "hello" }],
+    });
     expect(result.success).toBe(true);
   });
 
   await t.step("rejects unknown type", () => {
-    const result = ControlMessageSchema.safeParse({ type: "unknown" });
+    const result = ClientMessageSchema.safeParse({ type: "unknown" });
     expect(result.success).toBe(false);
   });
 
   await t.step("rejects missing type", () => {
-    const result = ControlMessageSchema.safeParse({});
+    const result = ClientMessageSchema.safeParse({});
     expect(result.success).toBe(false);
   });
 });

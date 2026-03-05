@@ -4,7 +4,7 @@ import {
   DEFAULT_TTS_SAMPLE_RATE,
   type ErrorMessage,
   type ServerMessage,
-} from "@aai/sdk/protocol";
+} from "@aai/server/protocol";
 
 import {
   type AgentState,
@@ -108,7 +108,7 @@ export class VoiceSession {
     }
 
     const base = this.options.platformUrl;
-    const wsUrl = new URL("session", base.endsWith("/") ? base : base + "/");
+    const wsUrl = new URL("websocket", base.endsWith("/") ? base : base + "/");
     wsUrl.protocol = wsUrl.protocol === "https:" ? "wss:" : "ws:";
     if (this.hasConnected) wsUrl.searchParams.set("resume", "1");
     const ws = new WebSocket(wsUrl);

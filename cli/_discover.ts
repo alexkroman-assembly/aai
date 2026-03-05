@@ -1,6 +1,9 @@
 import { parse as parseDotenv } from "@std/dotenv/parse";
-import { join } from "@std/path";
+import { dirname, fromFileUrl, join, resolve } from "@std/path";
 import { z } from "zod";
+
+/** Root of the aai framework (parent of cli/). */
+const AAI_ROOT = resolve(dirname(fromFileUrl(import.meta.url)), "..");
 
 export interface AgentEntry {
   slug: string;
@@ -66,7 +69,7 @@ export async function loadAgent(dir: string): Promise<AgentEntry | null> {
     );
   }
 
-  let clientEntry = "ui/client.tsx";
+  let clientEntry = resolve(AAI_ROOT, "ui/client.tsx");
   try {
     await Deno.stat(join(dir, "client.tsx"));
     clientEntry = join(dir, "client.tsx");

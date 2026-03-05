@@ -36,7 +36,6 @@ Deno.test("cli main", async (t) => {
     withConsoleSpy(async (logged) => {
       expect(await main(["--help"])).toBe(0);
       expect(logged[0]).toContain("dev");
-      expect(logged[0]).toContain("build");
       expect(logged[0]).toContain("deploy");
     }),
   );
@@ -59,11 +58,9 @@ Deno.test("cli main", async (t) => {
   );
 
   await t.step(
-    "prints command help with build --help",
-    withConsoleSpy(async (logged) => {
-      expect(await main(["build", "--help"])).toBe(0);
-      expect(logged[0]).toContain("--out-dir");
-      expect(logged[0]).toContain("<dir>");
+    "returns 1 for removed build command",
+    withConsoleSpy(async () => {
+      expect(await main(["build"])).toBe(1);
     }),
   );
 

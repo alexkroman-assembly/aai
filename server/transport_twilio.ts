@@ -15,7 +15,7 @@ import type { BundleStore } from "./bundle_store_tigris.ts";
 import {
   DEFAULT_STT_SAMPLE_RATE,
   DEFAULT_TTS_SAMPLE_RATE,
-} from "@aai/sdk/protocol";
+} from "./protocol.ts";
 
 const log = getLogger("twilio");
 
@@ -213,7 +213,7 @@ export function createTwilioRoutes(ctx: {
     return slot?.transport.includes("twilio") ? slot : null;
   }
 
-  app.post("/twilio/:slug/voice", async (c) => {
+  app.post("/:slug/twilio/voice", async (c) => {
     const slug = c.req.param("slug");
     const slot = getTwilioSlot(slug);
     if (!slot) return twiml("<Say>Agent not found. Goodbye.</Say>");
@@ -231,12 +231,12 @@ export function createTwilioRoutes(ctx: {
     }
 
     const host = c.req.header("host") ?? "localhost";
-    const streamUrl = `wss://${host}/twilio/${slug}/stream`;
+    const streamUrl = `wss://${host}/${slug}/twilio/stream`;
     log.info("Incoming call, connecting media stream", { slug, streamUrl });
     return twiml(`<Connect><Stream url="${streamUrl}" /></Connect>`);
   });
 
-  app.get("/twilio/:slug/stream", async (c) => {
+  app.get("/:slug/twilio/stream", async (c) => {
     const slug = c.req.param("slug");
     const slot = getTwilioSlot(slug);
     if (!slot) return c.json({ error: "Not found" }, 404);

@@ -1,4 +1,8 @@
-import { agentToolsToSchemas, type ToolDef, type ToolSchema } from "@aai/sdk";
+import {
+  agentToolsToSchemas,
+  type ToolDef,
+  type ToolSchema,
+} from "./agent_types.ts";
 import { executeToolCall } from "./tool_executor.ts";
 import type { AgentConfig } from "./types.ts";
 

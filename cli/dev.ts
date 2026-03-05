@@ -1,9 +1,13 @@
 import { debounce } from "@std/async/debounce";
 import { context } from "esbuild";
+import { dirname, fromFileUrl, resolve } from "@std/path";
 import { log } from "./_output.ts";
 import { loadAgent } from "./_discover.ts";
 import { bundleAgent, clientBuildOptions } from "./_bundler.ts";
 import { deployToLocal, spawn, waitForServer } from "./_server.ts";
+
+/** Root of the aai framework (parent of cli/). */
+const AAI_ROOT = resolve(dirname(fromFileUrl(import.meta.url)), "..");
 
 export interface DevOpts {
   port: number;
@@ -46,7 +50,10 @@ export async function runDev(opts: DevOpts): Promise<void> {
     agent.transport,
   );
 
-  const watcher = Deno.watchFs([agent.dir, "server"], { recursive: true });
+  const watcher = Deno.watchFs(
+    [agent.dir, resolve(AAI_ROOT, "server")],
+    { recursive: true },
+  );
 
   const rebuild = debounce(async () => {
     log.step("Change", "file modified, rebuilding...");
@@ -90,13 +97,13 @@ export async function runDev(opts: DevOpts): Promise<void> {
   if (agent.transport.includes("websocket")) {
     log.stepInfo(
       "Listen",
-      `http://localhost:${opts.port}/websocket/${agent.slug}/`,
+      `http://localhost:${opts.port}/${agent.slug}/`,
     );
   }
   if (agent.transport.includes("twilio")) {
     log.stepInfo(
       "Listen",
-      `http://localhost:${opts.port}/twilio/${agent.slug}/voice`,
+      `http://localhost:${opts.port}/${agent.slug}/twilio/voice`,
     );
   }
   log.stepInfo("Watch", "for changes...");

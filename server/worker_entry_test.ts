@@ -1,6 +1,6 @@
 import { expect } from "@std/expect";
 import { z } from "zod";
-import { tool } from "@aai/sdk";
+import type { ToolDef } from "./agent_types.ts";
 import { startWorker } from "./worker_entry.ts";
 import { createWorkerRpc } from "./worker_pool.ts";
 
@@ -12,7 +12,7 @@ function createHarness(
     voice: string;
     prompt?: string;
     builtinTools?: readonly string[];
-    tools: Record<string, ReturnType<typeof tool>>;
+    tools: Record<string, ToolDef>;
   },
   secrets: Record<string, string> = {},
 ) {
@@ -41,11 +41,11 @@ Deno.test("getConfig returns agent config and tool schemas", async () => {
   const h = createHarness({
     ...BASE_AGENT,
     tools: {
-      greet: tool({
+      greet: {
         description: "Greet someone",
         parameters: z.object({ name: z.string() }),
-        handler: ({ name }) => `Hi ${name}`,
-      }),
+        execute: ({ name }) => `Hi ${name}`,
+      },
     },
   });
   try {
@@ -65,11 +65,11 @@ Deno.test("executeTool runs handler through worker RPC", async () => {
   const h = createHarness({
     ...BASE_AGENT,
     tools: {
-      greet: tool({
+      greet: {
         description: "Greet",
         parameters: z.object({ name: z.string() }),
-        handler: ({ name }) => `Hello, ${name}!`,
-      }),
+        execute: ({ name }) => `Hello, ${name}!`,
+      },
     },
   });
   try {

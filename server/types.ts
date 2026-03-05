@@ -2,7 +2,7 @@ import { z } from "zod";
 import {
   DEFAULT_STT_SAMPLE_RATE,
   DEFAULT_TTS_SAMPLE_RATE,
-} from "@aai/sdk/protocol";
+} from "./protocol.ts";
 
 export interface STTConfig {
   sampleRate: number;
@@ -81,29 +81,6 @@ export const SttMessageSchema: z.ZodType<SttMessage> = z
   })
   .passthrough();
 
-export type ControlMessage =
-  | { type: "audio_ready" }
-  | { type: "cancel" }
-  | { type: "reset" }
-  | {
-    type: "history";
-    messages: { role: "user" | "assistant"; text: string }[];
-  };
-
-export const ControlMessageSchema: z.ZodType<ControlMessage> = z
-  .discriminatedUnion("type", [
-    z.object({ type: z.literal("audio_ready") }),
-    z.object({ type: z.literal("cancel") }),
-    z.object({ type: z.literal("reset") }),
-    z.object({
-      type: z.literal("history"),
-      messages: z.array(z.object({
-        role: z.enum(["user", "assistant"]),
-        text: z.string(),
-      })),
-    }),
-  ]);
-
 export interface ChatMessage {
   role: "system" | "user" | "assistant" | "tool";
   content: string | null;
@@ -148,7 +125,7 @@ export const LLMResponseSchema: z.ZodType<LLMResponse> = z
   })
   .passthrough();
 
-export type { ToolSchema } from "@aai/sdk";
+export type { ToolSchema } from "./agent_types.ts";
 
 export interface AgentConfig {
   name?: string;

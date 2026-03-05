@@ -1,10 +1,7 @@
 import { expect } from "@std/expect";
 import { connectStt } from "./stt.ts";
 import { DEFAULT_STT_CONFIG } from "./types.ts";
-import {
-  installMockWebSocket,
-  type MockWebSocket,
-} from "@aai/sdk/testing/mock-ws";
+import { installMockWebSocket, type MockWebSocket } from "./_mock_ws.ts";
 import { createMockSttEvents } from "./_test_utils.ts";
 
 function sendMsg(ws: MockWebSocket, data: Record<string, unknown>) {

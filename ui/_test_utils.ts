@@ -22,7 +22,10 @@ export function getContainer(): Element {
 // Ensure document exists at import time for modules using goober css``.
 setupDOM();
 
-export { installMockWebSocket, MockWebSocket } from "@aai/sdk/testing/mock-ws";
+export {
+  installMockWebSocket,
+  MockWebSocket,
+} from "@aai/server/testing/mock-ws";
 
 export const flush = () => new Promise<void>((r) => queueMicrotask(r));
 

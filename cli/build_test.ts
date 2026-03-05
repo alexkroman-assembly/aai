@@ -4,8 +4,8 @@ import type { AgentEntry } from "./_discover.ts";
 
 const fakeAgent: AgentEntry = {
   slug: "test-agent",
-  dir: "examples/test-agent",
-  entryPoint: "examples/test-agent/agent.ts",
+  dir: "templates/test-agent",
+  entryPoint: "templates/test-agent/agent.ts",
   env: { SLUG: "test-agent" },
   clientEntry: "ui/client.tsx",
   transport: ["websocket"],
@@ -16,7 +16,7 @@ Deno.test("runBuild", async (t) => {
     const bundled: string[] = [];
 
     await runBuild(
-      { outDir: "dist/bundle", agentDir: "examples/test-agent" },
+      { outDir: "dist/bundle", agentDir: "templates/test-agent" },
       () => Promise.resolve(fakeAgent),
       (agent, _outDir) => {
         bundled.push(agent.slug);
@@ -30,7 +30,7 @@ Deno.test("runBuild", async (t) => {
     const dirs: string[] = [];
 
     await runBuild(
-      { outDir: "/custom/path", agentDir: "examples/test-agent" },
+      { outDir: "/custom/path", agentDir: "templates/test-agent" },
       () => Promise.resolve(fakeAgent),
       (_agent, outDir) => {
         dirs.push(outDir);

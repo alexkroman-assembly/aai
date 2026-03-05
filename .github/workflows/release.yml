@@ -50,9 +50,6 @@ jobs:
         with:
           deno-version: ${{ env.DENO_VERSION }}
 
-      - name: Publish @aai/sdk
-        run: cd sdk && deno publish
-
       - name: Publish @aai/ui
         run: cd ui && deno publish
 
@@ -84,7 +81,7 @@ jobs:
           deno compile \
             --allow-all \
             --unstable-worker-options \
-            --include examples/ \
+            --include templates/ \
             --include skills/ \
             --target ${{ matrix.target }} \
             --output dist/aai \

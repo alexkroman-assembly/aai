@@ -60,17 +60,17 @@ export function createWebSocketRoutes(ctx: {
       log.error("Failed to initialize agent", { slug, err });
       return c.json({ error: "Agent failed to initialize" }, 500);
     }
-    return c.html(renderAgentPage(info.name, `/websocket/${slug}`));
+    return c.html(renderAgentPage(info.name, `/${slug}`));
   });
 
   app.get("/:slug", async (c) => {
     const slug = c.req.param("slug");
     const slot = await resolveSlot(slug);
     if (!slot) return c.json({ error: "Not found" }, 404);
-    return c.redirect(`/websocket/${slug}/`, 301);
+    return c.redirect(`/${slug}/`, 301);
   });
 
-  app.get("/:slug/session", async (c) => {
+  app.get("/:slug/websocket", async (c) => {
     const slug = c.req.param("slug");
     const slot = await resolveSlot(slug);
     if (!slot) return c.json({ error: "Not found" }, 404);

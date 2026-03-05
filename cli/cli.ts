@@ -3,6 +3,12 @@ import { bold, cyan, dim, green, red } from "@std/fmt/colors";
 import { dirname, fromFileUrl, join, relative } from "@std/path";
 import { log } from "./_output.ts";
 
+/** Default bundle output directory inside the user's home (~/.aai/bundles). */
+function defaultBundleDir(): string {
+  const home = Deno.env.get("HOME") || Deno.env.get("USERPROFILE") || "";
+  return join(home, ".aai", "bundles");
+}
+
 const denoConfig = await import("../deno.json", { with: { type: "json" } });
 const VERSION: string = denoConfig.default.version;
 
@@ -13,17 +19,11 @@ function resolveAgentDir(): string {
   return relative(Deno.cwd(), initCwd) || ".";
 }
 
-/** Resolve a relative path against the user's invoking directory (INIT_CWD). */
-function resolveFromCaller(path: string): string {
-  return join(resolveAgentDir(), path);
-}
-
 // deno-fmt-ignore
 const ENV_VARS = [
   `    ${cyan("ASSEMBLYAI_API_KEY")}       AssemblyAI API key for speech-to-text ${red("(required)")}`,
   `    ${cyan("LLM_MODEL")}                LLM model to use ${dim("(default: claude-haiku-4-5-20251001)")}`,
   `    ${cyan("PORT")}                     Server port ${dim("(default: 3000)")}`,
-  `    ${cyan("BRAVE_API_KEY")}            Brave Search API key ${dim("(optional, for web tools)")}`,
 ];
 
 function printUsage(): void {
@@ -35,12 +35,9 @@ ${bold("USAGE:")}
 
 ${bold("COMMANDS:")}
     ${green("new")}       Scaffold a new agent from a template
-    ${green("build")}     Bundle agent for development or production
-    ${green("compile")}   Compile server into a standalone binary
     ${green("dev")}       Start development server with watch + hot-reload
-    ${green("open")}      Open agent in browser (dev server must be running)
-    ${green("prod")}      Build, compile, and run agent in production mode
     ${green("deploy")}    Build and deploy agent to the orchestrator
+    ${green("types")}     Generate ambient type declarations (types.d.ts)
     ${green("skill")}     Install Claude Code skill for creating agents
 
 ${bold("OPTIONS:")}
@@ -70,7 +67,7 @@ export async function main(args: string[]): Promise<number> {
     switch (command) {
       case "new": {
         const cliDir = dirname(fromFileUrl(import.meta.url));
-        const tplDir = join(cliDir, "..", "examples");
+        const tplDir = join(cliDir, "..", "templates");
         const tpls: string[] = [];
         for await (const entry of Deno.readDir(tplDir)) {
           if (entry.isDirectory) tpls.push(entry.name);
@@ -103,55 +100,6 @@ ${ENV_VARS.slice(0, 3).join("\n")}
           cyan(".env")
         } file in your agent directory or export them in your shell.`);
         return 0;
-      case "prod":
-        console.log(`${green(bold("aai prod"))} — Run agent in production mode
-
-${bold("USAGE:")}
-    ${cyan("aai prod")} ${dim("[options]")}
-
-${bold("OPTIONS:")}
-    ${cyan("-p, --port")} <number>  Server port ${dim("(default: 3000)")}
-
-${bold("ENVIRONMENT VARIABLES:")}
-${ENV_VARS.slice(0, 3).join("\n")}
-
-    Set these in a ${
-          cyan(".env")
-        } file in your agent directory or export them in your shell.`);
-        return 0;
-      case "build":
-        console.log(`${green(bold("aai build"))} — Bundle agent for production
-
-${bold("USAGE:")}
-    ${cyan("aai build")} ${dim("[options]")}
-
-${bold("OPTIONS:")}
-    ${cyan("-o, --out-dir")} <dir>  Output directory ${
-          dim("(default: dist/bundle)")
-        }`);
-        return 0;
-      case "compile":
-        console.log(
-          `${
-            green(bold("aai compile"))
-          } — Compile server into a standalone binary
-
-${bold("USAGE:")}
-    ${cyan("aai compile")} ${dim("[options]")}
-
-${bold("OPTIONS:")}
-    ${cyan("-o, --out-dir")} <dir>  Output directory ${dim("(default: dist)")}`,
-        );
-        return 0;
-      case "open":
-        console.log(`${green(bold("aai open"))} — Open agent in browser
-
-${bold("USAGE:")}
-    ${cyan("aai open")} ${dim("[options]")}
-
-${bold("OPTIONS:")}
-    ${cyan("-p, --port")} <number>  Dev server port ${dim("(default: 3000)")}`);
-        return 0;
       case "skill":
         console.log(`${green(bold("aai skill"))} — Install Claude Code skill
 
@@ -160,6 +108,18 @@ ${bold("USAGE:")}
 
 Installs the aai agent creation skill to ~/.claude/skills/
 so you can use ${cyan("/new-agent")} in Claude Code to scaffold voice agents.`);
+        return 0;
+      case "types":
+        console.log(
+          `${green(bold("aai types"))} — Generate ambient type declarations
+
+${bold("USAGE:")}
+    ${cyan("aai types")}
+
+Generates a ${cyan("types.d.ts")} file in the current directory that declares
+SDK symbols (Agent, tool, z, fetchJSON, etc.) as ambient globals.
+Add ${cyan('"types": ["./types.d.ts"]')} to your deno.json compilerOptions.`,
+        );
         return 0;
       case "deploy":
         console.log(
@@ -173,7 +133,7 @@ ${bold("OPTIONS:")}
             dim("(default: https://voice-agent-api.fly.dev)")
           }
     ${cyan("--bundle-dir")} <dir>   Bundle directory ${
-            dim("(default: dist/bundle)")
+            dim("(default: ~/.aai/bundles)")
           }
     ${cyan("--dry-run")}            Show what would be deployed without sending
 
@@ -207,7 +167,7 @@ ${ENV_VARS.filter((_, i) => i !== 3).join("\n")}
         return 1;
       }
       const cliDir = dirname(fromFileUrl(import.meta.url));
-      const templatesDir = join(cliDir, "..", "examples");
+      const templatesDir = join(cliDir, "..", "templates");
       if (!flags.template) {
         const templates: string[] = [];
         for await (const entry of Deno.readDir(templatesDir)) {
@@ -245,64 +205,10 @@ ${ENV_VARS.filter((_, i) => i !== 3).join("\n")}
       await runDev({ port: Number(flags.port) || 3000, agentDir });
       return 0;
     }
-    case "prod": {
-      const flags = parseArgs(rest, {
-        string: ["port"],
-        alias: { p: "port" },
-      });
-      const agentDir = resolveAgentDir();
-      const { runProd } = await import("./prod.ts");
-      await runProd({ port: Number(flags.port) || 3000, agentDir });
-      return 0;
-    }
-    case "open": {
-      const flags = parseArgs(rest, {
-        string: ["port"],
-        alias: { p: "port" },
-      });
-      const agentDir = resolveAgentDir();
-      const { loadAgent } = await import("./_discover.ts");
-      let agent;
-      try {
-        agent = await loadAgent(agentDir);
-      } catch { /* env vars not needed for open */ }
-      if (!agent) {
-        log.error(
-          `no agent found in ${agentDir} — needs agent.ts + agent.json`,
-        );
-        return 1;
-      }
-      const port = Number(flags.port) || 3000;
-      const url = `http://localhost:${port}/websocket/${agent.slug}/`;
-      const cmd = Deno.build.os === "darwin"
-        ? "open"
-        : Deno.build.os === "windows"
-        ? "start"
-        : "xdg-open";
-      log.step("Open", url);
-      const proc = new Deno.Command(cmd, { args: [url] });
-      await proc.output();
-      return 0;
-    }
-    case "build": {
-      const flags = parseArgs(rest, {
-        string: ["out-dir"],
-        alias: { o: "out-dir" },
-      });
-      const agentDir = resolveAgentDir();
-      const { runBuild } = await import("./build.ts");
-      const outDir = resolveFromCaller(flags["out-dir"] || "dist/bundle");
-      await runBuild({ outDir, agentDir });
-      return 0;
-    }
-    case "compile": {
-      const flags = parseArgs(rest, {
-        string: ["out-dir"],
-        alias: { o: "out-dir" },
-      });
-      const { runCompile } = await import("./compile.ts");
-      const outDir = resolveFromCaller(flags["out-dir"] || "dist");
-      await runCompile({ outDir });
+    case "types": {
+      const dir = Deno.env.get("INIT_CWD") || Deno.cwd();
+      const { runTypes } = await import("./types.ts");
+      await runTypes(dir);
       return 0;
     }
     case "skill": {
@@ -330,9 +236,9 @@ ${ENV_VARS.filter((_, i) => i !== 3).join("\n")}
         alias: { u: "url" },
       });
       const agentDir = resolveAgentDir();
-      const bundleDir = resolveFromCaller(
-        flags["bundle-dir"] || "dist/bundle",
-      );
+      const bundleDir = flags["bundle-dir"]
+        ? join(resolveAgentDir(), flags["bundle-dir"])
+        : defaultBundleDir();
       const { runBuild } = await import("./build.ts");
       await runBuild({ outDir: bundleDir, agentDir });
       const { loadAgent } = await import("./_discover.ts");

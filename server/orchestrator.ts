@@ -30,11 +30,11 @@ export function createOrchestrator(opts: {
     }));
   app.route("/", createDeployRoute({ slots, store }));
   app.route("/", createTwilioRoutes({ slots, store }));
-  app.route("/websocket", createWebSocketRoutes({ slots, sessions, store }));
+  app.route("/", createWebSocketRoutes({ slots, sessions, store }));
 
   app.get("/", (c) => {
     const first = slots.keys().next().value;
-    if (first) return c.redirect(`/websocket/${first}/`, 302);
+    if (first) return c.redirect(`/${first}/`, 302);
     return c.html(renderLandingPage());
   });
 

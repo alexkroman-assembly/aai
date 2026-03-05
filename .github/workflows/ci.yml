@@ -20,23 +20,3 @@ jobs:
         run: deno task check
         env:
           ASSEMBLYAI_API_KEY: ${{ secrets.ASSEMBLYAI_API_KEY }}
-
-  e2e:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: denoland/setup-deno@v2
-        with:
-          deno-version: ${{ env.DENO_VERSION }}
-
-      - name: Install Chromium dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y chromium-browser
-
-      - name: Run e2e tests
-        run: deno task test:e2e
-        env:
-          ASSEMBLYAI_API_KEY: ${{ secrets.ASSEMBLYAI_API_KEY }}
-          ASSEMBLYAI_TTS_API_KEY: ${{ secrets.ASSEMBLYAI_TTS_API_KEY }}  # server-level TTS key

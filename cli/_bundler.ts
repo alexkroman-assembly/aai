@@ -2,7 +2,7 @@ import { build, type BuildOptions, type Plugin } from "esbuild";
 import { denoPlugin } from "@deno/esbuild-plugin";
 import { dirname, fromFileUrl, resolve, toFileUrl } from "@std/path";
 import type { AgentEntry } from "./_discover.ts";
-import { agentToolsToSchemas } from "@aai/sdk";
+import { agentToolsToSchemas } from "../server/agent_types.ts";
 
 /** Root of the aai framework (parent of cli/). */
 const AAI_ROOT = resolve(dirname(fromFileUrl(import.meta.url)), "..");
@@ -57,6 +57,12 @@ export function clientBuildOptions(
 }
 
 async function precomputeSchemas(agent: AgentEntry) {
+  // Inject SDK globals so import-free agent files can use defineAgent, z, etc.
+  const { defineAgent } = await import("../server/agent.ts");
+  const { fetchJSON } = await import("../server/fetch_json.ts");
+  const { z } = await import("zod");
+  Object.assign(globalThis, { defineAgent, fetchJSON, z });
+
   const mod = await import(toFileUrl(resolve(agent.entryPoint)).href);
   return agentToolsToSchemas(mod.default.tools);
 }
@@ -85,6 +91,28 @@ export async function bundleAgent(
   const agentAbsolute = resolve(agent.entryPoint);
   const workerEntryAbsolute = resolve(AAI_ROOT, "server/worker_entry.ts");
 
+  // Write temp shims that expose SDK/UI symbols as globals so import-free
+  // agent files can reference defineAgent, z, fetchJSON, mount, etc. at runtime.
+  const agentModAbsolute = resolve(AAI_ROOT, "server/agent.ts");
+  const fetchJsonAbsolute = resolve(AAI_ROOT, "server/fetch_json.ts");
+
+  const workerShimPath = resolve(outDir, "_worker_shim.ts");
+  await Deno.writeTextFile(
+    workerShimPath,
+    `import { defineAgent } from "${agentModAbsolute}";\n` +
+      `import { fetchJSON } from "${fetchJsonAbsolute}";\n` +
+      `import { z } from "zod";\n` +
+      `Object.assign(globalThis, { defineAgent, fetchJSON, z });\n`,
+  );
+
+  const clientShimPath = resolve(outDir, "_client_shim.ts");
+  await Deno.writeTextFile(
+    clientShimPath,
+    `import { mount, useSession, css, keyframes, styled, darkTheme, defaultTheme, applyTheme, App, ChatView, ErrorBanner, MessageBubble, StateIndicator, Transcript, SessionProvider, createSessionControls, VoiceSession } from "@aai/ui";\n` +
+      `import { useEffect, useRef, useState, useCallback, useMemo } from "preact/hooks";\n` +
+      `Object.assign(globalThis, { mount, useSession, css, keyframes, styled, darkTheme, defaultTheme, applyTheme, App, ChatView, ErrorBanner, MessageBubble, StateIndicator, Transcript, SessionProvider, createSessionControls, VoiceSession, useEffect, useRef, useState, useCallback, useMemo });\n`,
+  );
+
   const workerResult = await build({
     ...BASE,
     plugins: [denoPlugin({ configPath })],
@@ -99,6 +127,7 @@ export async function bundleAgent(
       loader: "ts",
       resolveDir: AAI_ROOT,
     },
+    inject: [workerShimPath],
     outfile: `${outDir}/worker.js`,
     metafile: true,
     loader: {
@@ -114,10 +143,15 @@ export async function bundleAgent(
   if (!opts?.skipClient) {
     const clientResult = await build({
       ...clientBuildOptions(agent.clientEntry, `${outDir}/client.js`),
+      inject: [clientShimPath],
       metafile: true,
     });
     clientBytes = jsBytes(clientResult.metafile!);
   }
+
+  // Clean up temp shims
+  await Deno.remove(workerShimPath).catch(() => {});
+  await Deno.remove(clientShimPath).catch(() => {});
 
   await Deno.writeTextFile(
     `${outDir}/manifest.json`,

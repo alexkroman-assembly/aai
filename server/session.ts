@@ -17,7 +17,7 @@ import type {
   STTConfig,
   ToolSchema,
 } from "./types.ts";
-import { DEFAULT_GREETING } from "@aai/sdk";
+import { DEFAULT_GREETING } from "./agent_types.ts";
 import { buildSystemPrompt } from "./system_prompt.ts";
 
 export interface SessionTransport {
@@ -78,7 +78,10 @@ export function createSession(opts: SessionOptions): Session {
     ? { ...opts.agentConfig, greeting: "" }
     : opts.agentConfig;
 
-  const secrets = opts.secrets ?? {};
+  const secrets: Record<string, string | undefined> = {
+    ...opts.secrets,
+    BRAVE_API_KEY: platformConfig.braveApiKey || opts.secrets?.BRAVE_API_KEY,
+  };
   const logger = getLogger(`session:${id.slice(0, 8)}`);
 
   const config: PlatformConfig = {

@@ -9,14 +9,46 @@ import type { ChatMessage, LLMResponse, ToolSchema } from "./types.ts";
 import { DEFAULT_STT_CONFIG, DEFAULT_TTS_CONFIG } from "./types.ts";
 import { TigrisBundleStore } from "./bundle_store_tigris.ts";
 
-// Re-export sdk test helpers for downstream consumers
-export {
-  createTestContext,
-  stubFetch,
-  stubFetchError,
-  stubFetchJson,
-  testCtx,
-} from "@aai/sdk/testing";
+import type { ToolContext } from "./agent_types.ts";
+
+export function createTestContext(
+  overrides?: Partial<ToolContext>,
+): ToolContext {
+  return {
+    secrets: {},
+    fetch: globalThis.fetch,
+    ...overrides,
+  };
+}
+
+export function testCtx(fetch?: typeof globalThis.fetch): ToolContext {
+  return createTestContext(fetch ? { fetch } : undefined);
+}
+
+export function stubFetchJson(data: unknown): typeof globalThis.fetch {
+  return (() => Promise.resolve(Response.json(data))) as typeof fetch;
+}
+
+export function stubFetchError(
+  status: number,
+  body: string,
+): typeof globalThis.fetch {
+  return (() =>
+    Promise.resolve(new Response(body, { status }))) as typeof fetch;
+}
+
+export function stubFetch(
+  stubs: Record<string, unknown>,
+): typeof globalThis.fetch {
+  return ((input: string | URL) => {
+    const url = String(input);
+    const match = Object.entries(stubs).find(([k]) => url.includes(k));
+    if (!match) {
+      return Promise.resolve(new Response("Not found", { status: 404 }));
+    }
+    return Promise.resolve(Response.json(match[1]));
+  }) as typeof fetch;
+}
 
 export const flush = (): Promise<void> =>
   new Promise<void>((r) => setTimeout(r, 0));
@@ -118,6 +150,7 @@ export function createMockPlatformConfig(): PlatformConfig {
     ttsConfig: { ...DEFAULT_TTS_CONFIG, apiKey: "test-tts-key" },
     model: "test-model",
     llmGatewayBase: "https://test-gateway.example.com/v1",
+    braveApiKey: "",
   };
 }
 

@@ -1,6 +1,6 @@
 import { getLogger } from "./logger.ts";
+import { ClientMessageSchema } from "./protocol.ts";
 import type { Session } from "./session.ts";
-import { ControlMessageSchema } from "./types.ts";
 import { safeParseJSON } from "./ws.ts";
 
 const log = getLogger("ws");
@@ -29,10 +29,12 @@ export function handleSessionWebSocket(
   function processControlMessage(raw: string): void {
     const json = safeParseJSON(raw);
     if (json === null) return;
-    const parsed = ControlMessageSchema.safeParse(json);
+    const parsed = ClientMessageSchema.safeParse(json);
     if (!parsed.success) return;
 
-    if (parsed.data.type === "audio_ready") {
+    if (parsed.data.type === "ping") {
+      ws.send(JSON.stringify({ type: "pong" }));
+    } else if (parsed.data.type === "audio_ready") {
       session?.onAudioReady();
     } else if (parsed.data.type === "cancel") {
       session?.onCancel();
@@ -81,7 +83,7 @@ export function handleSessionWebSocket(
       if (!isBinary) {
         const json = safeParseJSON(event.data as string);
         if (
-          json !== null && typeof json === "object" && json !== undefined &&
+          json !== null && typeof json === "object" &&
           (json as Record<string, unknown>).type === "ping"
         ) {
           ws.send(JSON.stringify({ type: "pong" }));
@@ -94,22 +96,6 @@ export function handleSessionWebSocket(
 
     if (isBinary) {
       session?.onAudio(new Uint8Array(event.data));
-      return;
-    }
-
-    const data = safeParseJSON(event.data as string) as
-      | Record<
-        string,
-        unknown
-      >
-      | null;
-    if (data === null) {
-      log.warn("Unparseable JSON from client", { ...ctx, sid });
-      return;
-    }
-
-    if (data.type === "ping") {
-      ws.send(JSON.stringify({ type: "pong" }));
       return;
     }
 

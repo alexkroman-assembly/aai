@@ -1,0 +1,7 @@
+{
+  "slug": "web-researcher",
+  "env": {
+    "ASSEMBLYAI_API_KEY": null,
+    "LLM_MODEL": "claude-haiku-4-5-20251001"
+  }
+}

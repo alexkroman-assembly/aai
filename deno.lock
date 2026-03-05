@@ -1567,11 +1567,6 @@
           "npm:esbuild@~0.27.3"
         ]
       },
-      "sdk": {
-        "dependencies": [
-          "npm:zod@^4.3.6"
-        ]
-      },
       "server": {
         "dependencies": [
           "jsr:@hono/hono@^4.12.4",

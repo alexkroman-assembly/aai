@@ -1,15 +1,11 @@
 export { main } from "./cli.ts";
-export { runBuild } from "./build.ts";
 export { runDeploy } from "./deploy.ts";
 export { runDev } from "./dev.ts";
 export { runNew } from "./new.ts";
-export { runProd } from "./prod.ts";
 export { loadAgent } from "./_discover.ts";
 export { bundleAgent, clientBuildOptions } from "./_bundler.ts";
 export type { AgentEntry } from "./_discover.ts";
-export type { BuildOpts } from "./build.ts";
 export type { BundleResult } from "./_bundler.ts";
 export type { DeployOpts } from "./deploy.ts";
 export type { DevOpts } from "./dev.ts";
 export type { NewOptions } from "./new.ts";
-export type { ProdOpts } from "./prod.ts";

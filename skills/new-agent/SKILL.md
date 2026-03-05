@@ -10,18 +10,16 @@ You are creating a voice agent using the **aai** framework. Generate an `agent.t
 
 ## Agent structure
 
-Every agent exports a default `Agent()` call:
+Every agent exports a default `defineAgent()` call. No imports needed — `defineAgent`, `z`, and `fetchJSON` are ambient globals provided by the framework:
 
 ```ts
-import { Agent } from "@aai/sdk";
-
-export default Agent({
+export default defineAgent({
   name: "Agent Name",
   instructions: "...",
   greeting: "...",
   voice: "jess",           // "jess", "dan", or "tara"
   builtinTools: [],        // see available tools below
-  tools: {},               // custom tools defined with tool()
+  tools: {},               // custom tools defined inline
 });
 ```
 
@@ -36,26 +34,23 @@ export default Agent({
 
 ## Custom tools
 
-Define custom tools with `tool()` and `zod` schemas:
+Define custom tools inline with `z` (zod) schemas:
 
 ```ts
-import { Agent, tool } from "@aai/sdk";
-import { z } from "zod";
-
-export default Agent({
+export default defineAgent({
   name: "My Agent",
   tools: {
-    my_tool: tool({
+    my_tool: {
       description: "What this tool does",
       parameters: z.object({
         param: z.string().describe("What this param is"),
       }),
-      handler: ({ param }, ctx) => {
+      execute: ({ param }, ctx) => {
         // ctx.fetch for HTTP requests
         // ctx.secrets for environment variables
         return { result: param };
       },
-    }),
+    },
   },
 });
 ```
@@ -63,10 +58,7 @@ export default Agent({
 For tools that call external APIs, use `fetchJSON`:
 
 ```ts
-import { Agent, fetchJSON, tool } from "@aai/sdk";
-import type { ToolContext } from "@aai/sdk";
-
-// In handler:
+// In execute:
 const data = await fetchJSON("https://api.example.com/data", { fetch: ctx.fetch });
 ```
 
@@ -95,16 +87,6 @@ After creating `agent.ts`, also create:
 2. **`.env`** with required API keys:
 ```
 ASSEMBLYAI_API_KEY=<user needs to add>
-```
-
-3. **`deno.json`** with the SDK import:
-```json
-{
-  "imports": {
-    "@aai/sdk": "jsr:@anthropic-ai/aai/sdk",
-    "zod": "npm:zod@^4.3.6"
-  }
-}
 ```
 
 ## Running the agent

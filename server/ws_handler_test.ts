@@ -1,7 +1,7 @@
 import { expect } from "@std/expect";
 import { handleSessionWebSocket } from "./ws_handler.ts";
 import type { Session } from "./session.ts";
-import { MockWebSocket } from "@aai/sdk/testing/mock-ws";
+import { MockWebSocket } from "./_mock_ws.ts";
 import { flush } from "./_test_utils.ts";
 
 function createSpySession(): Session & { calls: string[] } {
@@ -97,6 +97,7 @@ Deno.test("handleSessionWebSocket", async (t) => {
 
       ws.sent.length = 0;
       ws.msg(JSON.stringify({ type: "ping" }));
+      await flush();
       expect(ws.sentJson().some((m) => m.type === "pong")).toBe(true);
     },
   );

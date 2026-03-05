@@ -1,4 +1,7 @@
-import { join } from "@std/path";
+import { dirname, fromFileUrl, join, resolve } from "@std/path";
+
+/** Root of the aai framework (parent of cli/). */
+const AAI_ROOT = resolve(dirname(fromFileUrl(import.meta.url)), "..");
 
 /** Spawn a compiled server binary on the given port. */
 export function spawnCompiled(
@@ -20,7 +23,7 @@ export function spawn(port: number): Deno.ChildProcess {
       "run",
       "--allow-all",
       "--unstable-worker-options",
-      "server/main.ts",
+      resolve(AAI_ROOT, "server/main.ts"),
     ],
     env: { PORT: String(port) },
     stdout: "inherit",

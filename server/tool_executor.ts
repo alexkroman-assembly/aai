@@ -1,5 +1,5 @@
 import { getLogger } from "./logger.ts";
-import type { ToolContext, ToolDef } from "@aai/sdk";
+import type { ToolContext, ToolDef } from "./agent_types.ts";
 
 const log = getLogger("tool-executor");
 export const TOOL_HANDLER_TIMEOUT = 30_000;
@@ -31,7 +31,7 @@ export async function executeToolCall(
       signal,
     };
     const result = await Promise.resolve(
-      tool.handler(parsed.data as Record<string, unknown>, ctx),
+      tool.execute(parsed.data as Record<string, unknown>, ctx),
     );
     if (result == null) return "null";
     return typeof result === "string" ? result : JSON.stringify(result);
