@@ -46,14 +46,8 @@ class PlaybackProcessor extends AudioWorkletProcessor {
     const output = outputs[0];
     const outputChannelData = output[0];
     if (this.hasInterrupted) {
-      this.hasInterrupted = false;
-      this.hasStarted = false;
-      this.outputBuffers = [];
-      this.write = { buffer: new Float32Array(this.bufferLength) };
-      this.writeOffset = 0;
-      outputChannelData.fill(0);
-      this.port.postMessage({ event: 'interrupted' });
-      return true;
+      this.port.postMessage({ event: 'stop' });
+      return false;
     } else if (this.outputBuffers.length) {
       this.hasStarted = true;
       const { buffer } = this.outputBuffers.shift();
@@ -62,12 +56,9 @@ class PlaybackProcessor extends AudioWorkletProcessor {
       }
       return true;
     } else if (this.hasStarted) {
-      this.hasStarted = false;
-      outputChannelData.fill(0);
-      this.port.postMessage({ event: 'drained' });
-      return true;
+      this.port.postMessage({ event: 'stop' });
+      return false;
     } else {
-      outputChannelData.fill(0);
       return true;
     }
   }

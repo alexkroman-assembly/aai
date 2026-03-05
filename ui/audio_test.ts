@@ -105,10 +105,10 @@ Deno.test("createVoiceIO", async (t) => {
     "enqueue posts write event to playback worklet",
     withAudioMocks(async ({ workletNodes }) => {
       const io = await createVoiceIO(voiceOpts());
-      const playNode = findWorkletNode(workletNodes(), "playback-processor");
 
       io.enqueue(new Int16Array([100, -200, 300]).buffer);
 
+      const playNode = findWorkletNode(workletNodes(), "playback-processor");
       const writes = playNode.port.posted.filter(
         (p) => (p as { event: string }).event === "write",
       );
@@ -121,12 +121,12 @@ Deno.test("createVoiceIO", async (t) => {
     "enqueue is a no-op after close",
     withAudioMocks(async ({ workletNodes }) => {
       const io = await createVoiceIO(voiceOpts());
-      const playNode = findWorkletNode(workletNodes(), "playback-processor");
 
       await io.close();
-      const countBefore = playNode.port.posted.length;
+      const countBefore = workletNodes().length;
       io.enqueue(new Int16Array([100]).buffer);
-      expect(playNode.port.posted.length).toBe(countBefore);
+      // No new playback node should be created after close
+      expect(workletNodes().length).toBe(countBefore);
     }),
   );
 
@@ -134,9 +134,9 @@ Deno.test("createVoiceIO", async (t) => {
     "flush sends interrupt to playback worklet",
     withAudioMocks(async ({ workletNodes }) => {
       const io = await createVoiceIO(voiceOpts());
-      const playNode = findWorkletNode(workletNodes(), "playback-processor");
 
       io.enqueue(new Int16Array([1, 2, 3]).buffer);
+      const playNode = findWorkletNode(workletNodes(), "playback-processor");
       io.flush();
 
       expect(playNode.port.posted).toContainEqual({ event: "interrupt" });

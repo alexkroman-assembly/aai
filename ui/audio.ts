@@ -1,8 +1,6 @@
 import { MIC_BUFFER_SECONDS } from "./types.ts";
 import { resample } from "./resample.ts";
 
-const GAIN_RAMP_TC = 0.02; // ~20ms time constant for click-free ramps
-
 export interface VoiceIOOptions {
   sttSampleRate: number;
   ttsSampleRate: number;
@@ -115,14 +113,20 @@ export async function createVoiceIO(
   };
 
   // ── Playback ──
-  const playNode = new AudioWorkletNode(ctx, "playback-processor");
-  const gate = ctx.createGain();
-  gate.gain.value = 0; // start muted
-  playNode.connect(gate);
-  gate.connect(ctx.destination);
-
+  let playNode: AudioWorkletNode | null = null;
   let closed = false;
-  let muted = true;
+
+  function startPlayNode(): AudioWorkletNode {
+    const node = new AudioWorkletNode(ctx, "playback-processor");
+    node.connect(ctx.destination);
+    node.port.onmessage = (e: MessageEvent) => {
+      if (e.data.event === "stop") {
+        node.disconnect();
+        if (playNode === node) playNode = null;
+      }
+    };
+    return node;
+  }
 
   const io: VoiceIO = {
     enqueue(pcm16Buffer: ArrayBuffer) {
@@ -132,25 +136,17 @@ export async function createVoiceIO(
       if (len === 0) return;
       const samples = new Int16Array(pcm16Buffer, 0, len / 2);
 
+      if (!playNode) playNode = startPlayNode();
+
       // Send Int16 PCM directly to the worklet (it converts to Float32)
       playNode.port.postMessage(
         { event: "write", buffer: samples },
         [samples.buffer],
       );
-
-      // Click-free unmute
-      if (muted) {
-        muted = false;
-        gate.gain.setTargetAtTime(1, ctx.currentTime, GAIN_RAMP_TC);
-      }
     },
 
     flush() {
-      if (!muted) {
-        muted = true;
-        gate.gain.setTargetAtTime(0, ctx.currentTime, GAIN_RAMP_TC);
-      }
-      playNode.port.postMessage({ event: "interrupt" });
+      if (playNode) playNode.port.postMessage({ event: "interrupt" });
     },
 
     async close() {
