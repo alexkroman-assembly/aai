@@ -1,50 +1,47 @@
 import { debounce } from "@std/async/debounce";
-import { context } from "esbuild";
 import { log } from "./_output.ts";
 import { loadAgent } from "./_discover.ts";
-import { clientBuildOptions } from "./_bundler.ts";
-import { startWorkerServer } from "./worker_server.ts";
-import { startTunnel, type Tunnel } from "./tunnel.ts";
+import { bundleAgent } from "./_bundler.ts";
 
 export interface DevOpts {
   agentDir: string;
-  workerPort: number;
   serverUrl: string;
 }
 
-function isLocalServer(url: string): boolean {
-  try {
-    const { hostname } = new URL(url);
-    return hostname === "localhost" || hostname === "127.0.0.1";
-  } catch {
-    return false;
-  }
-}
-
-/** Deploy agent config to the server with a worker_url. */
-async function deployToServer(
+async function deploy(
   serverUrl: string,
+  bundleDir: string,
   slug: string,
-  env: Record<string, string>,
-  transport: string[],
-  clientJs: string,
-  workerUrl: string,
   apiKey: string,
 ): Promise<void> {
-  const resp = await fetch(`${serverUrl}/deploy`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      slug,
-      env,
-      worker_url: workerUrl,
-      client: clientJs,
-      transport,
-    }),
-  });
+  const dir = `${bundleDir}/${slug}`;
+  const manifest = JSON.parse(await Deno.readTextFile(`${dir}/manifest.json`));
+  const worker = await Deno.readTextFile(`${dir}/worker.js`);
+  const client = await Deno.readTextFile(`${dir}/client.js`);
+
+  let resp: Response;
+  try {
+    resp = await fetch(`${serverUrl}/deploy`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        slug: manifest.slug,
+        env: manifest.env,
+        worker,
+        client,
+        transport: manifest.transport,
+      }),
+    });
+  } catch (err) {
+    throw new Error(
+      `Deploy request failed: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
 
   if (!resp.ok) {
     const text = await resp.text();
@@ -61,74 +58,24 @@ export async function runDev(opts: DevOpts): Promise<void> {
   }
 
   const apiKey = agent.env.ASSEMBLYAI_API_KEY;
-  if (!apiKey) {
-    throw new Error(
-      "ASSEMBLYAI_API_KEY not found — set it in .env or your environment",
-    );
-  }
-
-  const local = isLocalServer(opts.serverUrl);
-
-  // 1. Build client bundle (still needs esbuild for browser JS)
-  log.step("Bundle", `${agent.slug} client`);
   const tmpDir = await Deno.makeTempDir({ prefix: "aai-dev-" });
-  const slugDir = `${tmpDir}/${agent.slug}`;
-  await Deno.mkdir(slugDir, { recursive: true });
 
-  const clientCtx = await context({
-    ...clientBuildOptions(agent.clientEntry, `${slugDir}/client.js`),
-    sourcemap: true,
-  });
-  await clientCtx.rebuild();
-  await clientCtx.watch();
-  log.stepInfo("Watch", "client (esbuild)");
-
-  // 2. Start local worker HTTP server
-  const workerServer = await startWorkerServer(agent, opts.workerPort);
-
-  // 3. Get the worker URL — tunnel for remote, direct for local
-  let tunnel: Tunnel | undefined;
-  let workerUrl: string;
-
-  if (local) {
-    workerUrl = `http://localhost:${opts.workerPort}`;
-  } else {
-    tunnel = await startTunnel(opts.workerPort);
-    workerUrl = tunnel.url;
-  }
-
-  // 4. Deploy to server with worker_url
-  const clientJs = await Deno.readTextFile(`${slugDir}/client.js`);
+  // Initial build + deploy
+  log.step("Bundle", agent.slug);
+  await bundleAgent(agent, `${tmpDir}/${agent.slug}`);
   log.step("Deploy", `${agent.slug} → ${opts.serverUrl}`);
-  await deployToServer(
-    opts.serverUrl,
-    agent.slug,
-    agent.env,
-    agent.transport,
-    clientJs,
-    workerUrl,
-    apiKey,
-  );
+  await deploy(opts.serverUrl, tmpDir, agent.slug, apiKey);
 
-  // 5. Watch for file changes → reload worker (no server restart needed)
+  // Watch for file changes → rebuild and redeploy
   const watcher = Deno.watchFs([agent.dir], { recursive: true });
 
   const rebuild = debounce(async () => {
-    log.step("Change", "file modified, reloading...");
+    log.step("Change", "file modified, rebuilding...");
     try {
-      await workerServer.reload();
-      await clientCtx.rebuild();
-
-      const newClientJs = await Deno.readTextFile(`${slugDir}/client.js`);
-      await deployToServer(
-        opts.serverUrl,
-        agent.slug,
-        agent.env,
-        agent.transport,
-        newClientJs,
-        workerUrl,
-        apiKey,
-      );
+      const freshAgent = await loadAgent(opts.agentDir);
+      if (!freshAgent) throw new Error("agent not found after change");
+      await bundleAgent(freshAgent, `${tmpDir}/${freshAgent.slug}`);
+      await deploy(opts.serverUrl, tmpDir, freshAgent.slug, apiKey);
       log.step("Deploy", "updated");
     } catch (err: unknown) {
       log.error(
@@ -148,8 +95,9 @@ export async function runDev(opts: DevOpts): Promise<void> {
     }
   })();
 
+  const agentUrl = `${opts.serverUrl}/${agent.slug}/`;
   if (agent.transport.includes("websocket")) {
-    log.stepInfo("Listen", `${opts.serverUrl}/${agent.slug}/`);
+    log.stepInfo("Listen", agentUrl);
   }
   if (agent.transport.includes("twilio")) {
     log.stepInfo("Listen", `${opts.serverUrl}/${agent.slug}/twilio/voice`);
@@ -157,11 +105,15 @@ export async function runDev(opts: DevOpts): Promise<void> {
   log.stepInfo("Watch", "for changes...");
   console.log();
 
+  const openCmd = Deno.build.os === "darwin"
+    ? "open"
+    : Deno.build.os === "windows"
+    ? "start"
+    : "xdg-open";
+  new Deno.Command(openCmd, { args: [agentUrl] }).spawn();
+
   const cleanup = () => {
     watcher.close();
-    tunnel?.close();
-    workerServer.shutdown();
-    clientCtx.dispose();
     Deno.removeSync(tmpDir, { recursive: true });
     Deno.exit(0);
   };

@@ -1,5 +1,5 @@
 import { parseArgs } from "@std/cli/parse-args";
-import { bold, cyan, dim, green, red } from "@std/fmt/colors";
+import { bold, cyan, dim, green } from "@std/fmt/colors";
 import { dirname, fromFileUrl, join, relative } from "@std/path";
 import { log } from "./_output.ts";
 
@@ -19,13 +19,6 @@ function resolveAgentDir(): string {
   return relative(Deno.cwd(), initCwd) || ".";
 }
 
-// deno-fmt-ignore
-const ENV_VARS = [
-  `    ${cyan("ASSEMBLYAI_API_KEY")}       AssemblyAI API key for speech-to-text ${red("(required)")}`,
-  `    ${cyan("LLM_MODEL")}                LLM model to use ${dim("(default: claude-haiku-4-5-20251001)")}`,
-  `    ${cyan("PORT")}                     Server port ${dim("(default: 3000)")}`,
-];
-
 function printUsage(): void {
   console.log(`${green(bold("aai"))} ${dim(VERSION)}
 Agent development toolkit
@@ -34,7 +27,6 @@ ${bold("USAGE:")}
     ${cyan("aai")} <command> [options]
 
 ${bold("COMMANDS:")}
-    ${green("new")}       Scaffold a new agent from a template
     ${green("dev")}       Start development server with watch + hot-reload
     ${green("deploy")}    Build and deploy agent to the orchestrator
     ${green("types")}     Generate ambient type declarations (types.d.ts)
@@ -44,9 +36,6 @@ ${bold("OPTIONS:")}
     ${cyan("-h, --help")}       Show this help message
     ${cyan("-V, --version")}    Show version number
 
-${bold("ENVIRONMENT VARIABLES:")}
-${ENV_VARS.join("\n")}
-
 Run ${cyan("aai <command> --help")} for command-specific options.`);
 }
 
@@ -54,8 +43,45 @@ export async function main(args: string[]): Promise<number> {
   const command = args[0];
   const rest = args.slice(1);
 
-  if (!command || command === "--help" || command === "-h") {
+  if (command === "--help" || command === "-h") {
     printUsage();
+    return 0;
+  }
+
+  if (!command) {
+    const { getApiKey } = await import("./_config.ts");
+
+    console.log(`\n${green(bold("aai"))} ${dim(VERSION)}`);
+    console.log("Agent development toolkit\n");
+
+    // Ensure API key is configured (prompts on first use)
+    await getApiKey();
+
+    const cwd = Deno.env.get("INIT_CWD") || Deno.cwd();
+    const answer = prompt(`\nSet up and deploy "${cwd}"? (Y/n)`);
+    if (answer !== null && answer !== "" && answer.toLowerCase() !== "y") {
+      return 0;
+    }
+
+    const cliDir = dirname(fromFileUrl(import.meta.url));
+    const templatesDir = join(cliDir, "..", "templates");
+    const { generateSlug } = await import("./_slug.ts");
+    const { runNew } = await import("./new.ts");
+    const slug = generateSlug();
+
+    await runNew({
+      slug,
+      targetDir: cwd,
+      template: "simple",
+      templatesDir,
+    });
+
+    const { runDev } = await import("./dev.ts");
+    await runDev({
+      agentDir: cwd,
+      serverUrl: "https://voice-agent-api.fly.dev",
+    });
+
     return 0;
   }
   if (command === "--version" || command === "-V") {
@@ -65,51 +91,15 @@ export async function main(args: string[]): Promise<number> {
 
   if (rest.includes("--help") || rest.includes("-h")) {
     switch (command) {
-      case "new": {
-        const cliDir = dirname(fromFileUrl(import.meta.url));
-        const tplDir = join(cliDir, "..", "templates");
-        const tpls: string[] = [];
-        for await (const entry of Deno.readDir(tplDir)) {
-          if (entry.isDirectory) tpls.push(entry.name);
-        }
-        console.log(`${green(bold("aai new"))} — Scaffold a new agent
-
-${bold("USAGE:")}
-    ${cyan("aai new")} <name> ${dim("[options]")}
-
-${bold("OPTIONS:")}
-    ${cyan("-t, --template")} <name>  Template to use
-
-${bold("TEMPLATES:")}
-${tpls.sort().map((t) => `    ${green(t)}`).join("\n")}`);
-        return 0;
-      }
       case "dev":
         console.log(`${green(bold("aai dev"))} — Start development server
 
 ${bold("USAGE:")}
-    ${cyan("aai dev")} ${dim("[options]")}
+    ${cyan("aai dev")}
 
-${bold("OPTIONS:")}
-    ${cyan("--local")}                   Use local server on :3100 (${
-          dim("deno task serve")
-        })
-    ${cyan("--worker-port")} <number>    Local worker port ${
-          dim("(default: 9100)")
-        }
-
-Runs the agent worker locally and deploys to the remote server via cloudflared.
-Use ${cyan("--local")} to target a local server instead (no cloudflared needed).
-Requires ${cyan("cloudflared")} for remote servers (${
-          dim("brew install cloudflare/cloudflare/cloudflared")
-        }).
-
-${bold("ENVIRONMENT VARIABLES:")}
-${ENV_VARS.slice(0, 3).join("\n")}
-
-    Set these in a ${
-          cyan(".env")
-        } file in your agent directory or export them in your shell.`);
+Builds and deploys your agent, then watches for file changes.
+On each change, rebuilds and redeploys automatically.
+Opens your agent in the browser on start.`);
         return 0;
       case "skill":
         console.log(`${green(bold("aai skill"))} — Install Claude Code skill
@@ -146,14 +136,7 @@ ${bold("OPTIONS:")}
     ${cyan("--bundle-dir")} <dir>   Bundle directory ${
             dim("(default: ~/.aai/bundles)")
           }
-    ${cyan("--dry-run")}            Show what would be deployed without sending
-
-${bold("ENVIRONMENT VARIABLES:")}
-${ENV_VARS.filter((_, i) => i !== 3).join("\n")}
-
-    Env vars are read from your agent's ${
-            cyan(".env")
-          } file and bundled at build time.`,
+    ${cyan("--dry-run")}            Show what would be deployed without sending`,
         );
         return 0;
       default:
@@ -164,61 +147,12 @@ ${ENV_VARS.filter((_, i) => i !== 3).join("\n")}
   }
 
   switch (command) {
-    case "new": {
-      const flags = parseArgs(rest, {
-        string: ["template"],
-        alias: { t: "template" },
-      });
-      const projectName = flags._[0]?.toString();
-      if (!projectName) {
-        log.error("missing project name");
-        console.log(
-          `\n${bold("USAGE:")} ${cyan("aai new")} <name> --template <template>`,
-        );
-        return 1;
-      }
-      const cliDir = dirname(fromFileUrl(import.meta.url));
-      const templatesDir = join(cliDir, "..", "templates");
-      if (!flags.template) {
-        const templates: string[] = [];
-        for await (const entry of Deno.readDir(templatesDir)) {
-          if (entry.isDirectory) templates.push(entry.name);
-        }
-        log.error("missing --template flag");
-        console.log(`\n${bold("TEMPLATES:")}`);
-        for (const t of templates.sort()) {
-          console.log(`    ${green(t)}`);
-        }
-        console.log(
-          `\n${bold("USAGE:")} ${
-            cyan("aai new")
-          } ${projectName} --template <template>`,
-        );
-        return 1;
-      }
-      const outDir = Deno.env.get("INIT_CWD") || Deno.cwd();
-      const { runNew } = await import("./new.ts");
-      await runNew({
-        projectName,
-        template: flags.template,
-        templatesDir,
-        outDir,
-      });
-      return 0;
-    }
     case "dev": {
-      const flags = parseArgs(rest, {
-        boolean: ["local"],
-        string: ["worker-port"],
-      });
       const agentDir = resolveAgentDir();
       const { runDev } = await import("./dev.ts");
       await runDev({
         agentDir,
-        workerPort: Number(flags["worker-port"]) || 9100,
-        serverUrl: flags.local
-          ? "http://localhost:3100"
-          : "https://voice-agent-api.fly.dev",
+        serverUrl: "https://voice-agent-api.fly.dev",
       });
       return 0;
     }
@@ -267,10 +201,6 @@ ${ENV_VARS.filter((_, i) => i !== 3).join("\n")}
         return 1;
       }
       const apiKey = agent.env.ASSEMBLYAI_API_KEY;
-      if (!apiKey) {
-        log.error("ASSEMBLYAI_API_KEY not found in agent env");
-        return 1;
-      }
       const { runDeploy } = await import("./deploy.ts");
       await runDeploy({
         url: flags.url || "https://voice-agent-api.fly.dev",

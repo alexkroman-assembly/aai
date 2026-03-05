@@ -98,6 +98,5 @@ aai dev
 
 If they don't have aai installed:
 ```sh
-brew tap alexkroman/aai https://github.com/alexkroman/homebrew-aai
-brew install aai
+curl -fsSL https://voice-agent-api.fly.dev/install | sh
 ```

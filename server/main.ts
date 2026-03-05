@@ -1,6 +1,5 @@
 import { createOrchestrator } from "./orchestrator.ts";
-import type { BundleStore } from "./bundle_store_tigris.ts";
-import { MemoryBundleStore } from "./bundle_store_memory.ts";
+import { createS3Client, TigrisBundleStore } from "./bundle_store_tigris.ts";
 import { getLogger } from "./logger.ts";
 
 const log = getLogger("server");
@@ -10,16 +9,16 @@ try {
   await load({ export: true });
 } catch { /* .env not found — fine */ }
 
-let store: BundleStore;
-const bucket = Deno.env.get("BUCKET_NAME");
-if (bucket && Deno.env.get("AWS_ENDPOINT_URL_S3")) {
-  const { createS3Client, TigrisBundleStore } = await import(
-    "./bundle_store_tigris.ts"
-  );
-  store = new TigrisBundleStore(createS3Client(), bucket);
+const bucket = Deno.env.get("BUCKET_NAME") ?? "local";
+let s3;
+if (Deno.env.get("AWS_ENDPOINT_URL_S3")) {
+  s3 = createS3Client();
 } else {
-  store = new MemoryBundleStore();
+  const { createMemoryS3Client } = await import("./s3_memory.ts");
+  s3 = createMemoryS3Client();
+  log.info("Using in-memory storage (no S3 configured)");
 }
+const store = new TigrisBundleStore(s3, bucket);
 const { app } = createOrchestrator({ store });
 
 const port = parseInt(Deno.env.get("PORT") ?? "3100");

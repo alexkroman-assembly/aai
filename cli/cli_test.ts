@@ -41,26 +41,10 @@ Deno.test("cli main", async (t) => {
   );
 
   await t.step(
-    "prints usage with no args",
-    withConsoleSpy(async (logged) => {
-      expect(await main([])).toBe(0);
-      expect(logged[0]).toContain("aai");
-    }),
-  );
-
-  await t.step(
     "prints command help with dev --help",
     withConsoleSpy(async (logged) => {
       expect(await main(["dev", "--help"])).toBe(0);
-      expect(logged[0]).toContain("--local");
-      expect(logged[0]).toContain("--worker-port");
-    }),
-  );
-
-  await t.step(
-    "returns 1 for removed build command",
-    withConsoleSpy(async () => {
-      expect(await main(["build"])).toBe(1);
+      expect(logged[0]).toContain("aai dev");
     }),
   );
 

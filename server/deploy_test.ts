@@ -1,11 +1,10 @@
 import { expect } from "@std/expect";
 import { createDeployRoute, hashApiKey } from "./deploy.ts";
-import { MemoryBundleStore } from "./bundle_store_memory.ts";
 import type { AgentSlot } from "./worker_pool.ts";
-import { VALID_ENV } from "./_test_utils.ts";
+import { createTestStore, VALID_ENV } from "./_test_utils.ts";
 
 function setup() {
-  const store = new MemoryBundleStore();
+  const store = createTestStore();
   const slots = new Map<string, AgentSlot>();
   const app = createDeployRoute({ slots, store });
   return { app, store, slots };

@@ -51,6 +51,7 @@
     "npm:goober@^2.1.18": "2.1.18_csstype@3.2.3",
     "npm:preact@10.28.4": "10.28.4",
     "npm:preact@^10.28.4": "10.28.4",
+    "npm:unique-names-generator@^4.7.1": "4.7.1",
     "npm:zod@^4.3.6": "4.3.6"
   },
   "jsr": {
@@ -1517,6 +1518,9 @@
     "tslib@2.8.1": {
       "integrity": "sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w=="
     },
+    "unique-names-generator@4.7.1": {
+      "integrity": "sha512-lMx9dX+KRmG8sq6gulYYpKWZc9RlGsgBR6aoO8Qsm3qvkSJ+3rAymr+TnV8EDMrIrwuFJ4kruzMWM/OpYzPoow=="
+    },
     "zod@4.3.6": {
       "integrity": "sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg=="
     }
@@ -1558,6 +1562,7 @@
       "npm:esbuild@~0.27.3",
       "npm:goober@^2.1.18",
       "npm:preact@^10.28.4",
+      "npm:unique-names-generator@^4.7.1",
       "npm:zod@^4.3.6"
     ],
     "members": {

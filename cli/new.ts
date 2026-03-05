@@ -3,10 +3,10 @@ import { log } from "./_output.ts";
 import { generateTypes } from "./types.ts";
 
 export interface NewOptions {
-  projectName: string;
+  slug: string;
+  targetDir: string;
   template: string;
   templatesDir: string;
-  outDir: string;
 }
 
 async function listTemplates(dir: string): Promise<string[]> {
@@ -30,8 +30,8 @@ async function copyDir(src: string, dest: string): Promise<void> {
   }
 }
 
-export async function runNew(opts: NewOptions): Promise<void> {
-  const { projectName, template, templatesDir, outDir } = opts;
+export async function runNew(opts: NewOptions): Promise<string> {
+  const { slug, targetDir, template, templatesDir } = opts;
   const available = await listTemplates(templatesDir);
 
   if (!available.includes(template)) {
@@ -41,25 +41,26 @@ export async function runNew(opts: NewOptions): Promise<void> {
   }
 
   const src = join(templatesDir, template);
-  const dest = join(outDir, projectName);
 
-  try {
-    await Deno.stat(dest);
-    throw new Error(`directory '${dest}' already exists`);
-  } catch (e) {
-    if (!(e instanceof Deno.errors.NotFound)) throw e;
+  log.step("Create", `${slug} from template '${template}'`);
+
+  // Copy template files into target directory
+  for await (const entry of Deno.readDir(src)) {
+    const srcPath = join(src, entry.name);
+    const destPath = join(targetDir, entry.name);
+    if (entry.isDirectory) {
+      await copyDir(srcPath, destPath);
+    } else {
+      await Deno.copyFile(srcPath, destPath);
+    }
   }
 
-  log.step("Create", `${projectName} from template '${template}'`);
-
-  await copyDir(src, dest);
-
   // Update slug in agent.json
-  const agentJsonPath = join(dest, "agent.json");
+  const agentJsonPath = join(targetDir, "agent.json");
   try {
     const raw = await Deno.readTextFile(agentJsonPath);
     const config = JSON.parse(raw);
-    config.slug = projectName;
+    config.slug = slug;
     await Deno.writeTextFile(
       agentJsonPath,
       JSON.stringify(config, null, 2) + "\n",
@@ -69,20 +70,18 @@ export async function runNew(opts: NewOptions): Promise<void> {
   }
 
   // Generate ambient type declarations for editor autocomplete
-  await generateTypes(dest);
+  await generateTypes(targetDir);
   log.step("Generated", "types.d.ts");
 
   // Copy .env.example as .env
-  const envExamplePath = join(dest, ".env.example");
+  const envExamplePath = join(targetDir, ".env.example");
   try {
-    await Deno.copyFile(envExamplePath, join(dest, ".env"));
+    await Deno.copyFile(envExamplePath, join(targetDir, ".env"));
     log.warn("created .env from .env.example — fill in your keys");
   } catch {
     // No .env.example in template — skip
   }
 
-  log.step("Done", dest);
-  console.log(`\nNext steps:`);
-  console.log(`    cd ${projectName}`);
-  console.log(`    ${log.cyan("aai dev")}`);
+  log.step("Done", targetDir);
+  return targetDir;
 }

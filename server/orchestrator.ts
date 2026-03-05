@@ -1,5 +1,6 @@
 import { Hono } from "@hono/hono";
 import { faviconRoutes, renderLandingPage } from "./html.ts";
+import { installRoute } from "./install.ts";
 import { applyMiddleware } from "./middleware.ts";
 import { createDeployRoute } from "./deploy.ts";
 import { createWebSocketRoutes } from "./transport_websocket.ts";
@@ -19,6 +20,7 @@ export function createOrchestrator(opts: {
   const app = new Hono();
   applyMiddleware(app);
   app.route("/", faviconRoutes());
+  app.route("/", installRoute());
   app.get("/health", (c) =>
     c.json({
       status: "ok",

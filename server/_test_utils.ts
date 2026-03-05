@@ -3,11 +3,10 @@ import type { SttEvents, SttHandle } from "./stt.ts";
 import type { ExecuteTool } from "./tool_executor.ts";
 import type { PlatformConfig } from "./config.ts";
 import type { CallLLMOptions } from "./llm.ts";
-import type { S3Client } from "@aws-sdk/client-s3";
-
 import type { ChatMessage, LLMResponse, ToolSchema } from "./types.ts";
 import { DEFAULT_STT_CONFIG, DEFAULT_TTS_CONFIG } from "./types.ts";
 import { TigrisBundleStore } from "./bundle_store_tigris.ts";
+import { createMemoryS3Client } from "./s3_memory.ts";
 
 import type { ToolContext } from "./agent_types.ts";
 
@@ -298,89 +297,6 @@ export const VALID_ENV = {
   ASSEMBLYAI_API_KEY: "test-key",
 };
 
-// --- From _s3_test_utils.ts ---
-
-export function createMockS3(): S3Client {
-  const objects = new Map<string, { body: string; etag: string }>();
-  let etagCounter = 0;
-
-  // deno-lint-ignore no-explicit-any
-  const send = (command: any): any => {
-    const name = command.constructor.name;
-
-    if (name === "PutObjectCommand") {
-      const key = command.input.Key as string;
-      const body = typeof command.input.Body === "string"
-        ? command.input.Body
-        : new TextDecoder().decode(command.input.Body);
-      const etag = `"etag-${++etagCounter}"`;
-      objects.set(key, { body, etag });
-      return { ETag: etag };
-    }
-
-    if (name === "GetObjectCommand") {
-      const key = command.input.Key as string;
-      const obj = objects.get(key);
-      if (!obj) {
-        const err = new Error("NoSuchKey");
-        Object.assign(err, { name: "NoSuchKey" });
-        throw err;
-      }
-      if (command.input.IfNoneMatch && command.input.IfNoneMatch === obj.etag) {
-        const err = new Error("Not Modified");
-        Object.assign(err, { $metadata: { httpStatusCode: 304 } });
-        throw err;
-      }
-      return {
-        Body: {
-          transformToString: () => Promise.resolve(obj.body),
-        },
-        ETag: obj.etag,
-      };
-    }
-
-    if (name === "ListObjectsV2Command") {
-      const prefix = (command.input.Prefix as string) ?? "";
-      const delimiter = command.input.Delimiter as string | undefined;
-
-      if (delimiter) {
-        const prefixSet = new Set<string>();
-        for (const key of objects.keys()) {
-          if (!key.startsWith(prefix)) continue;
-          const rest = key.slice(prefix.length);
-          const slashIdx = rest.indexOf("/");
-          if (slashIdx !== -1) {
-            prefixSet.add(prefix + rest.slice(0, slashIdx + 1));
-          }
-        }
-        return {
-          CommonPrefixes: [...prefixSet].map((p) => ({ Prefix: p })),
-        };
-      }
-
-      const contents = [];
-      for (const key of objects.keys()) {
-        if (key.startsWith(prefix)) {
-          contents.push({ Key: key });
-        }
-      }
-      return { Contents: contents.length > 0 ? contents : undefined };
-    }
-
-    if (name === "DeleteObjectsCommand") {
-      const toDelete = command.input.Delete?.Objects ?? [];
-      for (const obj of toDelete) {
-        if (obj.Key) objects.delete(obj.Key);
-      }
-      return {};
-    }
-
-    throw new Error(`Unhandled S3 command: ${name}`);
-  };
-
-  return { send } as unknown as S3Client;
-}
-
 export function createTestStore(): TigrisBundleStore {
-  return new TigrisBundleStore(createMockS3(), "test-bucket");
+  return new TigrisBundleStore(createMemoryS3Client(), "test-bucket");
 }

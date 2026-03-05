@@ -47,25 +47,13 @@ export function renderLandingPage(): string {
     <div class="wrap">
       <h1>aai</h1>
       <p>Build voice agents with a single command.</p>
-      <pre><code><span class="dim"># install</span>
-brew tap alexkroman/aai
-brew install aai
+      <pre><code><span class="dim"># install and run</span>
+curl -fsSL https://voice-agent-api.fly.dev/install | sh
+aai
 
-<span class="dim"># create an agent</span>
-aai new my-agent --template simple
-cd my-agent
-aai dev
-
-<span class="dim"># test your agent</span>
-aai dev
-
-<span class="dim"># deploy your agent</span>
-aai deploy
-
-<span class="dim"># create an agent with claude code</span>
+<span class="dim"># or create with claude code</span>
+mkdir my-agent && cd my-agent
 aai skill install
-aai new my-agent --template simple
-cd my-agent
 claude "/new-agent a voice agent that helps plan weekend trips"</code></pre>
       <p style="margin-top:1.5rem;font-size:.85rem">
         <a href="https://github.com/alexkroman/aai">GitHub</a>

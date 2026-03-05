@@ -5,16 +5,14 @@ Build voice agents with a single command.
 ## Install
 
 ```sh
-brew tap alexkroman/aai https://github.com/alexkroman/homebrew-aai
-brew install aai
+curl -fsSL https://voice-agent-api.fly.dev/install | sh
 ```
 
 ## Quick start
 
 ```sh
-aai new my-agent --template simple
-cd my-agent
-aai dev
+mkdir my-agent && cd my-agent
+aai
 ```
 
 ## Claude Code skill

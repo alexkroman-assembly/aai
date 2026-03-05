@@ -17,15 +17,12 @@ export async function hashApiKey(apiKey: string): Promise<string> {
 const DeployBodySchema = z.object({
   slug: z.string().min(1),
   env: z.record(z.string(), z.string()),
-  worker: z.string().min(1).optional(),
-  worker_url: z.string().url().optional(),
+  worker: z.string().min(1),
   client: z.string().min(1),
   transport: z.union([
     z.enum(["websocket", "twilio"]),
     z.array(z.enum(["websocket", "twilio"])),
   ]).optional(),
-}).refine((d) => d.worker || d.worker_url, {
-  message: "Either worker or worker_url must be provided",
 });
 
 const log = getLogger("deploy");
@@ -62,15 +59,12 @@ export function createDeployRoute(ctx: {
     }
     const body = parsed.data;
 
-    // Skip platform config validation when using remote worker (dev mode)
-    if (!body.worker_url) {
-      try {
-        loadPlatformConfig(body.env);
-      } catch (err: unknown) {
-        throw new HTTPException(400, {
-          message: `Invalid platform config: ${(err as Error).message}`,
-        });
-      }
+    try {
+      loadPlatformConfig(body.env);
+    } catch (err: unknown) {
+      throw new HTTPException(400, {
+        message: `Invalid platform config: ${(err as Error).message}`,
+      });
     }
 
     // Check slug ownership
@@ -102,7 +96,7 @@ export function createDeployRoute(ctx: {
       slug: body.slug,
       env: body.env,
       transport,
-      worker: body.worker ?? "",
+      worker: body.worker,
       client: body.client,
       owner_hash: ownerHash,
     });
@@ -112,7 +106,6 @@ export function createDeployRoute(ctx: {
       env: body.env,
       transport,
       activeSessions: 0,
-      workerUrl: body.worker_url,
     };
     slots.set(body.slug, slot);
 

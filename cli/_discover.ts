@@ -1,6 +1,7 @@
 import { parse as parseDotenv } from "@std/dotenv/parse";
 import { dirname, fromFileUrl, join, resolve } from "@std/path";
 import { z } from "zod";
+import { getApiKey } from "./_config.ts";
 
 /** Root of the aai framework (parent of cli/). */
 const AAI_ROOT = resolve(dirname(fromFileUrl(import.meta.url)), "..");
@@ -59,6 +60,12 @@ export async function loadAgent(dir: string): Promise<AgentEntry | null> {
     } else {
       env[key] = resolved;
     }
+  }
+
+  // Resolve missing ASSEMBLYAI_API_KEY from global config (prompts on first use)
+  if (missing.includes("ASSEMBLYAI_API_KEY")) {
+    env.ASSEMBLYAI_API_KEY = await getApiKey();
+    missing.splice(missing.indexOf("ASSEMBLYAI_API_KEY"), 1);
   }
 
   if (missing.length > 0) {

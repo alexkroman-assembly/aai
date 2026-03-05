@@ -1,9 +1,5 @@
 import knowledge from "./knowledge.json" with { type: "json" };
 
-// Text assets can also be embedded at bundle time via esbuild's text loader:
-//   import instructions from "./system_prompt.txt" with { type: "text" };
-// This works in the bundled worker but is not supported by `deno check`.
-
 type FaqEntry = { question: string; answer: string };
 const faqs: FaqEntry[] = knowledge.faqs;
 
