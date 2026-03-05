@@ -34,12 +34,6 @@ fi
 
 URL="https://github.com/\$REPO/releases/download/v\${VERSION}/\${ARTIFACT}.tar.gz"
 
-# Check if already installed at this version
-if [ -x "\$INSTALL_DIR/aai" ] && [ "\$("\$INSTALL_DIR/aai" --version 2>/dev/null)" = "\$VERSION" ]; then
-  echo "aai v\$VERSION is already installed"
-  exit 0
-fi
-
 echo "Installing aai v\$VERSION (\$os/\$arch)..."
 
 # Download and extract
