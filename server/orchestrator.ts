@@ -34,11 +34,7 @@ export function createOrchestrator(opts: {
   app.route("/", createTwilioRoutes({ slots, store }));
   app.route("/", createWebSocketRoutes({ slots, sessions, store }));
 
-  app.get("/", (c) => {
-    const first = slots.keys().next().value;
-    if (first) return c.redirect(`/${first}/`, 302);
-    return c.html(renderLandingPage());
-  });
+  app.get("/", (c) => c.html(renderLandingPage()));
 
   app.notFound((c) => c.json({ error: "Not found" }, 404));
 
