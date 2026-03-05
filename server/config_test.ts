@@ -24,7 +24,7 @@ Deno.test("loadPlatformConfig", async (t) => {
 
   await t.step("uses server env TTS key when not explicitly passed", () => {
     const config = loadPlatformConfig({ ASSEMBLYAI_API_KEY: "key" });
-    // Falls back to Deno.env.get("ASSEMBLYAI_TTS_API_KEY") via getServerTtsKey()
+    // Falls back to Deno.env.get("RIME_API_KEY")
     expect(typeof config.ttsConfig.apiKey).toBe("string");
   });
 
@@ -46,29 +46,29 @@ Deno.test("loadPlatformConfig", async (t) => {
 });
 
 Deno.test("validateServerEnv", async (t) => {
-  await t.step("throws when ASSEMBLYAI_TTS_API_KEY is missing", () => {
-    const orig = Deno.env.get("ASSEMBLYAI_TTS_API_KEY");
+  await t.step("throws when RIME_API_KEY is missing", () => {
+    const orig = Deno.env.get("RIME_API_KEY");
     const origBrave = Deno.env.get("BRAVE_API_KEY");
     try {
-      Deno.env.delete("ASSEMBLYAI_TTS_API_KEY");
+      Deno.env.delete("RIME_API_KEY");
       Deno.env.delete("BRAVE_API_KEY");
       expect(() => validateServerEnv()).toThrow();
     } finally {
-      if (orig) Deno.env.set("ASSEMBLYAI_TTS_API_KEY", orig);
+      if (orig) Deno.env.set("RIME_API_KEY", orig);
       if (origBrave) Deno.env.set("BRAVE_API_KEY", origBrave);
     }
   });
 
   await t.step("passes when all required vars are set", () => {
-    const orig = Deno.env.get("ASSEMBLYAI_TTS_API_KEY");
+    const orig = Deno.env.get("RIME_API_KEY");
     const origBrave = Deno.env.get("BRAVE_API_KEY");
     try {
-      Deno.env.set("ASSEMBLYAI_TTS_API_KEY", "test-key");
+      Deno.env.set("RIME_API_KEY", "test-key");
       Deno.env.set("BRAVE_API_KEY", "test-brave-key");
       expect(() => validateServerEnv()).not.toThrow();
     } finally {
-      if (orig) Deno.env.set("ASSEMBLYAI_TTS_API_KEY", orig);
-      else Deno.env.delete("ASSEMBLYAI_TTS_API_KEY");
+      if (orig) Deno.env.set("RIME_API_KEY", orig);
+      else Deno.env.delete("RIME_API_KEY");
       if (origBrave) Deno.env.set("BRAVE_API_KEY", origBrave);
       else Deno.env.delete("BRAVE_API_KEY");
     }

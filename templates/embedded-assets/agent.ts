@@ -18,7 +18,7 @@ Rules:
 - Always be helpful and polite`,
   greeting:
     "Hi! I'm your FAQ assistant. Ask me anything about the AAI agent framework and I'll look it up in my knowledge base.",
-  voice: "tara",
+  voice: "luna",
   tools: {
     search_faq: {
       description:

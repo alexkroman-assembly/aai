@@ -31,24 +31,19 @@ export interface TTSConfig {
   wssUrl: string;
   apiKey: string;
   voice: string;
-  maxTokens: number;
-  bufferSize: number;
-  repetitionPenalty: number;
-  temperature: number;
-  topP: number;
+  modelId: string;
+  audioFormat: string;
+  samplingRate: number;
   sampleRate: number;
 }
 
 export const DEFAULT_TTS_CONFIG: TTSConfig = {
-  wssUrl:
-    "wss://model-q844y7pw.api.baseten.co/environments/production/websocket",
+  wssUrl: "wss://users-ws.rime.ai/ws",
   apiKey: "",
-  voice: "jess",
-  maxTokens: 2000,
-  bufferSize: 105,
-  repetitionPenalty: 1.2,
-  temperature: 0.6,
-  topP: 0.9,
+  voice: "luna",
+  modelId: "arcana",
+  audioFormat: "pcm",
+  samplingRate: DEFAULT_TTS_SAMPLE_RATE,
   sampleRate: DEFAULT_TTS_SAMPLE_RATE,
 };
 

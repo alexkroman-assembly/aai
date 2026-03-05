@@ -71,13 +71,11 @@ export async function runNew(opts: NewOptions): Promise<string> {
 
   // Generate ambient type declarations for editor autocomplete
   await generateTypes(targetDir);
-  log.step("Generated", "types.d.ts");
 
   // Copy .env.example as .env
   const envExamplePath = join(targetDir, ".env.example");
   try {
     await Deno.copyFile(envExamplePath, join(targetDir, ".env"));
-    log.warn("created .env from .env.example — fill in your keys");
   } catch {
     // No .env.example in template — skip
   }

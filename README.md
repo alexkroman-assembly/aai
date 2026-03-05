@@ -20,7 +20,7 @@ aai
 Install the Claude Code skill to create agents with `/new-agent`:
 
 ```sh
-aai skill install
+aai install-skill
 ```
 
 Then in Claude Code, type `/new-agent a travel assistant that helps plan trips` and it will scaffold a complete agent for you.

@@ -1,4 +1,4 @@
-import { css } from "goober";
+import { css, keyframes } from "goober";
 
 export const base = css`
   font-family: var(--aai-font);
@@ -84,6 +84,36 @@ export const controls = css`
     border: 1px solid var(--aai-surface-light);
     background: transparent;
     color: var(--aai-text-muted);
+  }
+`;
+
+const bounce = keyframes`
+  0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
+  40% { opacity: 1; transform: scale(1); }
+`;
+
+export const thinking = css`
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+
+  & .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--aai-text-muted);
+    animation: ${bounce} 1.4s infinite ease-in-out both;
+  }
+  & .dot:nth-child(1) {
+    animation-delay: 0s;
+  }
+  & .dot:nth-child(2) {
+    animation-delay: 0.16s;
+  }
+  & .dot:nth-child(3) {
+    animation-delay: 0.32s;
   }
 `;
 

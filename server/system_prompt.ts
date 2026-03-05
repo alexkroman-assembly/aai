@@ -11,7 +11,7 @@ const VOICE_RULES =
   "If a tool returns no results, just answer naturally without explaining why.\n" +
   "- Write exactly as you would say it out loud to a friend\n" +
   '- Use short conversational sentences. To list things, say "First," "Next," "Finally,"\n' +
-  "- Keep responses concise — a few sentences max";
+  "- Keep responses concise — 1 to 3 sentences max";
 
 export function buildSystemPrompt(
   config: AgentConfig,
@@ -32,6 +32,9 @@ export function buildSystemPrompt(
       "BUT, if one of the values for a required parameter is missing, DO NOT invoke the function (not even with fillers for the missing params) and instead, ask the user to provide the missing parameters. " +
       "DO NOT ask for more information on optional parameters if it is not provided. " +
       "Do not answer from memory alone when a tool can provide accurate, up-to-date information." +
+      "\n\nTool Preambles: When you decide to call a tool, ALWAYS say a brief natural phrase BEFORE the tool call " +
+      '(e.g. "Let me look that up" or "One moment while I check"). ' +
+      "This fills silence while the tool executes. Keep preambles to one short sentence." +
       "\n\nIMPORTANT: You MUST call the final_answer tool to deliver every response. " +
       "Put your complete spoken response in the answer parameter. " +
       "It is the only way to complete the task — otherwise you will be stuck in a loop."

@@ -41,8 +41,8 @@ export interface SessionOptions {
   ): Promise<SttHandle>;
   callLLM?(opts: CallLLMOptions): Promise<LLMResponse>;
   ttsClient?: {
-    synthesize(
-      text: string,
+    synthesizeStream(
+      chunks: AsyncIterable<string>,
       onAudio: (chunk: Uint8Array) => void,
       signal?: AbortSignal,
     ): Promise<void>;
@@ -158,6 +158,13 @@ export function createSession(opts: SessionOptions): Session {
 
   async function doConnectSttWithEvents(): Promise<void> {
     const events: SttEvents = {
+      onSpeechStarted: () => {
+        if (turnAbort) {
+          logger.info("User started speaking — interrupting playback");
+          cancelInflight();
+          trySendJson({ type: "cancelled" });
+        }
+      },
       onTranscript: (text, isFinal, turnOrder) => {
         logger.info("transcript", { text, isFinal, turnOrder });
         if (isFinal) {
@@ -240,8 +247,10 @@ export function createSession(opts: SessionOptions): Session {
 
       if (result) {
         trySendJson({ type: "chat", text: result });
-        await tts.synthesize(
-          result,
+        await tts.synthesizeStream(
+          (async function* () {
+            yield result;
+          })(),
           (chunk) => trySendBytes(chunk),
           abort.signal,
         );
@@ -262,8 +271,11 @@ export function createSession(opts: SessionOptions): Session {
   function speakText(text: string): void {
     const abort = new AbortController();
     turnAbort = abort;
+    async function* oneShot() {
+      yield text;
+    }
     const p = tts
-      .synthesize(text, (chunk) => trySendBytes(chunk), abort.signal)
+      .synthesizeStream(oneShot(), (chunk) => trySendBytes(chunk), abort.signal)
       .then(() => {
         if (!abort.signal.aborted) trySendJson({ type: "tts_done" });
       })

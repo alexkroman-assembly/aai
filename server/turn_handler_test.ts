@@ -279,8 +279,8 @@ Deno.test("executeTurn", async (t) => {
       });
 
       expect(result).toBe("Here are the results.");
-      expect(c.toolCalls.length).toBe(3);
-      expect(callCount).toBe(4); // 1 initial + 2 re-calls + 1 forced
+      expect(c.toolCalls.length).toBe(5);
+      expect(callCount).toBe(6); // 1 initial + 4 re-calls + 1 forced
     });
 
     await t.step(

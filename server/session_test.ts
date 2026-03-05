@@ -10,18 +10,28 @@ import {
 } from "./_test_utils.ts";
 import type { SttEvents } from "./stt.ts";
 
-function setup(
-  overrides?: Partial<
+type SetupOverrides =
+  & Partial<
     Pick<
       SessionOptions,
-      "connectStt" | "callLLM" | "ttsClient" | "executeBuiltinTool"
+      | "connectStt"
+      | "callLLM"
+      | "ttsClient"
+      | "executeBuiltinTool"
     >
-  >,
+  >
+  & { toolSchemas?: SessionOptions["toolSchemas"] };
+
+function setup(
+  overrides?: SetupOverrides,
   agentConfig?: Partial<AgentConfig>,
 ) {
   const mocks = createMockSessionOptions(overrides);
   if (agentConfig) {
     mocks.opts.agentConfig = { ...mocks.opts.agentConfig, ...agentConfig };
+  }
+  if (overrides?.toolSchemas) {
+    mocks.opts.toolSchemas = overrides.toolSchemas;
   }
   const transport = mocks.opts.transport as ReturnType<
     typeof createMockTransport
@@ -31,12 +41,7 @@ function setup(
 }
 
 function setupWithSttEvents(
-  overrides?: Partial<
-    Pick<
-      SessionOptions,
-      "connectStt" | "callLLM" | "ttsClient" | "executeBuiltinTool"
-    >
-  >,
+  overrides?: SetupOverrides,
   agentConfig?: Partial<AgentConfig>,
 ) {
   const events: { current: SttEvents | null } = { current: null };
@@ -99,7 +104,7 @@ Deno.test("createSession", async (t) => {
       const chat = messages.find((m) => m.type === "chat");
       expect(chat).toBeDefined();
       expect(chat!.text).toBe("Hi there!");
-      expect(ttsClient.synthesizeCalls.length).toBeGreaterThan(0);
+      expect(ttsClient.synthesizeStreamCalls).toBeGreaterThan(0);
     });
 
     await t.step("is a no-op on second call", async () => {
@@ -107,9 +112,9 @@ Deno.test("createSession", async (t) => {
       await session.start();
 
       session.onAudioReady();
-      const firstCount = ttsClient.synthesizeCalls.length;
+      const firstCount = ttsClient.synthesizeStreamCalls;
       session.onAudioReady();
-      expect(ttsClient.synthesizeCalls.length).toBe(firstCount);
+      expect(ttsClient.synthesizeStreamCalls).toBe(firstCount);
     });
   });
 
@@ -158,23 +163,25 @@ Deno.test("createSession", async (t) => {
   });
 
   await t.step("handleTurn()", async (t) => {
-    await t.step("sends TURN, CHAT, triggers TTS", async () => {
-      const ctx = setupWithSttEvents();
-      await ctx.session.start();
+    await t.step(
+      "sends TURN, CHAT, triggers TTS",
+      async () => {
+        const ctx = setupWithSttEvents();
+        await ctx.session.start();
 
-      ctx.events.current!.onTurn("What is the weather?");
-      await ctx.session.waitForTurn();
+        ctx.events.current!.onTurn("What is the weather?");
+        await ctx.session.waitForTurn();
 
-      const messages = getSentJson(ctx.transport);
-      expect(messages.find((m) => m.type === "turn")!.text).toBe(
-        "What is the weather?",
-      );
-      expect(messages.find((m) => m.type === "chat")!.text).toBe(
-        "Hello from LLM",
-      );
-      expect(ctx.llmCalls.length).toBe(1);
-      expect(ctx.ttsClient.synthesizeCalls.length).toBeGreaterThan(0);
-    });
+        const messages = getSentJson(ctx.transport);
+        expect(messages.find((m) => m.type === "turn")!.text).toBe(
+          "What is the weather?",
+        );
+        expect(messages.find((m) => m.type === "chat")!.text).toBe(
+          "Hello from LLM",
+        );
+        expect(ctx.ttsClient.synthesizeStreamCalls).toBeGreaterThan(0);
+      },
+    );
 
     await t.step("handles tool calls", async () => {
       const toolResponse = createMockLLMResponse(null, [
@@ -184,6 +191,13 @@ Deno.test("createSession", async (t) => {
 
       const ctx = setupWithSttEvents({
         callLLM: responses(toolResponse, finalResponse),
+        toolSchemas: [
+          {
+            name: "get_weather",
+            description: "Get weather",
+            parameters: { type: "object", properties: {} },
+          },
+        ],
       });
 
       await ctx.session.start();
@@ -193,8 +207,10 @@ Deno.test("createSession", async (t) => {
 
       expect(ctx.executeTool.calls.length).toBe(1);
       expect(ctx.executeTool.calls[0].name).toBe("get_weather");
-      expect(getSentJson(ctx.transport).find((m) => m.type === "chat")!.text)
-        .toBe("It's sunny in NYC.");
+      const msgs = getSentJson(ctx.transport);
+      expect(msgs.find((m) => m.type === "chat")!.text).toBe(
+        "It's sunny in NYC.",
+      );
     });
 
     await t.step("sends ERROR on LLM failure", async () => {

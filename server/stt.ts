@@ -7,6 +7,7 @@ const STT_CONNECTION_TIMEOUT = 10_000;
 const log = getLogger("stt");
 
 export interface SttEvents {
+  onSpeechStarted: () => void;
   onTranscript: (text: string, isFinal: boolean, turnOrder?: number) => void;
   onTurn: (text: string, turnOrder?: number) => void;
   onTermination: (audioDuration: number, sessionDuration: number) => void;
@@ -54,18 +55,9 @@ export async function connectStt(
       new Promise<SttHandle>((resolve, reject) => {
         ws.addEventListener("open", () => {
           log.info("STT WebSocket connected");
-          let audioSendCount = 0;
           resolve({
             send(audio: Uint8Array) {
               if (ws.readyState === WebSocket.OPEN) {
-                audioSendCount++;
-                if (audioSendCount <= 5 || audioSendCount % 100 === 0) {
-                  log.debug("STT audio send", {
-                    count: audioSendCount,
-                    bytes: audio.length,
-                    wsState: ws.readyState,
-                  });
-                }
                 ws.send(audio);
               } else {
                 log.warn("STT send skipped, ws not open", {
@@ -120,7 +112,9 @@ export async function connectStt(
             endOfTurn: msg.end_of_turn,
             turnIsFormatted: msg.turn_is_formatted,
           });
-          if (msg.type === "Termination") {
+          if (msg.type === "SpeechStarted") {
+            events.onSpeechStarted();
+          } else if (msg.type === "Termination") {
             events.onTermination(
               msg.audio_duration_seconds ?? 0,
               msg.session_duration_seconds ?? 0,

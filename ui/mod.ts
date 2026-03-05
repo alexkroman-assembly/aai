@@ -30,5 +30,6 @@ export {
   ErrorBanner,
   MessageBubble,
   StateIndicator,
+  ThinkingIndicator,
   Transcript,
 } from "./components.tsx";

@@ -52,8 +52,8 @@ curl -fsSL https://aai-agent.fly.dev/install | sh
 aai
 
 <span class="dim"># or create with claude code</span>
-aai skill install
-claude "/new-agent a voice agent that helps plan weekend trips"</code></pre>
+aai install-skill
+claude "/voice-agent a voice agent that helps plan weekend trips"</code></pre>
       <p style="margin-top:1.5rem;font-size:.85rem">
         <a href="https://github.com/alexkroman/aai">GitHub</a>
       </p>

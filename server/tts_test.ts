@@ -1,39 +1,36 @@
 import { expect } from "@std/expect";
 import { createTtsClient } from "./tts.ts";
 import { DEFAULT_TTS_CONFIG } from "./types.ts";
-import { installMockWebSocket, MockWebSocket } from "./_mock_ws.ts";
+import { installMockWebSocket } from "./_mock_ws.ts";
 import { flush } from "./_test_utils.ts";
 
 const config = { ...DEFAULT_TTS_CONFIG, apiKey: "test-tts-key" };
 
+async function* textStream(...texts: string[]): AsyncGenerator<string> {
+  for (const t of texts) yield t;
+}
+
 Deno.test("createTtsClient", async (t) => {
-  await t.step("creates a warm WebSocket on construction", () => {
+  await t.step("does not create a WebSocket on construction", () => {
     using mockWs = installMockWebSocket();
     const _client = createTtsClient(config);
-    expect(mockWs.created.length).toBe(1);
-  });
-
-  await t.step("skips warm-up when apiKey is empty", () => {
-    using mockWs = installMockWebSocket();
-    const _client = createTtsClient({ ...config, apiKey: "" });
     expect(mockWs.created.length).toBe(0);
   });
 
   await t.step(
-    "synthesize sends config, words, __END__ and relays audio",
+    "synthesizeStream sends text chunks + FLUSH and relays audio",
     async () => {
       using mockWs = installMockWebSocket();
       const client = createTtsClient(config);
-      await flush();
 
       const chunks: Uint8Array[] = [];
-      const promise = client.synthesize(
-        "one two three",
+      const promise = client.synthesizeStream(
+        textStream("Hello ", "world"),
         (chunk) => chunks.push(chunk),
       );
 
       await flush();
-      const ws = mockWs.created[mockWs.created.length - 1];
+      const ws = mockWs.created[0];
 
       // Server sends audio
       ws.dispatchEvent(
@@ -42,19 +39,14 @@ Deno.test("createTtsClient", async (t) => {
         }),
       );
 
-      // Server closes (TTS done)
+      // Simulate connection close to trigger completion
       ws.close();
       await promise;
 
-      // Verify protocol: config JSON, "one", "two", "three", "__END__"
-      const configMsg = JSON.parse(ws.sent[0] as string);
-      expect(configMsg.voice).toBe(config.voice);
-      expect(ws.sent).toContain("one");
-      expect(ws.sent).toContain("two");
-      expect(ws.sent).toContain("three");
-      expect(ws.sent[ws.sent.length - 1]).toBe("__END__");
+      expect(ws.sent).toContain("Hello ");
+      expect(ws.sent).toContain("world");
+      expect(ws.sent).toContain("<FLUSH>");
 
-      // Verify audio was relayed
       expect(chunks).toHaveLength(1);
       expect(chunks[0]).toEqual(new Uint8Array([10, 20]));
     },
@@ -69,8 +61,8 @@ Deno.test("createTtsClient", async (t) => {
       controller.abort();
 
       const chunks: Uint8Array[] = [];
-      await client.synthesize(
-        "Hello",
+      await client.synthesizeStream(
+        textStream("Hello"),
         (c) => chunks.push(c),
         controller.signal,
       );
@@ -78,15 +70,14 @@ Deno.test("createTtsClient", async (t) => {
     },
   );
 
-  await t.step("aborts mid-stream when signal fires", async () => {
-    using _mockWs = installMockWebSocket();
+  await t.step("aborts mid-synthesis and closes WebSocket", async () => {
+    using mockWs = installMockWebSocket();
     const client = createTtsClient(config);
-    await flush();
 
     const controller = new AbortController();
     const chunks: Uint8Array[] = [];
-    const promise = client.synthesize(
-      "Long text",
+    const promise = client.synthesizeStream(
+      textStream("Long text"),
       (c) => chunks.push(c),
       controller.signal,
     );
@@ -94,70 +85,24 @@ Deno.test("createTtsClient", async (t) => {
     await flush();
     controller.abort();
     await promise;
-    expect(chunks).toHaveLength(0);
+
+    const ws = mockWs.created[0];
+    expect(ws.readyState).toBe(WebSocket.CLOSED);
   });
 
-  await t.step(
-    "creates fresh connection when warm WS is unavailable",
-    async () => {
-      using mockWs = installMockWebSocket();
-      const client = createTtsClient(config);
-      expect(mockWs.created.length).toBe(1);
-
-      // Kill the warm WS
-      mockWs.created[0].readyState = MockWebSocket.CLOSED;
-
-      const promise = client.synthesize("Hello", () => {});
-      await flush();
-      expect(mockWs.created.length).toBe(2);
-
-      mockWs.created[1].close();
-      await promise;
-    },
-  );
-
-  await t.step(
-    "warms up a new connection after synthesize completes",
-    async () => {
-      using mockWs = installMockWebSocket();
-      const client = createTtsClient(config);
-      await flush();
-      expect(mockWs.created.length).toBe(1);
-
-      const promise = client.synthesize("Hello", () => {});
-      await flush();
-      mockWs.created[mockWs.created.length - 1].close();
-      await promise;
-      await flush();
-
-      expect(mockWs.created.length).toBeGreaterThanOrEqual(2);
-    },
-  );
-
-  await t.step("close disposes warm WS", () => {
+  await t.step("close sends EOS and prevents further synthesis", async () => {
     using mockWs = installMockWebSocket();
     const client = createTtsClient(config);
+
+    const p = client.synthesizeStream(textStream("Hello"), () => {});
+    await flush();
+    mockWs.created[0].close();
+    await p;
+
     client.close();
-    expect(mockWs.created[0].readyState).toBe(MockWebSocket.CLOSED);
-  });
 
-  await t.step("rejects on unexpected WS error during synthesize", async () => {
-    using mockWs = installMockWebSocket();
-    const client = createTtsClient(config);
-    await flush();
-
-    const promise = client.synthesize("Test", () => {});
-    await flush();
-
-    mockWs.created[mockWs.created.length - 1].dispatchEvent(
-      new Event("error"),
-    );
-
-    try {
-      await promise;
-      // If it resolves, that's also acceptable
-    } catch (err) {
-      expect((err as Error).message).toContain("TTS WebSocket error");
-    }
+    const chunks: Uint8Array[] = [];
+    await client.synthesizeStream(textStream("Hello"), (c) => chunks.push(c));
+    expect(chunks).toHaveLength(0);
   });
 });

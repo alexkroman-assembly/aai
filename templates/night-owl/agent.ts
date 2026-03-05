@@ -74,7 +74,7 @@ Use run_code for sleep calculations:
 - Format as HH:MM`,
   greeting:
     "Hey there, night owl. Try asking me for a cozy movie recommendation, or tell me what time you need to wake up and I'll calculate the best time to fall asleep.",
-  voice: "dan",
+  voice: "luna",
   prompt:
     "Transcribe movie titles, music artists, book names, and times accurately. Listen for genres like horror, comedy, sci-fi, jazz, ambient, and mood words like chill, intense, cozy, spooky.",
   builtinTools: ["run_code", "user_input", "final_answer"],

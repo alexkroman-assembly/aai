@@ -33,7 +33,7 @@ const BASE_AGENT = {
   name: "TestBot",
   instructions: "Test instructions",
   greeting: "Hi!",
-  voice: "jess",
+  voice: "luna",
   tools: {},
 };
 
@@ -53,7 +53,7 @@ Deno.test("getConfig returns agent config and tool schemas", async () => {
     expect(config.name).toBe("TestBot");
     expect(config.instructions).toBe("Test instructions");
     expect(config.greeting).toBe("Hi!");
-    expect(config.voice).toBe("jess");
+    expect(config.voice).toBe("luna");
     expect(toolSchemas.length).toBe(1);
     expect(toolSchemas[0].name).toBe("greet");
   } finally {

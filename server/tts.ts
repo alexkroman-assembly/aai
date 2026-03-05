@@ -4,167 +4,163 @@ import { createWebSocket, safeClose } from "./ws.ts";
 
 const log = getLogger("tts");
 
+/** Time (ms) after the last audio chunk before we consider synthesis complete. */
+const IDLE_MS = 300;
+/** Safety timeout (ms) if no audio arrives at all after a flush. */
+const NO_AUDIO_TIMEOUT_MS = 5000;
+
 export function createTtsClient(config: TTSConfig) {
-  let warmWs: WebSocket | null = null;
+  let ws: WebSocket | null = null;
   let disposed = false;
 
-  function makeWs(): WebSocket {
-    const ws = createWebSocket(config.wssUrl, {
-      Authorization: `Api-Key ${config.apiKey}`,
+  // Per-synthesis state
+  let onAudioCb: ((chunk: Uint8Array) => void) | null = null;
+  let completionResolve: (() => void) | null = null;
+  let idleTimer: ReturnType<typeof setTimeout> | null = null;
+  let chunkCount = 0;
+  let totalBytes = 0;
+
+  function buildUrl(): string {
+    const params = new URLSearchParams({
+      speaker: config.voice,
+      modelId: config.modelId,
+      audioFormat: config.audioFormat,
+      samplingRate: String(config.samplingRate),
     });
-    ws.binaryType = "arraybuffer";
-    return ws;
+    return `${config.wssUrl}?${params}`;
   }
 
-  function warmUp(): void {
-    if (disposed || !config.apiKey) return;
+  function finishSynthesis(): void {
+    if (idleTimer) {
+      clearTimeout(idleTimer);
+      idleTimer = null;
+    }
+    if (completionResolve) {
+      log.info("TTS synthesis done", { chunkCount, totalBytes });
+      completionResolve();
+      completionResolve = null;
+    }
+    onAudioCb = null;
+    chunkCount = 0;
+    totalBytes = 0;
+  }
 
-    if (warmWs) {
-      safeClose(warmWs);
-      warmWs = null;
+  function resetIdleTimer(): void {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(finishSynthesis, IDLE_MS);
+  }
+
+  function handleMessage(event: MessageEvent): void {
+    if (event.data instanceof ArrayBuffer && event.data.byteLength > 0) {
+      chunkCount++;
+      totalBytes += event.data.byteLength;
+      onAudioCb?.(new Uint8Array(event.data));
+      resetIdleTimer();
+    }
+  }
+
+  function handleClose(event: CloseEvent): void {
+    if (event.code !== 1000 && event.code !== 1005) {
+      log.error("TTS WebSocket closed unexpectedly", {
+        code: event.code,
+        reason: event.reason,
+      });
+    }
+    ws = null;
+    finishSynthesis();
+  }
+
+  function handleError(): void {
+    log.error("TTS WebSocket error");
+    ws = null;
+    finishSynthesis();
+  }
+
+  function connect(): Promise<WebSocket> {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      return Promise.resolve(ws);
+    }
+    if (ws) {
+      safeClose(ws);
+      ws = null;
     }
 
-    const ws = makeWs();
-    ws.addEventListener("error", () => {
-      if (warmWs === ws) warmWs = null;
+    const newWs = createWebSocket(buildUrl(), {
+      Authorization: `Bearer ${config.apiKey}`,
     });
-    warmWs = ws;
+    newWs.binaryType = "arraybuffer";
+    ws = newWs;
+
+    newWs.addEventListener("message", handleMessage);
+    newWs.addEventListener("close", handleClose);
+    newWs.addEventListener("error", handleError);
+
+    return new Promise<WebSocket>((resolve, reject) => {
+      newWs.addEventListener("open", () => {
+        log.info("TTS WebSocket connected");
+        resolve(newWs);
+      }, { once: true });
+      newWs.addEventListener("error", () => {
+        reject(new Error("TTS WebSocket connection failed"));
+      }, { once: true });
+    });
   }
 
-  function runTtsProtocol(
-    ws: WebSocket,
-    text: string,
-    onAudio: (chunk: Uint8Array) => void,
-    signal?: AbortSignal,
-  ): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const ac = new AbortController();
-      const { signal: listenerSignal } = ac;
-      const cleanup = () => {
-        ac.abort();
-        safeClose(ws);
-      };
+  function waitForCompletion(signal?: AbortSignal): Promise<void> {
+    return new Promise<void>((resolve) => {
+      completionResolve = resolve;
 
-      let chunkCount = 0;
-      let totalBytes = 0;
+      // Safety timeout in case no audio ever arrives
+      idleTimer = setTimeout(finishSynthesis, NO_AUDIO_TIMEOUT_MS);
 
-      const onAbort = () => {
-        log.info("TTS aborted", { chunkCount, totalBytes });
-        cleanup();
-        resolve();
-      };
-
-      signal?.addEventListener("abort", onAbort, { once: true });
-
-      const sendText = () => {
-        log.info("TTS sending text to WebSocket", {
-          wordCount: text.split(/\s+/).filter(Boolean).length,
-        });
-        ws.send(
-          JSON.stringify({
-            voice: config.voice,
-            max_tokens: config.maxTokens,
-            buffer_size: config.bufferSize,
-            repetition_penalty: config.repetitionPenalty,
-            temperature: config.temperature,
-            top_p: config.topP,
-          }),
-        );
-        for (const word of text.split(/\s+/)) {
-          if (word) ws.send(word);
-        }
-        ws.send("__END__");
-      };
-
-      if (ws.readyState === WebSocket.OPEN) {
-        sendText();
-      } else {
-        ws.addEventListener("open", sendText, { signal: listenerSignal });
+      if (signal) {
+        signal.addEventListener("abort", () => {
+          log.info("TTS aborted", { chunkCount, totalBytes });
+          // Close the WS so the next synthesis gets a fresh connection.
+          // Sending <CLEAR> on the old socket isn't reliable — the server
+          // may still have audio in flight that arrives after we start the
+          // next synthesis, corrupting playback.
+          if (ws) {
+            safeClose(ws);
+            ws = null;
+          }
+          finishSynthesis();
+        }, { once: true });
       }
-
-      ws.addEventListener("message", (event) => {
-        if (event.data instanceof ArrayBuffer) {
-          chunkCount++;
-          totalBytes += event.data.byteLength;
-          onAudio(new Uint8Array(event.data));
-        }
-      }, { signal: listenerSignal });
-
-      ws.addEventListener("close", (event: CloseEvent) => {
-        ac.abort();
-        signal?.removeEventListener("abort", onAbort);
-        warmUp();
-        if (event.code !== 1000 && event.code !== 1005) {
-          log.error("TTS WebSocket closed unexpectedly", {
-            code: event.code,
-            reason: event.reason,
-            chunkCount,
-            totalBytes,
-          });
-          reject(
-            new Error(
-              `TTS WebSocket closed unexpectedly (code ${event.code})`,
-            ),
-          );
-        } else {
-          log.info("TTS complete", {
-            code: event.code,
-            chunkCount,
-            totalBytes,
-          });
-          resolve();
-        }
-      });
-
-      ws.addEventListener("error", () => {
-        log.error("TTS WebSocket error", { chunkCount, totalBytes });
-        signal?.removeEventListener("abort", onAbort);
-        cleanup();
-        reject(new Error("TTS WebSocket error"));
-      });
     });
   }
-
-  warmUp();
 
   return {
-    synthesize(
-      text: string,
+    async synthesizeStream(
+      chunks: AsyncIterable<string>,
       onAudio: (chunk: Uint8Array) => void,
       signal?: AbortSignal,
     ): Promise<void> {
-      if (signal?.aborted) {
-        log.info("synthesize skipped (already aborted)");
-        return Promise.resolve();
+      if (disposed || signal?.aborted) return;
+
+      log.info("synthesizeStream start", { voice: config.voice });
+
+      const conn = await connect();
+      if (signal?.aborted) return;
+
+      onAudioCb = onAudio;
+      for await (const text of chunks) {
+        if (signal?.aborted) return;
+        conn.send(text);
       }
-
-      log.info("synthesize start", {
-        textLength: text.length,
-        text: text.length > 200 ? text.slice(0, 200) + "\u2026" : text,
-        voice: config.voice,
-      });
-
-      let ws: WebSocket;
-      if (warmWs && warmWs.readyState === WebSocket.OPEN) {
-        ws = warmWs;
-        warmWs = null;
-        log.info("using warm WebSocket");
-      } else {
-        if (warmWs) {
-          safeClose(warmWs);
-          warmWs = null;
-        }
-        ws = makeWs();
-        log.info("created new WebSocket");
-      }
-
-      return runTtsProtocol(ws, text, onAudio, signal);
+      conn.send("<FLUSH>");
+      await waitForCompletion(signal);
     },
+
     close(): void {
       disposed = true;
-      if (warmWs) {
-        safeClose(warmWs);
-        warmWs = null;
+      finishSynthesis();
+      if (ws) {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send("<EOS>");
+        }
+        safeClose(ws);
+        ws = null;
       }
     },
   };

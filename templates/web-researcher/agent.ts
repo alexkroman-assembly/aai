@@ -11,7 +11,7 @@ export default defineAgent({
 - If results are unclear or contradictory, say so.`,
   greeting:
     "Hey, I'm Scout. I search the web for answers. Try asking me something like, what happened in tech news today, or who won the last World Cup.",
-  voice: "tara",
+  voice: "luna",
   prompt: "",
   builtinTools: ["web_search", "visit_webpage", "user_input", "final_answer"],
 });

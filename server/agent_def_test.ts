@@ -6,7 +6,7 @@ import { DEFAULT_GREETING, DEFAULT_INSTRUCTIONS } from "./agent_types.ts";
 Deno.test("defineAgent - fills defaults", () => {
   const agent = defineAgent({ name: "Minimal" });
   expect(agent.name).toBe("Minimal");
-  expect(agent.voice).toBe("jess");
+  expect(agent.voice).toBe("luna");
   expect(agent.instructions).toBe(DEFAULT_INSTRUCTIONS);
   expect(agent.greeting).toBe(DEFAULT_GREETING);
   expect(Object.keys(agent.tools).length).toBe(0);

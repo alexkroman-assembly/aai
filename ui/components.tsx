@@ -13,6 +13,7 @@ import {
   indicator,
   layout,
   messageArea,
+  thinking,
 } from "./styles.ts";
 
 export function StateIndicator(
@@ -62,13 +63,24 @@ export function Transcript(
   );
 }
 
+export function ThinkingIndicator(): preact.JSX.Element {
+  return (
+    <div class={thinking}>
+      <div class="dot" />
+      <div class="dot" />
+      <div class="dot" />
+    </div>
+  );
+}
+
 function MessageList() {
-  const { messages, transcript } = useSession();
+  const { messages, transcript, state } = useSession();
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useSignalEffect(() => {
     messages.value;
     transcript.value;
+    state.value;
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
   });
 
@@ -76,6 +88,7 @@ function MessageList() {
     <div class={messageArea}>
       {messages.value.map((msg, i) => <MessageBubble key={i} message={msg} />)}
       <Transcript text={transcript} />
+      {state.value === "thinking" && <ThinkingIndicator />}
       <div ref={scrollRef} />
     </div>
   );

@@ -13,19 +13,25 @@ const EnvSchema = z.object({
 });
 
 const ServerEnvSchema = z.object({
-  ASSEMBLYAI_TTS_API_KEY: z.string().min(
+  RIME_API_KEY: z.string().min(
     1,
-    "ASSEMBLYAI_TTS_API_KEY is required",
+    "RIME_API_KEY is required",
   ),
   BRAVE_API_KEY: z.string().min(1, "BRAVE_API_KEY is required"),
 });
 
 /** Validate that all required server environment variables are set. Throws on failure. */
 export function validateServerEnv(): void {
-  ServerEnvSchema.parse({
-    ASSEMBLYAI_TTS_API_KEY: Deno.env.get("ASSEMBLYAI_TTS_API_KEY"),
+  const result = ServerEnvSchema.safeParse({
+    RIME_API_KEY: Deno.env.get("RIME_API_KEY"),
     BRAVE_API_KEY: Deno.env.get("BRAVE_API_KEY"),
   });
+  if (!result.success) {
+    const missing = result.error.issues.map((i) => i.path.join(".")).join(", ");
+    throw new Error(
+      `Missing required environment variables: ${missing}\nSee .env.example for the required keys.`,
+    );
+  }
 }
 
 export interface PlatformConfig {
@@ -39,7 +45,7 @@ export interface PlatformConfig {
 
 /** Read the TTS API key from the server's own process environment. */
 export function getServerTtsKey(): string {
-  return Deno.env.get("ASSEMBLYAI_TTS_API_KEY") ?? "";
+  return Deno.env.get("RIME_API_KEY") ?? "";
 }
 
 /** Read the Brave Search API key from the server's own process environment. */

@@ -2,7 +2,7 @@ import { FINAL_ANSWER_TOOL, USER_INPUT_TOOL } from "./builtin_tools.ts";
 import { getLogger, type Logger } from "./logger.ts";
 import type { ChatMessage, LLMResponse, ToolSchema } from "./types.ts";
 
-const MAX_TOOL_ITERATIONS = 3;
+const MAX_TOOL_ITERATIONS = 5;
 
 export type ToolChoiceParam =
   | "auto"
@@ -192,7 +192,7 @@ export async function executeTurn(
         messages.push({ role: "assistant", content: msg.content });
       }
     } else {
-      // Plain text response
+      // Plain text response (shouldn't happen with tool_choice=required)
       const responseText = msg.content ??
         "Sorry, I couldn't generate a response.";
       messages.push({ role: "assistant", content: responseText });

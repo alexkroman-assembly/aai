@@ -40,7 +40,7 @@ export async function callLLM(opts: CallLLMOptions): Promise<LLMResponse> {
   const body: Record<string, unknown> = {
     model: opts.model,
     messages: sanitizeMessages(opts.messages),
-    max_tokens: opts.maxTokens ?? 1024,
+    max_tokens: opts.maxTokens ?? 8000,
   };
 
   if (opts.tools.length > 0) {
@@ -75,6 +75,12 @@ export async function callLLM(opts: CallLLMOptions): Promise<LLMResponse> {
 
   if (!resp.ok) {
     const text = await resp.text();
+    log.error("LLM request failed", {
+      status: resp.status,
+      body: text.slice(0, 500),
+      model: opts.model,
+      messageCount: opts.messages.length,
+    });
     throw new Error(`LLM request failed: ${resp.status} ${text}`);
   }
 

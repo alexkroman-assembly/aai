@@ -96,10 +96,11 @@ export function createMockSttHandle(): SttHandle & {
 }
 
 export interface MockTtsClient {
-  synthesizeCalls: { text: string }[];
+  synthesizeStreamCalls: number;
+  streamedText: string[];
   closeCalled: boolean;
-  synthesize(
-    text: string,
+  synthesizeStream(
+    chunks: AsyncIterable<string>,
     onAudio: (chunk: Uint8Array) => void,
     signal?: AbortSignal,
   ): Promise<void>;
@@ -108,15 +109,18 @@ export interface MockTtsClient {
 
 export function createMockTtsClient(): MockTtsClient {
   return {
-    synthesizeCalls: [],
+    synthesizeStreamCalls: 0,
+    streamedText: [],
     closeCalled: false,
-    synthesize(
-      text: string,
+    async synthesizeStream(
+      chunks: AsyncIterable<string>,
       _onAudio: (chunk: Uint8Array) => void,
       _signal?: AbortSignal,
     ): Promise<void> {
-      this.synthesizeCalls.push({ text });
-      return Promise.resolve();
+      this.synthesizeStreamCalls++;
+      for await (const text of chunks) {
+        this.streamedText.push(text);
+      }
     },
     close() {
       this.closeCalled = true;
@@ -198,7 +202,10 @@ export function createMockSessionOptions(
   overrides?: Partial<
     Pick<
       SessionOptions,
-      "connectStt" | "callLLM" | "ttsClient" | "executeBuiltinTool"
+      | "connectStt"
+      | "callLLM"
+      | "ttsClient"
+      | "executeBuiltinTool"
     >
   >,
 ): {
@@ -227,7 +234,7 @@ export function createMockSessionOptions(
     agentConfig: {
       instructions: "Test instructions",
       greeting: "Hi there!",
-      voice: "jess",
+      voice: "luna",
     },
     toolSchemas: [],
     platformConfig: createMockPlatformConfig(),
@@ -272,6 +279,7 @@ export function createMockSttEvents(
     get closed() {
       return closed;
     },
+    onSpeechStarted() {},
     onTranscript(text, isFinal, turnOrder) {
       transcripts.push({ text, isFinal, turnOrder });
     },

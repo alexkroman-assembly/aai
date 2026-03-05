@@ -38,8 +38,6 @@ export async function runDeploy(
     return;
   }
 
-  log.step("Deploy", `${opts.slug} → ${opts.url}`);
-
   const resp = await doFetch(`${opts.url}/deploy`, {
     method: "POST",
     headers: {
@@ -56,13 +54,17 @@ export async function runDeploy(
   });
 
   if (resp.ok) {
-    log.step("Done", `deployed ${opts.slug}`);
     const transport = manifest.transport ?? ["websocket"];
+    const urls: string[] = [];
     if (transport.includes("websocket")) {
-      log.info(`websocket → ${opts.url}/websocket/${opts.slug}/`);
+      urls.push(`${opts.url}/websocket/${opts.slug}/`);
     }
     if (transport.includes("twilio")) {
-      log.info(`twilio  → ${opts.url}/twilio/${opts.slug}/voice`);
+      urls.push(`${opts.url}/twilio/${opts.slug}/voice`);
+    }
+    log.step("Deploy", `${opts.slug} → ${urls[0] ?? opts.url}`);
+    for (const url of urls.slice(1)) {
+      log.info(url);
     }
   } else {
     const text = await resp.text();

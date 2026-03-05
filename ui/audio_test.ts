@@ -1,246 +1,169 @@
 import { expect } from "@std/expect";
-import { createAudioPlayer, startMicCapture } from "./audio.ts";
+import { createVoiceIO } from "./audio.ts";
+import {
+  findWorkletNode,
+  MockAudioContext,
+  withAudioMocks,
+} from "./_test_utils.ts";
 
-class MockMediaStreamTrack {
-  stopped = false;
-  stop() {
-    this.stopped = true;
-  }
-}
+const noop = () => {};
 
-class MockMediaStream {
-  private tracks = [new MockMediaStreamTrack()];
-  getTracks() {
-    return this.tracks;
-  }
-}
-
-class MockMessagePort {
-  onmessage: ((e: MessageEvent) => void) | null = null;
-  posted: unknown[] = [];
-  postMessage(data: unknown, _transfer?: Transferable[]) {
-    this.posted.push(data);
-  }
-  simulateMessage(data: unknown) {
-    this.onmessage?.(new MessageEvent("message", { data }));
-  }
-}
-
-class MockAudioWorkletNode {
-  port = new MockMessagePort();
-  connected: MockAudioNode[] = [];
-  name: string;
-  options: unknown;
-  constructor(
-    _ctx: MockAudioContext,
-    name: string,
-    options?: unknown,
-  ) {
-    this.name = name;
-    this.options = options;
-  }
-  connect(dest: MockAudioNode) {
-    this.connected.push(dest);
-  }
-}
-
-class MockAudioNode {
-  connected: (MockAudioNode | MockAudioWorkletNode)[] = [];
-  connect(dest: MockAudioNode | MockAudioWorkletNode) {
-    this.connected.push(dest);
-  }
-}
-
-class MockGainNode extends MockAudioNode {
-  gain = { value: 1 };
-}
-
-class MockAudioContext {
-  sampleRate: number;
-  state: AudioContextState = "running";
-  destination = new MockAudioNode();
-  audioWorklet = {
-    modules: [] as string[],
-    addModule(url: string) {
-      this.modules.push(url);
-      return Promise.resolve();
-    },
-  };
-  closed = false;
-
-  constructor(opts?: { sampleRate?: number }) {
-    this.sampleRate = opts?.sampleRate ?? 44100;
-  }
-  resume() {
-    return Promise.resolve();
-  }
-  createMediaStreamSource(_stream: MockMediaStream) {
-    return new MockAudioNode();
-  }
-  createGain() {
-    return new MockGainNode();
-  }
-  close() {
-    this.closed = true;
-    this.state = "closed";
-    return Promise.resolve();
-  }
-}
-
-class MockWebSocket {
-  static readonly OPEN = 1;
-  static readonly CLOSED = 3;
-  readyState: number;
-  sent: unknown[] = [];
-
-  constructor(readyState = MockWebSocket.OPEN) {
-    this.readyState = readyState;
-  }
-  send(data: unknown) {
-    this.sent.push(data);
-  }
-}
-
-function withAudioMocks(
-  fn: (
-    ctx: {
-      lastContext: () => MockAudioContext;
-      lastWorkletNode: () => MockAudioWorkletNode;
-    },
-  ) => void | Promise<void>,
+function voiceOpts(
+  overrides?: Partial<Parameters<typeof createVoiceIO>[0]>,
 ) {
-  return async () => {
-    const origAudioContext = globalThis.AudioContext;
-    const origAudioWorkletNode = globalThis.AudioWorkletNode;
-    const origWebSocket = globalThis.WebSocket;
-    const origCreateObjectURL = URL.createObjectURL;
-    const origRevokeObjectURL = URL.revokeObjectURL;
-    // deno-lint-ignore no-explicit-any
-    const nav = globalThis.navigator as any;
-    const origGetUserMedia = nav?.mediaDevices?.getUserMedia;
-
-    let _lastContext: MockAudioContext;
-    let _lastWorkletNode: MockAudioWorkletNode;
-
-    // Mock AudioContext
-    // deno-lint-ignore no-explicit-any
-    (globalThis as any).AudioContext = class extends MockAudioContext {
-      constructor(opts?: { sampleRate?: number }) {
-        super(opts);
-        _lastContext = this;
-      }
-    };
-
-    // Mock AudioWorkletNode
-    // deno-lint-ignore no-explicit-any
-    (globalThis as any).AudioWorkletNode = class extends MockAudioWorkletNode {
-      constructor(ctx: MockAudioContext, name: string, options?: unknown) {
-        super(ctx, name, options);
-        _lastWorkletNode = this;
-      }
-    };
-
-    // Mock WebSocket constants
-    // deno-lint-ignore no-explicit-any
-    (globalThis as any).WebSocket = MockWebSocket;
-
-    // Mock getUserMedia
-    if (!nav.mediaDevices) nav.mediaDevices = {};
-    nav.mediaDevices.getUserMedia = () =>
-      Promise.resolve(new MockMediaStream());
-
-    // Mock URL blob methods
-    URL.createObjectURL = () => "blob:mock";
-    URL.revokeObjectURL = () => {};
-
-    try {
-      await fn({
-        lastContext: () => _lastContext,
-        lastWorkletNode: () => _lastWorkletNode,
-      });
-    } finally {
-      globalThis.AudioContext = origAudioContext;
-      globalThis.AudioWorkletNode = origAudioWorkletNode;
-      globalThis.WebSocket = origWebSocket;
-      URL.createObjectURL = origCreateObjectURL;
-      URL.revokeObjectURL = origRevokeObjectURL;
-      if (origGetUserMedia) {
-        nav.mediaDevices.getUserMedia = origGetUserMedia;
-      }
-    }
+  return {
+    sttSampleRate: 16000,
+    ttsSampleRate: 24000,
+    captureWorkletSrc: "cap",
+    playbackWorkletSrc: "play",
+    onMicData: noop,
+    ...overrides,
   };
 }
 
-Deno.test("startMicCapture", async (t) => {
+Deno.test("createVoiceIO", async (t) => {
   await t.step(
-    "returns a MicCapture with close()",
+    "returns a VoiceIO with enqueue, flush, close",
     withAudioMocks(async () => {
-      const ws = new MockWebSocket() as unknown as WebSocket;
-      const mic = await startMicCapture(ws, 16000, "mock-worklet-source");
-      expect(typeof mic.close).toBe("function");
-      mic.close();
+      const io = await createVoiceIO(voiceOpts());
+      expect(typeof io.enqueue).toBe("function");
+      expect(typeof io.flush).toBe("function");
+      expect(typeof io.close).toBe("function");
+      await io.close();
     }),
   );
 
   await t.step(
-    "loads the capture worklet module",
+    "uses TTS sample rate for the AudioContext",
     withAudioMocks(async ({ lastContext }) => {
-      const ws = new MockWebSocket() as unknown as WebSocket;
-      await startMicCapture(ws, 16000, "mock-worklet-source");
-      expect(lastContext().audioWorklet.modules).toHaveLength(1);
+      const io = await createVoiceIO(voiceOpts());
+      expect(lastContext().sampleRate).toBe(24000);
+      await io.close();
     }),
   );
 
   await t.step(
-    "creates AudioWorkletNode named 'pcm16'",
-    withAudioMocks(async ({ lastWorkletNode }) => {
-      const ws = new MockWebSocket() as unknown as WebSocket;
-      await startMicCapture(ws, 16000, "mock-worklet-source");
-      expect(lastWorkletNode().name).toBe("pcm16");
-    }),
-  );
-
-  await t.step(
-    "sends worklet audio frames to WebSocket when open",
-    withAudioMocks(async ({ lastWorkletNode }) => {
-      const ws = new MockWebSocket() as unknown as WebSocket;
-      await startMicCapture(ws, 16000, "mock-worklet-source");
-
-      const frame = new ArrayBuffer(3200);
-      lastWorkletNode().port.simulateMessage(frame);
-
-      expect((ws as unknown as MockWebSocket).sent).toHaveLength(1);
-      expect((ws as unknown as MockWebSocket).sent[0]).toBe(frame);
-    }),
-  );
-
-  await t.step(
-    "does not send when WebSocket is closed",
-    withAudioMocks(async ({ lastWorkletNode }) => {
-      const ws = new MockWebSocket(
-        MockWebSocket.CLOSED,
-      ) as unknown as WebSocket;
-      await startMicCapture(ws, 16000, "mock-worklet-source");
-
-      lastWorkletNode().port.simulateMessage(new ArrayBuffer(3200));
-      expect((ws as unknown as MockWebSocket).sent).toHaveLength(0);
-    }),
-  );
-
-  await t.step(
-    "close() stops media tracks and closes AudioContext",
+    "loads both worklet modules in parallel",
     withAudioMocks(async ({ lastContext }) => {
-      const ws = new MockWebSocket() as unknown as WebSocket;
-      const mic = await startMicCapture(ws, 16000, "mock-worklet-source");
+      const io = await createVoiceIO(voiceOpts());
+      expect(lastContext().audioWorklet.modules).toHaveLength(2);
+      await io.close();
+    }),
+  );
 
-      mic.close();
+  await t.step(
+    "creates capture node with channelCount: 1",
+    withAudioMocks(async ({ workletNodes }) => {
+      const io = await createVoiceIO(voiceOpts());
+      const capNode = findWorkletNode(workletNodes(), "capture-processor");
+      const opts = capNode.options as Record<string, unknown>;
+      expect(opts.channelCount).toBe(1);
+      expect(opts.channelCountMode).toBe("explicit");
+      await io.close();
+    }),
+  );
 
+  await t.step(
+    "capture sends start event on init",
+    withAudioMocks(async ({ workletNodes }) => {
+      const io = await createVoiceIO(voiceOpts());
+      const capNode = findWorkletNode(workletNodes(), "capture-processor");
+      expect(capNode.port.posted).toContainEqual({ event: "start" });
+      await io.close();
+    }),
+  );
+
+  await t.step(
+    "capture calls onMicData when worklet sends chunks",
+    withAudioMocks(async ({ workletNodes }) => {
+      const received: ArrayBuffer[] = [];
+      const io = await createVoiceIO(voiceOpts({
+        sttSampleRate: 16000,
+        ttsSampleRate: 16000,
+        onMicData: (buf) => received.push(buf),
+      }));
+      const capNode = findWorkletNode(workletNodes(), "capture-processor");
+
+      // Each worklet chunk is 128 samples * 2 bytes = 256 bytes
+      // bufferSamples = 16000 * 0.1 = 1600 samples = 3200 bytes
+      // Need ~13 chunks to fill the buffer
+      for (let i = 0; i < 13; i++) {
+        const buf = new ArrayBuffer(256);
+        const view = new Int16Array(buf);
+        view.fill(16384); // 0.5 in int16
+        capNode.port.simulateMessage({ event: "chunk", buffer: buf });
+      }
+
+      expect(received.length).toBeGreaterThanOrEqual(1);
+      const pcm16 = new Int16Array(received[0]);
+      expect(pcm16[0]).toBe(16384);
+      await io.close();
+    }),
+  );
+
+  await t.step(
+    "enqueue posts write event to playback worklet",
+    withAudioMocks(async ({ workletNodes }) => {
+      const io = await createVoiceIO(voiceOpts());
+      const playNode = findWorkletNode(workletNodes(), "playback-processor");
+
+      io.enqueue(new Int16Array([100, -200, 300]).buffer);
+
+      const writes = playNode.port.posted.filter(
+        (p) => (p as { event: string }).event === "write",
+      );
+      expect(writes).toHaveLength(1);
+      await io.close();
+    }),
+  );
+
+  await t.step(
+    "enqueue is a no-op after close",
+    withAudioMocks(async ({ workletNodes }) => {
+      const io = await createVoiceIO(voiceOpts());
+      const playNode = findWorkletNode(workletNodes(), "playback-processor");
+
+      await io.close();
+      const countBefore = playNode.port.posted.length;
+      io.enqueue(new Int16Array([100]).buffer);
+      expect(playNode.port.posted.length).toBe(countBefore);
+    }),
+  );
+
+  await t.step(
+    "flush sends interrupt to playback worklet",
+    withAudioMocks(async ({ workletNodes }) => {
+      const io = await createVoiceIO(voiceOpts());
+      const playNode = findWorkletNode(workletNodes(), "playback-processor");
+
+      io.enqueue(new Int16Array([1, 2, 3]).buffer);
+      io.flush();
+
+      expect(playNode.port.posted).toContainEqual({ event: "interrupt" });
+      await io.close();
+    }),
+  );
+
+  await t.step(
+    "close stops media tracks and closes AudioContext",
+    withAudioMocks(async ({ lastContext }) => {
+      const io = await createVoiceIO(voiceOpts());
+      await io.close();
       expect(lastContext().closed).toBe(true);
     }),
   );
 
   await t.step(
-    "cleans up stream and context on worklet load error",
+    "close is idempotent",
+    withAudioMocks(async () => {
+      const io = await createVoiceIO(voiceOpts());
+      await io.close();
+      await io.close(); // should not throw
+    }),
+  );
+
+  await t.step(
+    "cleans up on worklet load error",
     withAudioMocks(async () => {
       let _lastContext: MockAudioContext;
       // deno-lint-ignore no-explicit-any
@@ -252,107 +175,14 @@ Deno.test("startMicCapture", async (t) => {
         }
       };
 
-      const ws = new MockWebSocket() as unknown as WebSocket;
       let caught = false;
       try {
-        await startMicCapture(ws, 16000, "mock-worklet-source");
+        await createVoiceIO(voiceOpts());
       } catch {
         caught = true;
       }
       expect(caught).toBe(true);
       expect(_lastContext!.closed).toBe(true);
-    }),
-  );
-
-  await t.step(
-    "connects source → worklet → destination",
-    withAudioMocks(async ({ lastContext, lastWorkletNode }) => {
-      const ws = new MockWebSocket() as unknown as WebSocket;
-      await startMicCapture(ws, 16000, "mock-worklet-source");
-
-      expect(lastWorkletNode().connected).toContain(lastContext().destination);
-    }),
-  );
-});
-
-Deno.test("createAudioPlayer", async (t) => {
-  await t.step(
-    "returns an AudioPlayer with enqueue, flush, close",
-    withAudioMocks(async () => {
-      const player = await createAudioPlayer(24000, "mock-worklet-source");
-      expect(typeof player.enqueue).toBe("function");
-      expect(typeof player.flush).toBe("function");
-      expect(typeof player.close).toBe("function");
-      player.close();
-    }),
-  );
-
-  await t.step(
-    "creates AudioWorkletNode named 'pcm16-playback'",
-    withAudioMocks(async ({ lastWorkletNode }) => {
-      const player = await createAudioPlayer(24000, "mock-worklet-source");
-      expect(lastWorkletNode().name).toBe("pcm16-playback");
-      player.close();
-    }),
-  );
-
-  await t.step(
-    "enqueue() posts Float32Array converted from PCM16 to worklet port",
-    withAudioMocks(async ({ lastWorkletNode }) => {
-      const player = await createAudioPlayer(24000, "mock-worklet-source");
-
-      const pcm16 = new Int16Array([100, -200, 300]).buffer;
-      player.enqueue(pcm16);
-
-      expect(lastWorkletNode().port.posted).toHaveLength(1);
-      const posted = lastWorkletNode().port.posted[0] as Float32Array;
-      expect(posted).toBeInstanceOf(Float32Array);
-      expect(posted.length).toBe(3);
-      player.close();
-    }),
-  );
-
-  await t.step(
-    "enqueue() is a no-op when context is closed",
-    withAudioMocks(async ({ lastWorkletNode }) => {
-      const player = await createAudioPlayer(24000, "mock-worklet-source");
-      player.close(); // Closes context
-
-      player.enqueue(new ArrayBuffer(64));
-      expect(lastWorkletNode().port.posted).toHaveLength(0);
-    }),
-  );
-
-  await t.step(
-    "flush() posts 'flush' string to worklet port",
-    withAudioMocks(async ({ lastWorkletNode }) => {
-      const player = await createAudioPlayer(24000, "mock-worklet-source");
-
-      player.flush();
-
-      expect(lastWorkletNode().port.posted).toHaveLength(1);
-      expect(lastWorkletNode().port.posted[0]).toBe("flush");
-      player.close();
-    }),
-  );
-
-  await t.step(
-    "close() closes the AudioContext",
-    withAudioMocks(async ({ lastContext }) => {
-      const player = await createAudioPlayer(24000, "mock-worklet-source");
-      player.close();
-      expect(lastContext().closed).toBe(true);
-    }),
-  );
-
-  await t.step(
-    "connects worklet through gain to destination",
-    withAudioMocks(async ({ lastContext, lastWorkletNode }) => {
-      const player = await createAudioPlayer(24000, "mock-worklet-source");
-      const gainNode = lastWorkletNode().connected[0] as MockGainNode;
-      expect(gainNode).toBeInstanceOf(MockGainNode);
-      expect(gainNode.connected).toContain(lastContext().destination);
-      player.close();
     }),
   );
 });

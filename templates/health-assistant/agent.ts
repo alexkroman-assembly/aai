@@ -127,7 +127,7 @@ Use run_code for health calculations:
 - Weight-based dosage: dose_mg = weight_kg * dose_per_kg. Always note this is an estimate.`,
   greeting:
     "Hey, I'm Dr. Sage. Try asking me something like, what are the side effects of ibuprofen, can I take aspirin and warfarin together, or calculate my BMI. Just remember, I'm not a real doctor, so always check with your healthcare provider.",
-  voice: "tara",
+  voice: "luna",
   prompt: "",
   builtinTools: ["web_search", "run_code", "user_input", "final_answer"],
   tools: {
