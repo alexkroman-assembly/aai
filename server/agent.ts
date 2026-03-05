@@ -12,7 +12,6 @@ export interface AgentDef {
   readonly voice: string;
   readonly prompt?: string;
   readonly builtinTools?: readonly string[];
-  readonly muteOnReply?: boolean;
   readonly tools: Readonly<Record<string, ToolDef>>;
   readonly onConnect?: AgentOptions["onConnect"];
   readonly onDisconnect?: AgentOptions["onDisconnect"];
@@ -40,7 +39,6 @@ export function defineAgent(options: AgentOptions): AgentDef {
     voice: options.voice ?? "jess",
     prompt: options.prompt,
     builtinTools: options.builtinTools,
-    muteOnReply: options.muteOnReply,
     tools: options.tools ?? {},
     onConnect: options.onConnect,
     onDisconnect: options.onDisconnect,

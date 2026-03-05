@@ -18,7 +18,6 @@ interface AgentLike {
   readonly voice: string;
   readonly prompt?: string;
   readonly builtinTools?: readonly string[];
-  readonly muteOnReply?: boolean;
   readonly tools: Readonly<Record<string, ToolDef>>;
 }
 
@@ -49,7 +48,6 @@ export function startWorker(
     voice: agent.voice,
     prompt: agent.prompt,
     builtinTools: agent.builtinTools ? [...agent.builtinTools] : undefined,
-    muteOnReply: agent.muteOnReply,
   };
 
   const api: WorkerApi = {

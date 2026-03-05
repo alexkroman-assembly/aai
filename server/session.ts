@@ -103,12 +103,10 @@ export function createSession(opts: SessionOptions): Session {
     ((name: string, args: Record<string, unknown>) =>
       defaultExecuteBuiltinTool(name, args, secrets));
 
-  const muteOnReply = agentConfig.muteOnReply !== false;
   let stt: SttHandle | null = null;
   let turnAbort: AbortController | null = null;
   let turnPromise: Promise<void> | null = null;
   let stopped = false;
-  let muted = false;
   let audioFrameCount = 0;
   let pendingGreeting: string | null = null;
   let messages: ChatMessage[] = [{
@@ -156,7 +154,6 @@ export function createSession(opts: SessionOptions): Session {
   function cancelInflight(): void {
     turnAbort?.abort();
     turnAbort = null;
-    muted = false;
   }
 
   async function doConnectSttWithEvents(): Promise<void> {
@@ -243,16 +240,11 @@ export function createSession(opts: SessionOptions): Session {
 
       if (result) {
         trySendJson({ type: "chat", text: result });
-        if (muteOnReply) muted = true;
-        try {
-          await tts.synthesize(
-            result,
-            (chunk) => trySendBytes(chunk),
-            abort.signal,
-          );
-        } finally {
-          muted = false;
-        }
+        await tts.synthesize(
+          result,
+          (chunk) => trySendBytes(chunk),
+          abort.signal,
+        );
         if (!abort.signal.aborted) trySendJson({ type: "tts_done" });
       } else {
         trySendJson({ type: "tts_done" });
@@ -263,7 +255,6 @@ export function createSession(opts: SessionOptions): Session {
       logger.error("Chat failed", { error: msg });
       trySendJson({ type: "error", message: "Chat failed" });
     } finally {
-      muted = false;
       if (turnAbort === abort) turnAbort = null;
     }
   }
@@ -271,7 +262,6 @@ export function createSession(opts: SessionOptions): Session {
   function speakText(text: string): void {
     const abort = new AbortController();
     turnAbort = abort;
-    if (muteOnReply) muted = true;
     const p = tts
       .synthesize(text, (chunk) => trySendBytes(chunk), abort.signal)
       .then(() => {
@@ -279,7 +269,6 @@ export function createSession(opts: SessionOptions): Session {
       })
       .catch(() => {})
       .finally(() => {
-        muted = false;
         if (turnAbort === abort) turnAbort = null;
         if (turnPromise === p) turnPromise = null;
       });
@@ -317,7 +306,7 @@ export function createSession(opts: SessionOptions): Session {
           bytes: data.length,
         });
       }
-      if (!muted) stt?.send(data);
+      stt?.send(data);
     },
 
     onAudioReady(): void {

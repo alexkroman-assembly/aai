@@ -1,10 +1,10 @@
 {
-  "version": "0.1.2",
+  "version": "0.1.3",
   "workspace": ["server", "ui", "cli"],
   "tasks": {
     "setup": "git config core.hooksPath .githooks",
     "dev": "deno run --allow-net --allow-env --allow-read --allow-write --allow-run --unstable-worker-options cli/cli.ts dev",
-    "serve": "deno run --allow-net --allow-env --allow-read --unstable-worker-options server/main.ts",
+    "serve": "deno run --allow-net --allow-env --allow-read --allow-write --unstable-worker-options server/main.ts",
     "types": "deno run --allow-write --allow-env --allow-read cli/cli.ts types",
     "deploy": "deno run --allow-net --allow-env --allow-read --allow-write --allow-run cli/cli.ts deploy",
     "test": "deno test --allow-net --allow-read --allow-write --allow-env --allow-run --unstable-worker-options",

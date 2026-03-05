@@ -52,8 +52,8 @@ Deno.test("cli main", async (t) => {
     "prints command help with dev --help",
     withConsoleSpy(async (logged) => {
       expect(await main(["dev", "--help"])).toBe(0);
-      expect(logged[0]).toContain("--port");
-      expect(logged[0]).toContain("<number>");
+      expect(logged[0]).toContain("--local");
+      expect(logged[0]).toContain("--worker-port");
     }),
   );
 

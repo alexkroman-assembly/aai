@@ -25,7 +25,6 @@ export interface AgentOptions {
   onDisconnect?: (ctx: { sessionId: string }) => void | Promise<void>;
   onError?: (error: Error, ctx?: { sessionId: string }) => void;
   onTurn?: (text: string, ctx: { sessionId: string }) => void | Promise<void>;
-  muteOnReply?: boolean;
 }
 
 export const DEFAULT_INSTRUCTIONS: string = `\

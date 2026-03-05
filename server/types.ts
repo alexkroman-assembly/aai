@@ -134,5 +134,4 @@ export interface AgentConfig {
   voice: string;
   prompt?: string;
   builtinTools?: string[];
-  muteOnReply?: boolean;
 }

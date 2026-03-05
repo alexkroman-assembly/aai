@@ -69,7 +69,6 @@ interface AgentOptions {
   onDisconnect?: (ctx: { sessionId: string }) => void | Promise<void>;
   onError?: (error: Error, ctx?: { sessionId: string }) => void;
   onTurn?: (text: string, ctx: { sessionId: string }) => void | Promise<void>;
-  muteOnReply?: boolean;
 }
 
 interface AgentDef {
@@ -79,7 +78,6 @@ interface AgentDef {
   readonly voice: string;
   readonly prompt?: string;
   readonly builtinTools?: readonly string[];
-  readonly muteOnReply?: boolean;
   readonly tools: Readonly<Record<string, ToolDef>>;
   readonly onConnect?: AgentOptions["onConnect"];
   readonly onDisconnect?: AgentOptions["onDisconnect"];

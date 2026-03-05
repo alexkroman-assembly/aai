@@ -95,7 +95,10 @@ Deno.test("trackSessionClose", async (t) => {
         live: {
           slug: "test",
           name: "test",
-          worker: { terminate: () => {} } as unknown as Worker,
+          worker: { terminate() {} },
+          workerApi: {} as unknown,
+          config: {} as unknown,
+          toolSchemas: [],
         } as AgentSlot["live"],
       });
       trackSessionClose(slot);

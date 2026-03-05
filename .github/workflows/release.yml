@@ -165,6 +165,7 @@ jobs:
             license "MIT"
 
             depends_on "esbuild"
+            depends_on "cloudflare/cloudflare/cloudflared"
 
             on_macos do
               on_arm do

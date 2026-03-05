@@ -16,32 +16,18 @@ export function createTtsClient(config: TTSConfig) {
     return ws;
   }
 
-  function closeWarm(): void {
+  function warmUp(): void {
+    if (disposed || !config.apiKey) return;
+
     if (warmWs) {
       safeClose(warmWs);
       warmWs = null;
     }
-  }
 
-  function warmUp(): void {
-    if (disposed || !config.apiKey) return;
-
-    closeWarm();
-
-    let ws: WebSocket;
-    try {
-      ws = makeWs();
-    } catch (err: unknown) {
-      log.warn("warmUp: failed to create WebSocket", { error: err });
-      return;
-    }
-
-    ws.addEventListener("error", (e) => {
-      const msg = e instanceof ErrorEvent ? e.message : "unknown";
-      log.warn("warmUp failed", { error: msg });
+    const ws = makeWs();
+    ws.addEventListener("error", () => {
       if (warmWs === ws) warmWs = null;
     });
-
     warmWs = ws;
   }
 
@@ -152,6 +138,12 @@ export function createTtsClient(config: TTSConfig) {
         return Promise.resolve();
       }
 
+      if (!config.apiKey) {
+        throw new Error(
+          "TTS API key not configured — set ASSEMBLYAI_TTS_API_KEY on the server",
+        );
+      }
+
       log.info("synthesize start", {
         textLength: text.length,
         text: text.length > 200 ? text.slice(0, 200) + "\u2026" : text,
@@ -164,7 +156,10 @@ export function createTtsClient(config: TTSConfig) {
         warmWs = null;
         log.info("using warm WebSocket");
       } else {
-        closeWarm();
+        if (warmWs) {
+          safeClose(warmWs);
+          warmWs = null;
+        }
         ws = makeWs();
         log.info("created new WebSocket");
       }
@@ -173,7 +168,10 @@ export function createTtsClient(config: TTSConfig) {
     },
     close(): void {
       disposed = true;
-      closeWarm();
+      if (warmWs) {
+        safeClose(warmWs);
+        warmWs = null;
+      }
     },
   };
 }

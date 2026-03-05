@@ -104,10 +104,15 @@ export function createSandboxRpc(port: Worker | MessagePort): SandboxApi {
   };
 }
 
+/** A minimal subset of Worker used for lifecycle management. */
+export interface WorkerHandle {
+  terminate(): void;
+}
+
 export interface AgentInfo {
   slug: string;
   name: string;
-  worker: Worker;
+  worker: WorkerHandle;
   workerApi: WorkerApi;
   config: AgentConfig;
   toolSchemas: ToolSchema[];
@@ -117,10 +122,56 @@ export interface AgentSlot {
   slug: string;
   env: Record<string, string>;
   transport: ("websocket" | "twilio")[];
+  workerUrl?: string;
   live?: AgentInfo;
   initializing?: Promise<AgentInfo>;
   activeSessions: number;
   idleTimer?: ReturnType<typeof setTimeout>;
+}
+
+/** Create a WorkerApi that communicates with a remote worker over HTTP RPC. */
+export function createHttpWorkerRpc(workerUrl: string): WorkerApi {
+  const rpcUrl = workerUrl.replace(/\/$/, "") + "/rpc";
+  return {
+    async getConfig(timeoutMs?: number) {
+      const controller = new AbortController();
+      const timer = timeoutMs
+        ? setTimeout(() => controller.abort(), timeoutMs)
+        : undefined;
+      try {
+        const resp = await fetch(rpcUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "getConfig" }),
+          signal: controller.signal,
+        });
+        const data = await resp.json();
+        if (data.error) throw new Error(data.error);
+        return data as { config: AgentConfig; toolSchemas: ToolSchema[] };
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    },
+    async executeTool(name, args, timeoutMs?) {
+      const controller = new AbortController();
+      const timer = timeoutMs
+        ? setTimeout(() => controller.abort(), timeoutMs)
+        : undefined;
+      try {
+        const resp = await fetch(rpcUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "executeTool", name, args }),
+          signal: controller.signal,
+        });
+        const data = await resp.json();
+        if (data.error) throw new Error(data.error);
+        return data.result as string;
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    },
+  };
 }
 
 export function createRpcToolExecutor(
@@ -135,17 +186,44 @@ export async function spawnAgent(
 ): Promise<AgentInfo> {
   const { slug } = slot;
 
+  // Use HTTP RPC for remote workers (dev mode via cloudflared)
+  if (slot.workerUrl) {
+    log.info("Connecting to remote worker", { slug, url: slot.workerUrl });
+    const workerApi = createHttpWorkerRpc(slot.workerUrl);
+
+    const info = await workerApi.getConfig(15_000);
+
+    const agentConfig: AgentConfig = {
+      instructions: info.config.instructions,
+      greeting: info.config.greeting,
+      voice: info.config.voice,
+      prompt: info.config.prompt,
+      builtinTools: info.config.builtinTools,
+    };
+
+    const allToolSchemas = [
+      ...info.toolSchemas,
+      ...getBuiltinToolSchemas(agentConfig.builtinTools ?? []),
+    ];
+
+    return {
+      slug,
+      name: info.config.name ?? slug,
+      worker: { terminate() {} }, // no-op stub for remote worker
+      workerApi,
+      config: agentConfig,
+      toolSchemas: allToolSchemas,
+    };
+  }
+
   log.info("Spawning agent worker", { slug });
 
-  let workerUrl: string;
-  if (getWorkerCode) {
-    const code = await getWorkerCode(slug);
-    if (!code) throw new Error(`Worker code not found for ${slug}`);
-    workerUrl = `data:application/javascript;base64,${btoa(code)}`;
-  } else {
-    const port = parseInt(Deno.env.get("PORT") ?? "3000");
-    workerUrl = `http://localhost:${port}/_internal/worker/${slug}.js`;
+  if (!getWorkerCode) {
+    throw new Error(`No worker code source for ${slug}`);
   }
+  const code = await getWorkerCode(slug);
+  if (!code) throw new Error(`Worker code not found for ${slug}`);
+  const workerUrl = `data:application/javascript;base64,${btoa(code)}`;
 
   // deno-lint-ignore no-explicit-any
   const worker = new (Worker as any)(workerUrl, {
@@ -187,7 +265,6 @@ export async function spawnAgent(
     voice: info.config.voice,
     prompt: info.config.prompt,
     builtinTools: info.config.builtinTools,
-    muteOnReply: info.config.muteOnReply,
   };
 
   const allToolSchemas = [

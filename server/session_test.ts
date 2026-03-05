@@ -5,7 +5,6 @@ import {
   createMockLLMResponse,
   createMockSessionOptions,
   type createMockTransport,
-  createMockTtsClient,
   getSentJson,
   responses,
 } from "./_test_utils.ts";
@@ -129,123 +128,6 @@ Deno.test("createSession", async (t) => {
       });
       session.start();
       expect(() => session.onAudio(new Uint8Array([1]))).not.toThrow();
-    });
-  });
-
-  await t.step("muteOnReply", async (t) => {
-    await t.step("mutes audio to STT during TTS (default)", async () => {
-      const sttSendCalls: Uint8Array[] = [];
-      // We need a reference to session before ctx is created, so declare first
-      let sessionRef: ReturnType<typeof createSession> | null = null;
-      const ttsClient = createMockTtsClient();
-      const origSynthesize = ttsClient.synthesize.bind(ttsClient);
-      ttsClient.synthesize = function (text, onAudio, signal) {
-        // Send audio during TTS to simulate echo
-        sessionRef!.onAudio(new Uint8Array([99]));
-        return origSynthesize(text, onAudio, signal);
-      };
-
-      const ctx = setupWithSttEvents({
-        connectStt: (_key, _config, sttEvents) => {
-          ctx.events.current = sttEvents;
-          return Promise.resolve({
-            send: (data: Uint8Array) => sttSendCalls.push(data),
-            clear: () => {},
-            close: () => {},
-          });
-        },
-        ttsClient,
-      });
-      sessionRef = ctx.session;
-      await ctx.session.start();
-
-      // Audio before TTS should go through
-      ctx.session.onAudio(new Uint8Array([1]));
-      expect(sttSendCalls.length).toBe(1);
-
-      ctx.events.current!.onTurn("Hello");
-      await ctx.session.waitForTurn();
-
-      // The audio sent during TTS (byte 99) should NOT have been forwarded
-      expect(sttSendCalls.length).toBe(1);
-
-      // Audio after TTS completes should go through again
-      ctx.session.onAudio(new Uint8Array([2]));
-      expect(sttSendCalls.length).toBe(2);
-    });
-
-    await t.step(
-      "does not mute audio during TTS when muteOnReply is false",
-      async () => {
-        const sttSendCalls: Uint8Array[] = [];
-        let sessionRef: ReturnType<typeof createSession> | null = null;
-        const ttsClient = createMockTtsClient();
-        const origSynthesize = ttsClient.synthesize.bind(ttsClient);
-        ttsClient.synthesize = function (text, onAudio, signal) {
-          sessionRef!.onAudio(new Uint8Array([99]));
-          return origSynthesize(text, onAudio, signal);
-        };
-
-        const ctx = setupWithSttEvents(
-          {
-            connectStt: (_key, _config, sttEvents) => {
-              ctx.events.current = sttEvents;
-              return Promise.resolve({
-                send: (data: Uint8Array) => sttSendCalls.push(data),
-                clear: () => {},
-                close: () => {},
-              });
-            },
-            ttsClient,
-          },
-          { muteOnReply: false },
-        );
-        sessionRef = ctx.session;
-        await ctx.session.start();
-
-        ctx.events.current!.onTurn("Hello");
-        await ctx.session.waitForTurn();
-
-        // Audio during TTS should have been forwarded
-        expect(sttSendCalls.some((d) => d[0] === 99)).toBe(true);
-      },
-    );
-
-    await t.step("unmutes on cancel", async () => {
-      let ttsResolve: (() => void) | null = null;
-      const sttSendCalls: Uint8Array[] = [];
-      const ttsClient = createMockTtsClient();
-      ttsClient.synthesize = function (_text, _onAudio, _signal) {
-        return new Promise<void>((resolve) => {
-          ttsResolve = resolve;
-        });
-      };
-
-      const ctx = setupWithSttEvents({
-        connectStt: (_key, _config, sttEvents) => {
-          ctx.events.current = sttEvents;
-          return Promise.resolve({
-            send: (data: Uint8Array) => sttSendCalls.push(data),
-            clear: () => {},
-            close: () => {},
-          });
-        },
-        ttsClient,
-      });
-      await ctx.session.start();
-
-      ctx.events.current!.onTurn("Hello");
-      // Wait for TTS to start (turn handler is async)
-      await new Promise<void>((r) => setTimeout(r, 10));
-
-      // Cancel while TTS is in-flight
-      ctx.session.onCancel();
-      ttsResolve!();
-      await ctx.session.waitForTurn().catch(() => {});
-
-      // Audio should flow again after cancel
-      ctx.session.onAudio(new Uint8Array([3]));
-      expect(sttSendCalls.length).toBeGreaterThan(0);
     });
   });
 

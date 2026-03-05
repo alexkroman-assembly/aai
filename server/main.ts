@@ -22,7 +22,7 @@ if (bucket && Deno.env.get("AWS_ENDPOINT_URL_S3")) {
 }
 const { app } = createOrchestrator({ store });
 
-const port = parseInt(Deno.env.get("PORT") ?? "3000");
+const port = parseInt(Deno.env.get("PORT") ?? "3100");
 const server = Deno.serve(
   { port, hostname: "0.0.0.0", onListen: () => {} },
   app.fetch,

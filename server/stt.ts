@@ -40,6 +40,10 @@ export async function connectStt(
   }
 
   const url = `${config.wssBase}?${params}`;
+  log.info("Connecting to STT", {
+    url: config.wssBase,
+    params: Object.fromEntries(params),
+  });
   const ws = createWebSocket(url, { Authorization: apiKey });
 
   const ac = new AbortController();
@@ -49,9 +53,25 @@ export async function connectStt(
     const handle = await deadline(
       new Promise<SttHandle>((resolve, reject) => {
         ws.addEventListener("open", () => {
+          log.info("STT WebSocket connected");
+          let audioSendCount = 0;
           resolve({
             send(audio: Uint8Array) {
-              if (ws.readyState === WebSocket.OPEN) ws.send(audio);
+              if (ws.readyState === WebSocket.OPEN) {
+                audioSendCount++;
+                if (audioSendCount <= 5 || audioSendCount % 100 === 0) {
+                  log.debug("STT audio send", {
+                    count: audioSendCount,
+                    bytes: audio.length,
+                    wsState: ws.readyState,
+                  });
+                }
+                ws.send(audio);
+              } else {
+                log.warn("STT send skipped, ws not open", {
+                  wsState: ws.readyState,
+                });
+              }
             },
             clear() {
               if (ws.readyState === WebSocket.OPEN) {
@@ -66,10 +86,17 @@ export async function connectStt(
 
         let msgCount = 0;
         ws.addEventListener("message", (event: MessageEvent) => {
-          if (typeof event.data !== "string") return;
+          if (typeof event.data !== "string") {
+            log.debug("STT non-string message", {
+              dataType: typeof event.data,
+            });
+            return;
+          }
           const parsed = safeParseJSON(event.data);
           if (parsed === null) {
-            log.warn("Failed to parse message");
+            log.warn("Failed to parse STT message", {
+              raw: (event.data as string).slice(0, 200),
+            });
             return;
           }
 
@@ -77,15 +104,22 @@ export async function connectStt(
           if (!result.success) {
             log.warn("Invalid STT message, skipping", {
               error: result.error.message,
+              raw: JSON.stringify(parsed).slice(0, 200),
             });
             return;
           }
 
           const msg = result.data;
           msgCount++;
-          if (msgCount <= 5) {
-            log.debug("STT message", { msgCount, type: msg.type });
-          }
+          log.info("STT message", {
+            msgCount,
+            type: msg.type,
+            transcript: msg.transcript?.slice(0, 100),
+            isFinal: msg.is_final,
+            turnOrder: msg.turn_order,
+            endOfTurn: msg.end_of_turn,
+            turnIsFormatted: msg.turn_is_formatted,
+          });
           if (msg.type === "Termination") {
             events.onTermination(
               msg.audio_duration_seconds ?? 0,
@@ -114,6 +148,11 @@ export async function connectStt(
         });
 
         ws.addEventListener("close", (event: CloseEvent) => {
+          log.info("STT WebSocket closed", {
+            code: event.code,
+            reason: event.reason ?? "",
+            msgCount,
+          });
           ac.abort();
           if (event.code !== 1000 && event.code !== 1005) {
             log.error("WebSocket closed unexpectedly", {

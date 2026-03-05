@@ -91,7 +91,18 @@ ${bold("USAGE:")}
     ${cyan("aai dev")} ${dim("[options]")}
 
 ${bold("OPTIONS:")}
-    ${cyan("-p, --port")} <number>  Server port ${dim("(default: 3000)")}
+    ${cyan("--local")}                   Use local server on :3100 (${
+          dim("deno task serve")
+        })
+    ${cyan("--worker-port")} <number>    Local worker port ${
+          dim("(default: 9100)")
+        }
+
+Runs the agent worker locally and deploys to the remote server via cloudflared.
+Use ${cyan("--local")} to target a local server instead (no cloudflared needed).
+Requires ${cyan("cloudflared")} for remote servers (${
+          dim("brew install cloudflare/cloudflare/cloudflared")
+        }).
 
 ${bold("ENVIRONMENT VARIABLES:")}
 ${ENV_VARS.slice(0, 3).join("\n")}
@@ -197,12 +208,18 @@ ${ENV_VARS.filter((_, i) => i !== 3).join("\n")}
     }
     case "dev": {
       const flags = parseArgs(rest, {
-        string: ["port"],
-        alias: { p: "port" },
+        boolean: ["local"],
+        string: ["worker-port"],
       });
       const agentDir = resolveAgentDir();
       const { runDev } = await import("./dev.ts");
-      await runDev({ port: Number(flags.port) || 3000, agentDir });
+      await runDev({
+        agentDir,
+        workerPort: Number(flags["worker-port"]) || 9100,
+        serverUrl: flags.local
+          ? "http://localhost:3100"
+          : "https://voice-agent-api.fly.dev",
+      });
       return 0;
     }
     case "types": {
