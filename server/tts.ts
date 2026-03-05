@@ -138,12 +138,6 @@ export function createTtsClient(config: TTSConfig) {
         return Promise.resolve();
       }
 
-      if (!config.apiKey) {
-        throw new Error(
-          "TTS API key not configured — set ASSEMBLYAI_TTS_API_KEY on the server",
-        );
-      }
-
       log.info("synthesize start", {
         textLength: text.length,
         text: text.length > 200 ? text.slice(0, 200) + "\u2026" : text,

@@ -1,6 +1,7 @@
 import { createOrchestrator } from "./orchestrator.ts";
 import { createS3Client, TigrisBundleStore } from "./bundle_store_tigris.ts";
 import { getLogger } from "./logger.ts";
+import { validateServerEnv } from "./config.ts";
 
 const log = getLogger("server");
 
@@ -8,6 +9,8 @@ try {
   const { load } = await import("@std/dotenv");
   await load({ export: true });
 } catch { /* .env not found — fine */ }
+
+validateServerEnv();
 
 const bucket = Deno.env.get("BUCKET_NAME") ?? "local";
 let s3;

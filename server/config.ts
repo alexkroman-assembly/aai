@@ -12,6 +12,22 @@ const EnvSchema = z.object({
   LLM_MODEL: z.string().optional(),
 });
 
+const ServerEnvSchema = z.object({
+  ASSEMBLYAI_TTS_API_KEY: z.string().min(
+    1,
+    "ASSEMBLYAI_TTS_API_KEY is required",
+  ),
+  BRAVE_API_KEY: z.string().min(1, "BRAVE_API_KEY is required"),
+});
+
+/** Validate that all required server environment variables are set. Throws on failure. */
+export function validateServerEnv(): void {
+  ServerEnvSchema.parse({
+    ASSEMBLYAI_TTS_API_KEY: Deno.env.get("ASSEMBLYAI_TTS_API_KEY"),
+    BRAVE_API_KEY: Deno.env.get("BRAVE_API_KEY"),
+  });
+}
+
 export interface PlatformConfig {
   apiKey: string;
   sttConfig: STTConfig;
