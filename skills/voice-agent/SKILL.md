@@ -164,16 +164,21 @@ ASSEMBLYAI_API_KEY=<user needs to add>
 
 3. **`env.example`** — same as `.env` but without values, for version control.
 
-## Running the agent
+## Running and deploying the agent
 
 After creating files, tell the user to run:
 ```sh
-aai dev
+aai
 ```
 
-To point at a local server:
+This single command runs the agent locally in dev mode. To point at a local server:
 ```sh
-aai dev --url http://localhost:3100
+aai --url http://localhost:3100
+```
+
+To deploy the agent:
+```sh
+aai deploy
 ```
 
 If they don't have aai installed:
