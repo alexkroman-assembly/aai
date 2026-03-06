@@ -18,6 +18,7 @@ import type {
   ToolSchema,
 } from "./types.ts";
 import { DEFAULT_GREETING } from "../sdk/types.ts";
+import type { WorkerApi } from "../sdk/_worker_entry.ts";
 import { buildSystemPrompt } from "./system_prompt.ts";
 
 export interface SessionTransport {
@@ -33,6 +34,7 @@ export interface SessionOptions {
   platformConfig: PlatformConfig;
   executeTool: ExecuteTool;
   secrets?: Record<string, string | undefined>;
+  workerApi?: WorkerApi;
   skipGreeting?: boolean;
   connectStt?(
     apiKey: string,
@@ -231,6 +233,12 @@ export function createSession(opts: SessionOptions): Session {
       ...(turnOrder !== undefined ? { turn_order: turnOrder } : {}),
     });
 
+    if (opts.workerApi) {
+      opts.workerApi.invokeHook("onTurn", id, { text }, 5_000).catch(
+        (err: unknown) => logger.error("onTurn hook failed", { err }),
+      );
+    }
+
     const abort = new AbortController();
     turnAbort = abort;
 
@@ -292,6 +300,14 @@ export function createSession(opts: SessionOptions): Session {
       const greeting = agentConfig.greeting ?? DEFAULT_GREETING;
       if (greeting) pendingGreeting = greeting;
 
+      if (opts.workerApi) {
+        try {
+          await opts.workerApi.invokeHook("onConnect", id, undefined, 5_000);
+        } catch (err: unknown) {
+          logger.error("onConnect hook failed", { err });
+        }
+      }
+
       await doConnectSttWithEvents();
       trySendJson({
         type: "ready",
@@ -308,6 +324,14 @@ export function createSession(opts: SessionOptions): Session {
       if (pending) await pending;
       stt?.close();
       tts.close();
+
+      if (opts.workerApi) {
+        try {
+          await opts.workerApi.invokeHook("onDisconnect", id, undefined, 5_000);
+        } catch (err: unknown) {
+          logger.error("onDisconnect hook failed", { err });
+        }
+      }
     },
 
     onAudio(data: Uint8Array): void {

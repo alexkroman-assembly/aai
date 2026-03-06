@@ -202,6 +202,7 @@ export async function handleTwilioStream(
     toolSchemas: info.toolSchemas,
     platformConfig: loadPlatformConfig(slot.env),
     executeTool: createRpcToolExecutor(info.workerApi),
+    workerApi: info.workerApi,
     secrets: slot.env,
   });
 

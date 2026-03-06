@@ -29,6 +29,11 @@ interface ToolContext {
   signal?: AbortSignal;
 }
 
+interface HookContext {
+  sessionId: string;
+  secrets: Record<string, string>;
+}
+
 interface ToolDef {
   description: string;
   parameters: ToolParameters | SimpleToolParameters;
@@ -43,10 +48,10 @@ interface AgentOptions {
   prompt?: string;
   builtinTools?: string[];
   tools?: Record<string, ToolDef>;
-  onConnect?: (ctx: { sessionId: string }) => void | Promise<void>;
-  onDisconnect?: (ctx: { sessionId: string }) => void | Promise<void>;
-  onError?: (error: Error, ctx?: { sessionId: string }) => void;
-  onTurn?: (text: string, ctx: { sessionId: string }) => void | Promise<void>;
+  onConnect?: (ctx: HookContext) => void | Promise<void>;
+  onDisconnect?: (ctx: HookContext) => void | Promise<void>;
+  onError?: (error: Error, ctx?: HookContext) => void;
+  onTurn?: (text: string, ctx: HookContext) => void | Promise<void>;
 }
 
 interface AgentDef {
@@ -65,10 +70,10 @@ interface AgentDef {
 
 declare function defineAgent(options: AgentOptions): AgentDef;
 
-declare function fetchJSON(
+declare function fetchJSON<T = unknown>(
   url: string,
   init?: RequestInit & { fetch?: typeof globalThis.fetch },
-): Promise<unknown>;
+): Promise<T>;
 
 // -- UI types -----------------------------------------------------------------
 type AgentState =

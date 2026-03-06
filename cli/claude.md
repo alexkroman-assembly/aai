@@ -84,6 +84,11 @@ interface ToolContext {
   signal?: AbortSignal;
 }
 
+interface HookContext {
+  sessionId: string;
+  secrets: Record<string, string>; // env vars from .env — same as ToolContext.secrets
+}
+
 interface AgentOptions {
   name: string; // Required: display name
   instructions?: string; // System prompt (voice-first default provided)
@@ -92,10 +97,10 @@ interface AgentOptions {
   prompt?: string; // TTS voice guidance (pacing, tone, emotion)
   builtinTools?: BuiltinTool[]; // Subset of built-in tools to enable
   tools?: Record<string, ToolDef>; // Custom tools keyed by name
-  onConnect?: (ctx: { sessionId: string }) => void | Promise<void>;
-  onDisconnect?: (ctx: { sessionId: string }) => void | Promise<void>;
-  onError?: (error: Error, ctx?: { sessionId: string }) => void;
-  onTurn?: (text: string, ctx: { sessionId: string }) => void | Promise<void>;
+  onConnect?: (ctx: HookContext) => void | Promise<void>;
+  onDisconnect?: (ctx: HookContext) => void | Promise<void>;
+  onError?: (error: Error, ctx?: HookContext) => void;
+  onTurn?: (text: string, ctx: HookContext) => void | Promise<void>;
 }
 ```
 
@@ -132,15 +137,52 @@ parameters: {
 
 Full JSON Schema (`type: "object"`, `properties`, `required`) is also supported.
 
-For tools that call external APIs, use `fetchJSON`:
+For tools that call external APIs, use `fetchJSON`. It supports a generic type
+parameter for type-safe responses:
 
 ```ts
+interface SearchResult { items: { title: string; url: string }[] }
+
 execute: async ({ query }, ctx) => {
-  const data = await fetchJSON("https://api.example.com/data?q=" + encodeURIComponent(query), {
+  const data = await fetchJSON<SearchResult>("https://api.example.com/data?q=" + encodeURIComponent(query), {
     fetch: ctx.fetch,
   });
-  return data;
+  return data.items;
 },
+```
+
+## Environment variables and secrets
+
+Variables listed in `agent.json`'s `env` array are loaded from `.env` (or the
+process environment) and passed as `ctx.secrets` — a `Record<string, string>` —
+in both tool `execute` functions and lifecycle hooks. They are **not** available
+via `Deno.env` inside agent code.
+
+```ts
+// agent.json: { "env": ["ASSEMBLYAI_API_KEY", "MY_API_KEY"] }
+// .env:       MY_API_KEY=sk-abc123
+
+export default defineAgent({
+  name: "My Agent",
+  tools: {
+    call_api: {
+      description: "Call an external API",
+      parameters: { query: "search query" },
+      execute: async ({ query }, ctx) => {
+        // Access env vars via ctx.secrets
+        const key = ctx.secrets.MY_API_KEY;
+        const res = await ctx.fetch(`https://api.example.com?q=${query}`, {
+          headers: { Authorization: `Bearer ${key}` },
+        });
+        return res.json();
+      },
+    },
+  },
+  onConnect: (ctx) => {
+    // Same secrets available in hooks
+    console.log("Connected:", ctx.sessionId, ctx.secrets.MY_API_KEY);
+  },
+});
 ```
 
 ## Voice-first instructions guidelines
@@ -325,7 +367,9 @@ After creating `agent.ts`, also create:
 - `slug` (string, required) — Unique agent identifier used in URLs
 - `env` (string[], required) — Environment variable names required by the agent.
   Must include `"ASSEMBLYAI_API_KEY"`. Values are read from `.env` or the
-  process environment.
+  process environment. These are passed as `ctx.secrets` in both tool `execute`
+  functions and lifecycle hooks (`onConnect`, `onDisconnect`, `onTurn`,
+  `onError`). They are **not** injected into `Deno.env`.
 - `transport` (optional) — Either a single transport string or an array:
   `"websocket"` | `"twilio"`. Defaults to `["websocket"]`.
 - `npm` (optional) — Object mapping npm package names to version ranges. When
@@ -348,11 +392,11 @@ After creating files, tell the user to run:
 aai
 ```
 
-This single command runs the agent locally in dev mode. To point at a local
-server:
+This single command runs the agent locally in dev mode. To type-check, validate,
+and bundle without deploying:
 
 ```sh
-aai --url http://localhost:3100
+aai --dry-run
 ```
 
 If they don't have aai installed:

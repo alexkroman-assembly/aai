@@ -5,6 +5,7 @@ declare global {
   const fetchJSON: typeof import("@aai/sdk/fetch-json").fetchJSON;
   const z: typeof import("zod");
   type ToolContext = import("@aai/sdk/types").ToolContext;
+  type HookContext = import("@aai/sdk/types").HookContext;
   type ToolDef = import("@aai/sdk/types").ToolDef;
   type ParamShorthand = import("@aai/sdk/types").ParamShorthand;
   type SimpleToolParameters = import("@aai/sdk/types").SimpleToolParameters;

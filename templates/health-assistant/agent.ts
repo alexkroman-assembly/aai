@@ -9,10 +9,10 @@ async function lookupDrug(
   const q = encodeURIComponent(name.toLowerCase());
   let raw: Record<string, unknown>;
   try {
-    raw = await fetchJSON(
+    raw = await fetchJSON<Record<string, unknown>>(
       `https://api.fda.gov/drug/label.json?search=openfda.generic_name:"${q}"+openfda.brand_name:"${q}"&limit=1`,
       { fetch: ctx.fetch },
-    ) as Record<string, unknown>;
+    );
   } catch {
     return { error: `Drug not found: ${name}` };
   }
@@ -43,12 +43,12 @@ async function resolveRxCui(
   ctx: ToolContext,
 ): Promise<RxCui | null> {
   try {
-    const raw = await fetchJSON(
+    const raw = await fetchJSON<{ idGroup: { rxnormId?: string[] } }>(
       `https://rxnav.nlm.nih.gov/REST/rxcui.json?name=${
         encodeURIComponent(name)
       }`,
       { fetch: ctx.fetch },
-    ) as { idGroup: { rxnormId?: string[] } };
+    );
     const id = raw.idGroup.rxnormId?.[0];
     return id ? { name, rxcui: id } : null;
   } catch {
@@ -76,10 +76,10 @@ async function checkInteractions(
   const rxcuiList = resolved.map((r) => r.rxcui).join("+");
   let raw: Record<string, unknown>;
   try {
-    raw = await fetchJSON(
+    raw = await fetchJSON<Record<string, unknown>>(
       `https://rxnav.nlm.nih.gov/REST/interaction/list.json?rxcuis=${rxcuiList}`,
       { fetch: ctx.fetch },
-    ) as Record<string, unknown>;
+    );
   } catch {
     return { error: "Interaction lookup failed" };
   }

@@ -53,7 +53,11 @@ export async function main(args: string[]): Promise<number> {
     return 0;
   }
 
-  await promptUpgradeIfAvailable(VERSION);
+  // Skip update check when running via `deno run` (aai-dev) — only check for compiled binary
+  const isCompiled = !Deno.execPath().endsWith("deno");
+  if (isCompiled) {
+    await promptUpgradeIfAvailable(VERSION);
+  }
 
   const { getApiKey } = await import("./_discover.ts");
   const cwd = Deno.env.get("INIT_CWD") || Deno.cwd();

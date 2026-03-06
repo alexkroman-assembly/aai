@@ -5,10 +5,10 @@ export class HttpError extends Error {
   }
 }
 
-export async function fetchJSON(
+export async function fetchJSON<T = unknown>(
   url: string,
   init?: RequestInit & { fetch?: typeof globalThis.fetch },
-): Promise<unknown> {
+): Promise<T> {
   const { fetch: fetchFn = globalThis.fetch, ...rest } = init ?? {};
   const resp = await fetchFn(url, rest);
   if (!resp.ok) throw new HttpError(resp.status, resp.statusText);

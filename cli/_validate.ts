@@ -1,4 +1,4 @@
-import { resolve } from "@std/path";
+import { dirname, join, resolve } from "@std/path";
 import { toFileUrl } from "@std/path/to-file-url";
 import type { AgentEntry } from "./_discover.ts";
 
@@ -37,14 +37,18 @@ export async function validateAgent(
   };
 
   let mod: Record<string, unknown>;
+  // Copy source to a temp .ts file for cache-busting. A query parameter on the
+  // file URL (e.g. ?t=...) causes Deno to lose the TypeScript media-type, so
+  // top-level type annotations would fail with "Unexpected token ':'".
+  const tmpName = `.aai-validate-${Date.now()}.ts`;
+  const tmpPath = join(dirname(resolve(agent.entryPoint)), tmpName);
   try {
     const { defineAgent } = await import("../sdk/define_agent.ts");
     const { fetchJSON } = await import("../sdk/fetch_json.ts");
     Object.assign(globalThis, { defineAgent, fetchJSON });
 
-    mod = await import(
-      `${toFileUrl(resolve(agent.entryPoint)).href}?t=${Date.now()}`
-    );
+    await Deno.copyFile(resolve(agent.entryPoint), tmpPath);
+    mod = await import(toFileUrl(tmpPath).href);
   } catch (cause) {
     errors.push({
       field: "agent.ts",
@@ -54,6 +58,7 @@ export async function validateAgent(
     });
     return { errors };
   } finally {
+    await Deno.remove(tmpPath).catch(() => {});
     for (const [k, v] of Object.entries(saved)) {
       if (v === undefined) {
         delete (globalThis as Record<string, unknown>)[k];

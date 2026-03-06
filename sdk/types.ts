@@ -6,6 +6,11 @@ export interface ToolContext {
   signal?: AbortSignal;
 }
 
+export interface HookContext {
+  sessionId: string;
+  secrets: Record<string, string>;
+}
+
 /** JSON Schema property definition. */
 export interface JSONSchemaProperty {
   type?: string;
@@ -126,10 +131,10 @@ export interface AgentOptions {
   prompt?: string;
   builtinTools?: BuiltinTool[];
   tools?: Record<string, ToolDef>;
-  onConnect?: (ctx: { sessionId: string }) => void | Promise<void>;
-  onDisconnect?: (ctx: { sessionId: string }) => void | Promise<void>;
-  onError?: (error: Error, ctx?: { sessionId: string }) => void;
-  onTurn?: (text: string, ctx: { sessionId: string }) => void | Promise<void>;
+  onConnect?: (ctx: HookContext) => void | Promise<void>;
+  onDisconnect?: (ctx: HookContext) => void | Promise<void>;
+  onError?: (error: Error, ctx?: HookContext) => void;
+  onTurn?: (text: string, ctx: HookContext) => void | Promise<void>;
 }
 
 export const DEFAULT_INSTRUCTIONS: string = `\

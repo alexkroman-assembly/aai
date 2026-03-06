@@ -54,6 +54,14 @@ export const RpcRequestSchema = z.discriminatedUnion("type", [
     name: z.string(),
     args: z.record(z.string(), z.unknown()),
   }),
+  z.object({
+    id: z.number(),
+    type: z.literal("invokeHook"),
+    hook: z.enum(["onConnect", "onDisconnect", "onError", "onTurn"]),
+    sessionId: z.string(),
+    text: z.string().optional(),
+    error: z.string().optional(),
+  }),
 ]);
 
 export type RpcRequest = z.infer<typeof RpcRequestSchema>;
