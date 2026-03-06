@@ -4,10 +4,11 @@ import {
   formatMessages,
   initialize,
   type Plugin,
+  transform,
 } from "esbuild";
 import type { InitializeOptions } from "esbuild-wasm-types";
 import { denoPlugin } from "@deno/esbuild-plugin";
-import { dirname, fromFileUrl, resolve, toFileUrl } from "@std/path";
+import { dirname, fromFileUrl, join, resolve, toFileUrl } from "@std/path";
 import type { AgentEntry } from "./_discover.ts";
 
 export class BundleError extends Error {
@@ -85,6 +86,13 @@ export async function warmNpmCache(): Promise<void> {
   ]);
 }
 
+/** Strip TypeScript type annotations, returning plain JavaScript.
+ *  Requires esbuild to be initialized first (call warmNpmCache). */
+export async function stripTypes(source: string): Promise<string> {
+  const result = await transform(source, { loader: "ts" });
+  return result.code;
+}
+
 /** Root of the aai framework (parent of cli/). */
 const AAI_ROOT = resolve(dirname(fromFileUrl(import.meta.url)), "..");
 const configPath = resolve(AAI_ROOT, "deno.json");
@@ -156,10 +164,19 @@ async function precomputeSchemas(agent: AgentEntry) {
   const { fetchJSON } = await import("../sdk/fetch_json.ts");
   Object.assign(globalThis, { defineAgent, fetchJSON });
 
-  const mod = await import(
-    `${toFileUrl(resolve(agent.entryPoint)).href}?t=${Date.now()}`
+  const source = await Deno.readTextFile(resolve(agent.entryPoint));
+  const js = await stripTypes(source);
+  const tmpPath = join(
+    dirname(resolve(agent.entryPoint)),
+    `.aai-schemas-${Date.now()}.js`,
   );
-  return agentToolsToSchemas(mod.default.tools);
+  try {
+    await Deno.writeTextFile(tmpPath, js);
+    const mod = await import(toFileUrl(tmpPath).href);
+    return agentToolsToSchemas(mod.default.tools);
+  } finally {
+    await Deno.remove(tmpPath).catch(() => {});
+  }
 }
 
 function jsBytes(metafile: { outputs: Record<string, { bytes: number }> }) {

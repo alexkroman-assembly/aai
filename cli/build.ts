@@ -16,6 +16,10 @@ export async function runBuild(opts: BuildOpts): Promise<void> {
     );
   }
 
+  const sp = spinner("Setup", "preparing bundler...");
+  await warmNpmCache();
+  sp.stop();
+
   step("Check", agent.slug);
   const validation = await validateAgent(agent);
   if (validation.errors.length > 0) {
@@ -24,10 +28,6 @@ export async function runBuild(opts: BuildOpts): Promise<void> {
     }
     throw new Error("agent validation failed -- fix the errors above");
   }
-
-  const sp = spinner("Setup", "preparing bundler...");
-  await warmNpmCache();
-  sp.stop();
 
   const outDir = `${opts.outDir}/${agent.slug}`;
   await bundleAgent(agent, outDir);

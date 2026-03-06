@@ -1,6 +1,7 @@
 import { dirname, join, resolve } from "@std/path";
 import { toFileUrl } from "@std/path/to-file-url";
 import type { AgentEntry } from "./_discover.ts";
+import { stripTypes } from "./_bundler.ts";
 
 interface ValidationError {
   field: string;
@@ -20,6 +21,9 @@ export interface ValidationResult {
  * defineAgent() already validates fields -- we just check that
  * the module loads and produces a valid default export.
  *
+ * Uses esbuild to strip types before importing because compiled
+ * Deno binaries cannot dynamically import TypeScript files.
+ *
  * Agents with npm deps skip validation here -- esbuild catches errors during bundling.
  */
 export async function validateAgent(
@@ -37,17 +41,18 @@ export async function validateAgent(
   };
 
   let mod: Record<string, unknown>;
-  // Copy source to a temp .ts file for cache-busting. A query parameter on the
-  // file URL (e.g. ?t=...) causes Deno to lose the TypeScript media-type, so
-  // top-level type annotations would fail with "Unexpected token ':'".
-  const tmpName = `.aai-validate-${Date.now()}.ts`;
-  const tmpPath = join(dirname(resolve(agent.entryPoint)), tmpName);
+  const tmpPath = join(
+    dirname(resolve(agent.entryPoint)),
+    `.aai-validate-${Date.now()}.js`,
+  );
   try {
     const { defineAgent } = await import("../sdk/define_agent.ts");
     const { fetchJSON } = await import("../sdk/fetch_json.ts");
     Object.assign(globalThis, { defineAgent, fetchJSON });
 
-    await Deno.copyFile(resolve(agent.entryPoint), tmpPath);
+    const source = await Deno.readTextFile(resolve(agent.entryPoint));
+    const js = await stripTypes(source);
+    await Deno.writeTextFile(tmpPath, js);
     mod = await import(toFileUrl(tmpPath).href);
   } catch (cause) {
     errors.push({
