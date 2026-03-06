@@ -2,12 +2,9 @@ import { z } from "zod";
 import { getLogger } from "./logger.ts";
 import { createSandboxRpc } from "./rpc.ts";
 import type { ToolSchema } from "./types.ts";
-import type { ToolParameters } from "../sdk/types.ts";
 import { htmlToMarkdown } from "./html.ts";
 
 const log = getLogger("builtin-tools");
-
-type JSONSchemaParam = Parameters<typeof z.fromJSONSchema>[0];
 
 const BraveSearchResponseSchema = z.object({
   web: z.object({
@@ -22,7 +19,7 @@ const BraveSearchResponseSchema = z.object({
 interface BuiltinTool {
   name: string;
   description: string;
-  parameters: ToolParameters;
+  parameters: z.ZodObject<z.ZodRawShape>;
   execute: (
     args: Record<string, unknown>,
     env: Record<string, string | undefined>,
@@ -30,17 +27,12 @@ interface BuiltinTool {
   ) => string | Promise<string>;
 }
 
-const webSearchParams: ToolParameters = {
-  type: "object",
-  properties: {
-    query: { type: "string", description: "The search query" },
-    max_results: {
-      type: "number",
-      description: "Maximum number of results to return (default 5)",
-    },
-  },
-  required: ["query"],
-};
+const webSearchParams = z.object({
+  query: z.string().describe("The search query"),
+  max_results: z.number().describe(
+    "Maximum number of results to return (default 5)",
+  ).optional(),
+});
 
 const BRAVE_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search";
 
@@ -115,16 +107,11 @@ const webSearch: BuiltinTool = {
 const MAX_PAGE_CHARS = 10_000;
 const MAX_HTML_BYTES = 200_000;
 
-const visitWebpageParams: ToolParameters = {
-  type: "object",
-  properties: {
-    url: {
-      type: "string",
-      description: "The full URL to fetch (e.g., 'https://example.com/page')",
-    },
-  },
-  required: ["url"],
-};
+const visitWebpageParams = z.object({
+  url: z.string().describe(
+    "The full URL to fetch (e.g., 'https://example.com/page')",
+  ),
+});
 
 const visitWebpage: BuiltinTool = {
   name: "visit_webpage",
@@ -171,16 +158,11 @@ const visitWebpage: BuiltinTool = {
   },
 };
 
-const runCodeParams: ToolParameters = {
-  type: "object",
-  properties: {
-    code: {
-      type: "string",
-      description: "JavaScript code to execute. Use console.log() for output.",
-    },
-  },
-  required: ["code"],
-};
+const runCodeParams = z.object({
+  code: z.string().describe(
+    "JavaScript code to execute. Use console.log() for output.",
+  ),
+});
 
 const TIMEOUT_MS = 5_000;
 
@@ -229,18 +211,12 @@ const runCode: BuiltinTool = {
   },
 };
 
-const fetchJsonParams: ToolParameters = {
-  type: "object",
-  properties: {
-    url: { type: "string", description: "The URL to fetch JSON from" },
-    headers: {
-      type: "object",
-      description: "Optional HTTP headers to include in the request",
-      additionalProperties: { type: "string" },
-    },
-  },
-  required: ["url"],
-};
+const fetchJsonParams = z.object({
+  url: z.string().describe("The URL to fetch JSON from"),
+  headers: z.record(z.string(), z.string()).describe(
+    "Optional HTTP headers to include in the request",
+  ).optional(),
+});
 
 const fetchJson: BuiltinTool = {
   name: "fetch_json",
@@ -277,16 +253,9 @@ const fetchJson: BuiltinTool = {
   },
 };
 
-const userInputParams: ToolParameters = {
-  type: "object",
-  properties: {
-    question: {
-      type: "string",
-      description: "The question to ask the user",
-    },
-  },
-  required: ["question"],
-};
+const userInputParams = z.object({
+  question: z.string().describe("The question to ask the user"),
+});
 
 const userInput: BuiltinTool = {
   name: "user_input",
@@ -299,17 +268,11 @@ const userInput: BuiltinTool = {
   },
 };
 
-const finalAnswerParams: ToolParameters = {
-  type: "object",
-  properties: {
-    answer: {
-      type: "string",
-      description:
-        "Your final response to the user. This will be spoken aloud.",
-    },
-  },
-  required: ["answer"],
-};
+const finalAnswerParams = z.object({
+  answer: z.string().describe(
+    "Your final response to the user. This will be spoken aloud.",
+  ),
+});
 
 const finalAnswer: BuiltinTool = {
   name: "final_answer",
@@ -343,7 +306,7 @@ export function getBuiltinToolSchemas(names: readonly string[]): ToolSchema[] {
     return [{
       name: tool.name,
       description: tool.description,
-      parameters: tool.parameters,
+      parameters: z.toJSONSchema(tool.parameters),
     }];
   });
 }
@@ -357,8 +320,7 @@ export async function executeBuiltinTool(
   const tool = BUILTIN_TOOLS[name];
   if (!tool) return null;
 
-  const validator = z.fromJSONSchema(tool.parameters as JSONSchemaParam);
-  const parsed = validator.safeParse(args);
+  const parsed = tool.parameters.safeParse(args);
   if (!parsed.success) {
     // deno-lint-ignore no-explicit-any
     const issues = ((parsed as any).error?.issues ?? [])

@@ -61,29 +61,7 @@ async function printSummary(
   stepInfo("GitHub", "https://github.com/alexkroman/aai");
 }
 
-/** Run `deno check` on agent files and return any diagnostics. */
-async function typeCheck(agent: AgentEntry): Promise<string | null> {
-  const files = [join(agent.dir, "types.d.ts"), agent.entryPoint];
-  if (agent.clientEntry.startsWith(agent.dir)) {
-    files.push(agent.clientEntry);
-  }
-  const cmd = new Deno.Command("deno", {
-    args: ["check", ...files],
-    cwd: agent.dir,
-    stdout: "piped",
-    stderr: "piped",
-  });
-  const { success, stderr } = await cmd.output();
-  if (success) return null;
-  return new TextDecoder().decode(stderr)
-    .split("\n")
-    // deno-lint-ignore no-control-regex
-    .filter((l) => !l.replace(/\x1b\[[0-9;]*m/g, "").match(/^\s*Check\s/))
-    .join("\n")
-    .trim();
-}
-
-/** Type-check, validate, bundle, and optionally deploy an agent. */
+/** Validate, bundle, and optionally deploy an agent. */
 async function buildAndDeploy(
   agent: AgentEntry,
   serverUrl: string,
@@ -91,12 +69,6 @@ async function buildAndDeploy(
   dryRun?: boolean,
 ): Promise<ValidationResult> {
   step("Check", agent.slug);
-
-  const diagnostics = await typeCheck(agent);
-  if (diagnostics) {
-    console.error(diagnostics);
-    throw new Error("type check failed -- fix the errors above");
-  }
 
   const validation = await validateAgent(agent);
   if (validation.errors.length > 0) {

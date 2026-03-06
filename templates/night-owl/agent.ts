@@ -81,13 +81,10 @@ Use run_code for sleep calculations:
     recommend: {
       description:
         "Get recommendations for movies, music, or books based on mood.",
-      parameters: {
-        category: { type: "string", enum: ["movie", "music", "book"] },
-        mood: {
-          type: "string",
-          enum: ["chill", "intense", "cozy", "spooky", "funny"],
-        },
-      },
+      parameters: z.object({
+        category: z.enum(["movie", "music", "book"]),
+        mood: z.enum(["chill", "intense", "cozy", "spooky", "funny"]),
+      }),
       execute: (args) => {
         const category = args.category as string;
         const mood = args.mood as string;

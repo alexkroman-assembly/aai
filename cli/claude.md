@@ -12,7 +12,8 @@ files based on the user's description in `$ARGUMENTS`.
 ## Agent structure
 
 Every agent exports a default `defineAgent()` call. No imports needed —
-`defineAgent` and `fetchJSON` are ambient globals provided by the framework:
+`defineAgent`, `fetchJSON`, and `z` (Zod) are ambient globals provided by the
+framework:
 
 ```ts
 export default defineAgent({
@@ -57,21 +58,9 @@ type Voice =
   | "arcana"
   | (string & {}); // any Rime speaker ID — https://docs.rime.ai/api-reference/voices
 
-// Shorthand: bare string = required string param, object = JSON Schema property
-// All params required by default; add `optional: true` to opt out
-type ParamShorthand = string | (JSONSchemaProperty & { optional?: boolean });
-type SimpleToolParameters = Record<string, ParamShorthand>;
-
-// Full JSON Schema format still supported
-interface ToolParameters {
-  type: "object";
-  properties: Record<string, JSONSchemaProperty>;
-  required?: string[];
-}
-
 interface ToolDef {
   description: string; // LLM reads this to decide when to call the tool
-  parameters: ToolParameters | SimpleToolParameters; // shorthand or full JSON Schema
+  parameters?: z.ZodObject<any>; // Zod object schema (omit for no-arg tools)
   execute: (
     args: Record<string, unknown>,
     ctx: ToolContext,
@@ -106,16 +95,17 @@ interface AgentOptions {
 
 ## Custom tools
 
-Define custom tools with shorthand parameters — bare strings become required
-string params, all params are required by default:
+Tool parameters are defined using Zod schemas. The `z` global is provided by the
+framework — no import needed. Use `z.object({...})` to define the parameter
+schema:
 
 ```ts
 tools: {
   my_tool: {
     description: "What this tool does",
-    parameters: {
-      param: "What this param is",
-    },
+    parameters: z.object({
+      param: z.string().describe("What this param is"),
+    }),
     execute: async ({ param }, ctx) => {
       // ctx.fetch for HTTP requests
       // ctx.secrets for environment variables (from .env)
@@ -125,17 +115,26 @@ tools: {
 },
 ```
 
-For enums, numbers, or optional params, use object syntax:
+For enums, numbers, or optional params:
 
 ```ts
-parameters: {
-  category: { type: "string", enum: ["a", "b", "c"] },
-  count: { type: "number", description: "How many" },
-  label: { type: "string", description: "Optional label", optional: true },
-},
+parameters: z.object({
+  category: z.enum(["a", "b", "c"]),
+  count: z.number().describe("How many"),
+  label: z.string().describe("Optional label").optional(),
+}),
 ```
 
-Full JSON Schema (`type: "object"`, `properties`, `required`) is also supported.
+For a tool with no parameters, just omit `parameters`:
+
+```ts
+tools: {
+  list_items: {
+    description: "List all items",
+    execute: () => items,
+  },
+},
+```
 
 For tools that call external APIs, use `fetchJSON`. It supports a generic type
 parameter for type-safe responses:
@@ -167,7 +166,9 @@ export default defineAgent({
   tools: {
     call_api: {
       description: "Call an external API",
-      parameters: { query: "search query" },
+      parameters: z.object({
+        query: z.string().describe("search query"),
+      }),
       execute: async ({ query }, ctx) => {
         // Access env vars via ctx.secrets
         const key = ctx.secrets.MY_API_KEY;
@@ -239,9 +240,9 @@ export default defineAgent({
   tools: {
     search_faq: {
       description: "Search the knowledge base",
-      parameters: {
-        query: "search term",
-      },
+      parameters: z.object({
+        query: z.string().describe("search term"),
+      }),
       execute: ({ query }) => {
         const results = knowledge.faqs.filter((f) =>
           f.question.toLowerCase().includes(query.toLowerCase())
@@ -289,11 +290,9 @@ export default defineAgent({
   tools: {
     format_name: {
       description: "Capitalize a name",
-      parameters: {
-        type: "object",
-        properties: { name: { type: "string", description: "Name to format" } },
-        required: ["name"],
-      },
+      parameters: z.object({
+        name: z.string().describe("Name to format"),
+      }),
       execute: ({ name }) => capitalize(name),
     },
   },
@@ -386,24 +385,24 @@ ASSEMBLYAI_API_KEY=<user needs to add>
 
 ## Running and deploying the agent
 
-The `aai` CLI handles type-checking, validation, bundling, and deployment in a
-single command. There is no separate build step or deploy tool.
+The `aai` CLI handles validation, bundling, and deployment in a single command.
+There is no separate build step or deploy tool.
 
 ```sh
 aai
 ```
 
-This type-checks your agent, validates the config, bundles the code, and deploys
-it to the dev server. Use it every time you make changes.
+This validates the config, bundles the code, and deploys it to the dev server.
+Use it every time you make changes.
 
-To type-check and validate without deploying:
+To validate and bundle without deploying:
 
 ```sh
 aai --dry-run
 ```
 
-Use `--dry-run` to catch type errors and config issues before deploying. It runs
-the same checks as a full deploy but skips the upload.
+Use `--dry-run` to catch config issues before deploying. It runs the same checks
+as a full deploy but skips the upload.
 
 If they don't have aai installed:
 

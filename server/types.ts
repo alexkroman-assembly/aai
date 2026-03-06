@@ -12,13 +12,8 @@ export {
   type BuiltinTool,
   DEFAULT_GREETING,
   DEFAULT_INSTRUCTIONS,
-  type JSONSchemaProperty,
-  normalizeParameters,
-  type ParamShorthand,
-  type SimpleToolParameters,
   type ToolContext,
   type ToolDef,
-  type ToolParameters,
   type ToolSchema,
   type Voice,
 } from "../sdk/types.ts";
@@ -45,7 +40,7 @@ export const DEFAULT_STT_CONFIG: STTConfig = {
   formatTurns: true,
   minEndOfTurnSilenceWhenConfident: 100,
   maxTurnSilence: 1000,
-  vadThreshold: 0.3,
+  vadThreshold: 0.4,
 };
 
 export interface TTSConfig {

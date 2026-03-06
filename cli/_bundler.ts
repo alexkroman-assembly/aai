@@ -162,7 +162,8 @@ async function precomputeSchemas(agent: AgentEntry) {
   const { agentToolsToSchemas } = await import("../sdk/types.ts");
   const { defineAgent } = await import("../sdk/define_agent.ts");
   const { fetchJSON } = await import("../sdk/fetch_json.ts");
-  Object.assign(globalThis, { defineAgent, fetchJSON });
+  const { z } = await import("zod");
+  Object.assign(globalThis, { defineAgent, fetchJSON, z });
 
   const source = await Deno.readTextFile(resolve(agent.entryPoint));
   const js = await stripTypes(source);
@@ -211,7 +212,8 @@ export async function bundleAgent(
     workerShimPath,
     `import { defineAgent } from "${agentModAbsolute}";\n` +
       `import { fetchJSON } from "${fetchJsonAbsolute}";\n` +
-      `Object.assign(globalThis, { defineAgent, fetchJSON });\n`,
+      `import { z } from "zod";\n` +
+      `Object.assign(globalThis, { defineAgent, fetchJSON, z });\n`,
   );
 
   const clientShimPath = resolve(outDir, "_client_shim.ts");

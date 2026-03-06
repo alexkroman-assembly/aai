@@ -1,5 +1,7 @@
 // --- Agent types (stable SDK surface baked into deployed bundles) ---
 
+import { z } from "zod";
+
 export interface ToolContext {
   secrets: Record<string, string>;
   fetch: typeof globalThis.fetch;
@@ -11,76 +13,9 @@ export interface HookContext {
   secrets: Record<string, string>;
 }
 
-/** JSON Schema property definition. */
-export interface JSONSchemaProperty {
-  type?: string;
-  description?: string;
-  enum?: (string | number | boolean)[];
-  items?: JSONSchemaProperty;
-  properties?: Record<string, JSONSchemaProperty>;
-  required?: string[];
-  [key: string]: unknown;
-}
-
-/** JSON Schema object describing tool parameters. Must have type "object". */
-export interface ToolParameters {
-  type: "object";
-  properties: Record<string, JSONSchemaProperty>;
-  required?: string[];
-  [key: string]: unknown;
-}
-
-/**
- * Shorthand parameter definition.
- * - Bare string → `{ type: "string", description: string }`
- * - Object with `optional: true` → not included in `required`
- */
-export type ParamShorthand =
-  | string
-  | (JSONSchemaProperty & { optional?: boolean });
-
-/**
- * Shorthand tool parameters: a flat record of param names to definitions.
- * `type: "object"` and `required` are auto-generated.
- * All params are required by default; mark with `optional: true` to opt out.
- */
-export type SimpleToolParameters = Record<string, ParamShorthand>;
-
-/** Normalize shorthand parameters into full JSON Schema ToolParameters. */
-export function normalizeParameters(
-  params: ToolParameters | SimpleToolParameters,
-): ToolParameters {
-  if (
-    params && typeof params === "object" && "type" in params &&
-    params.type === "object" && "properties" in params &&
-    typeof params.properties === "object"
-  ) {
-    return params as ToolParameters;
-  }
-  const properties: Record<string, JSONSchemaProperty> = {};
-  const required: string[] = [];
-  for (const [name, def] of Object.entries(params)) {
-    if (typeof def === "string") {
-      properties[name] = { type: "string", description: def };
-      required.push(name);
-    } else {
-      const { optional, ...schema } = def as JSONSchemaProperty & {
-        optional?: boolean;
-      };
-      properties[name] = schema;
-      if (!optional) required.push(name);
-    }
-  }
-  return {
-    type: "object",
-    properties,
-    ...(required.length ? { required } : {}),
-  };
-}
-
 export interface ToolDef {
   description: string;
-  parameters: ToolParameters | SimpleToolParameters;
+  parameters?: z.ZodObject<z.ZodRawShape>;
   execute: (
     args: Record<string, unknown>,
     ctx: ToolContext,
@@ -157,11 +92,14 @@ If you need to list items, say "First," "Next," and "Finally."
 export const DEFAULT_GREETING: string =
   "Hey there. I'm a voice assistant. What can I help you with?";
 
+/** JSON Schema representation of tool parameters, sent over the wire to the LLM. */
 export interface ToolSchema {
   name: string;
   description: string;
-  parameters: ToolParameters;
+  parameters: Record<string, unknown>;
 }
+
+const EMPTY_PARAMS = z.object({});
 
 export function agentToolsToSchemas(
   tools: Readonly<Record<string, ToolDef>>,
@@ -169,7 +107,7 @@ export function agentToolsToSchemas(
   return Object.entries(tools).map(([name, def]) => ({
     name,
     description: def.description,
-    parameters: normalizeParameters(def.parameters),
+    parameters: z.toJSONSchema(def.parameters ?? EMPTY_PARAMS),
   }));
 }
 

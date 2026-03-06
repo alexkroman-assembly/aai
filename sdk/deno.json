@@ -8,6 +8,7 @@
     "./worker-entry": "./_worker_entry.ts",
     "./tool-executor": "./_tool_executor.ts",
     "./schema": "./_schema.ts",
-    "./protocol": "./_protocol.ts"
+    "./protocol": "./_protocol.ts",
+    "./rpc": "./_rpc.ts"
   }
 }

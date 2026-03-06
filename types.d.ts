@@ -7,8 +7,6 @@ declare global {
   type ToolContext = import("@aai/sdk/types").ToolContext;
   type HookContext = import("@aai/sdk/types").HookContext;
   type ToolDef = import("@aai/sdk/types").ToolDef;
-  type ParamShorthand = import("@aai/sdk/types").ParamShorthand;
-  type SimpleToolParameters = import("@aai/sdk/types").SimpleToolParameters;
   type AgentOptions = import("@aai/sdk/types").AgentOptions;
 
   // UI

@@ -38,6 +38,7 @@ export async function validateAgent(
   const saved = {
     defineAgent: (globalThis as Record<string, unknown>).defineAgent,
     fetchJSON: (globalThis as Record<string, unknown>).fetchJSON,
+    z: (globalThis as Record<string, unknown>).z,
   };
 
   let mod: Record<string, unknown>;
@@ -48,7 +49,8 @@ export async function validateAgent(
   try {
     const { defineAgent } = await import("../sdk/define_agent.ts");
     const { fetchJSON } = await import("../sdk/fetch_json.ts");
-    Object.assign(globalThis, { defineAgent, fetchJSON });
+    const { z } = await import("zod");
+    Object.assign(globalThis, { defineAgent, fetchJSON, z });
 
     const source = await Deno.readTextFile(resolve(agent.entryPoint));
     const js = await stripTypes(source);

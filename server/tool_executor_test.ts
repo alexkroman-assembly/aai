@@ -1,23 +1,20 @@
+import { z } from "zod";
 import { expect } from "@std/expect";
 import { executeToolCall } from "../sdk/_tool_executor.ts";
-import type { ToolDef, ToolParameters } from "../sdk/types.ts";
+import type { ToolDef } from "../sdk/types.ts";
 
 function makeTool(
-  parameters: ToolParameters,
+  parameters: z.ZodObject<z.ZodRawShape>,
   fn: ToolDef["execute"],
 ): ToolDef {
   return { description: "test", parameters, execute: fn };
 }
 
-const EMPTY: ToolParameters = { type: "object", properties: {} };
+const EMPTY = z.object({});
 
 Deno.test("executeToolCall - validates and runs handler", async () => {
   const t = makeTool(
-    {
-      type: "object",
-      properties: { name: { type: "string" } },
-      required: ["name"],
-    },
+    z.object({ name: z.string() }),
     ({ name }) => `Hi ${name}`,
   );
   expect(
@@ -27,11 +24,7 @@ Deno.test("executeToolCall - validates and runs handler", async () => {
 
 Deno.test("executeToolCall - returns validation error for bad args", async () => {
   const t = makeTool(
-    {
-      type: "object",
-      properties: { name: { type: "string" } },
-      required: ["name"],
-    },
+    z.object({ name: z.string() }),
     () => "ok",
   );
   const result = await executeToolCall("greet", { name: 123 }, t, {});
@@ -41,10 +34,7 @@ Deno.test("executeToolCall - returns validation error for bad args", async () =>
 
 Deno.test("executeToolCall - passes args through to handler", async () => {
   const t = makeTool(
-    {
-      type: "object",
-      properties: { n: { type: "number" } },
-    },
+    z.object({ n: z.number() }),
     ({ n }) => `n=${n}`,
   );
   expect(await executeToolCall("x", { n: 5 }, t, {})).toBe("n=5");

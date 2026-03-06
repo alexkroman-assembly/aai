@@ -63,17 +63,14 @@ Rules:
     random_words: {
       description:
         "Get random words from a category. Use this for word games and creative challenges.",
-      parameters: {
-        category: {
-          type: "string",
-          enum: ["animals", "colors", "foods"],
-          description: "Category to pick words from",
-        },
-        count: {
-          type: "number",
-          description: "Number of random words to return (1-6)",
-        },
-      },
+      parameters: z.object({
+        category: z.enum(["animals", "colors", "foods"]).describe(
+          "Category to pick words from",
+        ),
+        count: z.number().describe(
+          "Number of random words to return (1-6)",
+        ),
+      }),
       execute: (args) => {
         const category = args.category as string;
         const count = args.count as number;
@@ -88,15 +85,12 @@ Rules:
     mix_words: {
       description:
         "Shuffle the letters or words in a phrase. Use for anagram challenges.",
-      parameters: {
-        phrase: "The phrase to shuffle",
-        mode: {
-          type: "string",
-          enum: ["letters", "words"],
-          description: "Shuffle individual letters or whole words",
-          optional: true,
-        },
-      },
+      parameters: z.object({
+        phrase: z.string().describe("The phrase to shuffle"),
+        mode: z.enum(["letters", "words"]).describe(
+          "Shuffle individual letters or whole words",
+        ).optional(),
+      }),
       execute: (args) => {
         const phrase = args.phrase as string;
         const mode = args.mode as string | undefined;

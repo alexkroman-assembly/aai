@@ -26,10 +26,7 @@ const AgentConfigSchema = z.object({
 const ToolSchemaSchema = z.object({
   name: z.string(),
   description: z.string(),
-  parameters: z.object({
-    type: z.literal("object"),
-    properties: z.record(z.string(), z.unknown()),
-  }).passthrough(),
+  parameters: z.record(z.string(), z.unknown()),
 });
 
 export const GetConfigResponseSchema = z.object({

@@ -1,13 +1,7 @@
 import { z } from "zod";
-import {
-  normalizeParameters,
-  type ToolContext,
-  type ToolDef,
-} from "./types.ts";
+import type { ToolContext, ToolDef } from "./types.ts";
 
 export const TOOL_HANDLER_TIMEOUT = 30_000;
-
-type JSONSchemaParam = Parameters<typeof z.fromJSONSchema>[0];
 
 export type ExecuteTool = (
   name: string,
@@ -20,9 +14,8 @@ export async function executeToolCall(
   tool: ToolDef,
   secrets: Record<string, string>,
 ): Promise<string> {
-  const params = normalizeParameters(tool.parameters);
-  const validator = z.fromJSONSchema(params as JSONSchemaParam);
-  const parsed = validator.safeParse(args);
+  const schema = tool.parameters ?? z.object({});
+  const parsed = schema.safeParse(args);
   if (!parsed.success) {
     const issues = (parsed.error?.issues ?? [])
       .map((i) => `${i.path.map(String).join(".")}: ${i.message}`)
