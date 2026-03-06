@@ -1,6 +1,5 @@
 import { concat } from "@std/bytes/concat";
 import { decodeBase64, encodeBase64 } from "@std/encoding/base64";
-import { Hono } from "@hono/hono";
 import { getLogger } from "./logger.ts";
 import { loadPlatformConfig } from "./config.ts";
 import {
@@ -15,81 +14,19 @@ import type { BundleStore } from "./bundle_store_tigris.ts";
 import {
   DEFAULT_STT_SAMPLE_RATE,
   DEFAULT_TTS_SAMPLE_RATE,
-} from "./protocol.ts";
+} from "../sdk/_protocol.ts";
+import { mulawToPcm16, pcm16ToMulaw, resample } from "./mulaw.ts";
+import { z } from "zod";
 
 const log = getLogger("twilio");
 
-// Mulaw codec
+const TwilioMessageSchema = z.object({
+  event: z.string(),
+  start: z.object({ streamSid: z.string() }).optional(),
+  media: z.object({ payload: z.string() }).optional(),
+});
 
-const MULAW_BIAS = 0x84;
-const MULAW_CLIP = 32635;
 const MULAW_RATE = 8000;
-
-const DECODE_TABLE = new Int16Array(256);
-for (let i = 0; i < 256; i++) {
-  const mu = ~i & 0xff;
-  const sign = mu & 0x80;
-  const exp = (mu >> 4) & 0x07;
-  const mantissa = mu & 0x0f;
-  let mag = ((mantissa << 1) + 33) << (exp + 2);
-  mag -= MULAW_BIAS;
-  DECODE_TABLE[i] = sign ? -mag : mag;
-}
-
-export function decodeMulaw(byte: number): number {
-  return DECODE_TABLE[byte & 0xff];
-}
-
-export function encodeMulaw(sample: number): number {
-  const sign = sample < 0 ? 0x80 : 0;
-  let mag = Math.abs(sample);
-  if (mag > MULAW_CLIP) mag = MULAW_CLIP;
-  mag += MULAW_BIAS;
-
-  let exp = 7;
-  for (let i = 0; i < 8; i++) {
-    if (mag & (0x4000 >> i)) {
-      exp = 7 - i;
-      break;
-    }
-  }
-
-  return ~(sign | (exp << 4) | ((mag >> (exp + 3)) & 0x0f)) & 0xff;
-}
-
-export function mulawToPcm16(mulaw: Uint8Array): Int16Array {
-  const out = new Int16Array(mulaw.length);
-  for (let i = 0; i < mulaw.length; i++) out[i] = DECODE_TABLE[mulaw[i]];
-  return out;
-}
-
-export function pcm16ToMulaw(pcm: Int16Array): Uint8Array {
-  const out = new Uint8Array(pcm.length);
-  for (let i = 0; i < pcm.length; i++) out[i] = encodeMulaw(pcm[i]);
-  return out;
-}
-
-export function resample(
-  samples: Int16Array,
-  fromRate: number,
-  toRate: number,
-): Int16Array {
-  if (fromRate === toRate) return samples;
-  const ratio = fromRate / toRate;
-  const len = Math.ceil(samples.length / ratio);
-  const out = new Int16Array(len);
-  for (let i = 0; i < len; i++) {
-    const src = i * ratio;
-    const idx = Math.floor(src);
-    const frac = src - idx;
-    out[i] = idx + 1 < samples.length
-      ? Math.round(samples[idx] * (1 - frac) + samples[idx + 1] * frac)
-      : samples[Math.min(idx, samples.length - 1)];
-  }
-  return out;
-}
-
-// Base64
 
 // TwiML helper
 
@@ -101,11 +38,6 @@ export function twiml(body: string): Response {
 }
 
 // Twilio ↔ SessionTransport adapter
-//
-// Twilio sends mulaw 8kHz over JSON WebSocket messages.
-// ServerSession expects a SessionTransport that receives PCM16 binary
-// and sends PCM16 binary (TTS) or JSON strings (UI events).
-// This adapter bridges the two: incoming mulaw → PCM16, outgoing PCM16 → mulaw.
 
 export function createTwilioTransport(ws: WebSocket): SessionTransport & {
   streamSid: string | null;
@@ -126,7 +58,6 @@ export function createTwilioTransport(ws: WebSocket): SessionTransport & {
       if (ws.readyState !== WebSocket.OPEN) return;
 
       if (typeof data === "string") {
-        // JSON from ServerSession — log chat/error, drop UI-only messages
         try {
           const msg = JSON.parse(data) as Record<string, unknown>;
           if (msg.type === "chat") {
@@ -140,7 +71,6 @@ export function createTwilioTransport(ws: WebSocket): SessionTransport & {
         return;
       }
 
-      // Binary = TTS audio (PCM16 at TTS sample rate) → convert to mulaw
       const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
       if (!streamSid || bytes.length < 2) return;
 
@@ -161,9 +91,7 @@ export function createTwilioTransport(ws: WebSocket): SessionTransport & {
   };
 }
 
-// Audio buffer — accumulates small Twilio frames into STT-friendly chunks.
-// Twilio sends 20ms mulaw frames; AssemblyAI wants ≥100ms.
-// At 16kHz PCM16: 100ms = 1600 samples × 2 bytes = 3200 bytes.
+// Audio buffer
 
 const MIN_AUDIO_BYTES = 3200;
 
@@ -188,8 +116,6 @@ export function createAudioBuffer(
   };
 }
 
-// Decode incoming Twilio media frame to PCM16 bytes at STT sample rate.
-
 export function decodeTwilioFrame(payload: string): Uint8Array {
   const pcm16 = mulawToPcm16(decodeBase64(payload));
   const resampled = resample(pcm16, MULAW_RATE, DEFAULT_STT_SAMPLE_RATE);
@@ -200,130 +126,140 @@ export function decodeTwilioFrame(payload: string): Uint8Array {
   );
 }
 
-// Routes
+// Route handlers
 
-export function createTwilioRoutes(ctx: {
+export interface TwilioContext {
   slots: Map<string, AgentSlot>;
   store: BundleStore;
-}): Hono {
-  const app = new Hono();
+}
 
-  function getTwilioSlot(slug: string): AgentSlot | null {
-    const slot = ctx.slots.get(slug);
-    return slot?.transport.includes("twilio") ? slot : null;
+function getTwilioSlot(
+  slug: string,
+  ctx: TwilioContext,
+): AgentSlot | null {
+  const slot = ctx.slots.get(slug);
+  return slot?.transport.includes("twilio") ? slot : null;
+}
+
+export async function handleTwilioVoice(
+  req: Request,
+  slug: string,
+  ctx: TwilioContext,
+): Promise<Response> {
+  const slot = getTwilioSlot(slug, ctx);
+  if (!slot) return twiml("<Say>Agent not found. Goodbye.</Say>");
+
+  try {
+    await ensureAgent(slot, (s) => ctx.store.getFile(s, "worker"));
+  } catch (err: unknown) {
+    log.error("Failed to start agent for call", {
+      slug,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return twiml(
+      "<Say>Sorry, the agent is unavailable. Please try again later.</Say>",
+    );
   }
 
-  app.post("/:slug/twilio/voice", async (c) => {
-    const slug = c.req.param("slug");
-    const slot = getTwilioSlot(slug);
-    if (!slot) return twiml("<Say>Agent not found. Goodbye.</Say>");
+  const host = req.headers.get("host") ?? "localhost";
+  const streamUrl = `wss://${host}/${slug}/twilio/stream`;
+  log.info("Incoming call, connecting media stream", { slug, streamUrl });
+  return twiml(`<Connect><Stream url="${streamUrl}" /></Connect>`);
+}
 
-    try {
-      await ensureAgent(slot, (s) => ctx.store.getFile(s, "worker"));
-    } catch (err: unknown) {
-      log.error("Failed to start agent for call", {
-        slug,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      return twiml(
-        "<Say>Sorry, the agent is unavailable. Please try again later.</Say>",
-      );
-    }
+export async function handleTwilioStream(
+  req: Request,
+  slug: string,
+  ctx: TwilioContext,
+): Promise<Response> {
+  const slot = getTwilioSlot(slug, ctx);
+  if (!slot) return Response.json({ error: "Not found" }, { status: 404 });
+  if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") {
+    return Response.json(
+      { error: "Expected WebSocket upgrade" },
+      { status: 400 },
+    );
+  }
 
-    const host = c.req.header("host") ?? "localhost";
-    const streamUrl = `wss://${host}/${slug}/twilio/stream`;
-    log.info("Incoming call, connecting media stream", { slug, streamUrl });
-    return twiml(`<Connect><Stream url="${streamUrl}" /></Connect>`);
+  let info;
+  try {
+    info = await ensureAgent(slot, (s) => ctx.store.getFile(s, "worker"));
+  } catch (err: unknown) {
+    log.error("Failed to initialize agent for media stream", { slug, err });
+    return Response.json(
+      { error: "Agent failed to initialize" },
+      { status: 500 },
+    );
+  }
+
+  const { socket, response } = Deno.upgradeWebSocket(req);
+  const transport = createTwilioTransport(socket);
+
+  const session = createSession({
+    id: `twilio-${crypto.randomUUID().slice(0, 8)}`,
+    transport,
+    agentConfig: info.config,
+    toolSchemas: info.toolSchemas,
+    platformConfig: loadPlatformConfig(slot.env),
+    executeTool: createRpcToolExecutor(info.workerApi),
+    secrets: slot.env,
   });
 
-  app.get("/:slug/twilio/stream", async (c) => {
-    const slug = c.req.param("slug");
-    const slot = getTwilioSlot(slug);
-    if (!slot) return c.json({ error: "Not found" }, 404);
-    if (c.req.header("upgrade")?.toLowerCase() !== "websocket") {
-      return c.json({ error: "Expected WebSocket upgrade" }, 400);
-    }
+  trackSessionOpen(slot);
 
-    let info;
-    try {
-      info = await ensureAgent(slot, (s) => ctx.store.getFile(s, "worker"));
-    } catch (err: unknown) {
-      log.error("Failed to initialize agent for media stream", { slug, err });
-      return c.json({ error: "Agent failed to initialize" }, 500);
-    }
+  const audioBuf = createAudioBuffer((chunk) => session.onAudio(chunk));
 
-    const { socket, response } = Deno.upgradeWebSocket(c.req.raw);
-    const transport = createTwilioTransport(socket);
-
-    const session = createSession({
-      id: `twilio-${crypto.randomUUID().slice(0, 8)}`,
-      transport,
-      agentConfig: info.config,
-      toolSchemas: info.toolSchemas,
-      platformConfig: loadPlatformConfig(slot.env),
-      executeTool: createRpcToolExecutor(info.workerApi),
-      secrets: slot.env,
-    });
-
-    trackSessionOpen(slot);
-
-    const audioBuf = createAudioBuffer((chunk) => session.onAudio(chunk));
-
-    socket.addEventListener("open", () => {
-      log.info("Twilio media stream connected", { slug });
-      void session.start();
-    });
-
-    socket.addEventListener("message", (event) => {
-      if (typeof event.data !== "string") return;
-      let msg: {
-        event: string;
-        start?: { streamSid: string };
-        media?: { payload: string };
-      };
-      try {
-        msg = JSON.parse(event.data);
-      } catch {
-        return;
-      }
-
-      switch (msg.event) {
-        case "start":
-          transport.streamSid = msg.start?.streamSid ?? null;
-          log.info("Twilio stream started", {
-            slug,
-            streamSid: transport.streamSid,
-          });
-          session.onAudioReady();
-          break;
-        case "media":
-          if (msg.media?.payload) {
-            audioBuf.push(decodeTwilioFrame(msg.media.payload));
-          }
-          break;
-        case "stop":
-          audioBuf.drain();
-          log.info("Twilio stream stopped", { slug });
-          void session.stop();
-          break;
-      }
-    });
-
-    socket.addEventListener("close", () => {
-      log.info("Twilio media stream disconnected", { slug });
-      void session.stop();
-      trackSessionClose(slot);
-    });
-
-    socket.addEventListener("error", (event) => {
-      log.error("Twilio media stream error", {
-        slug,
-        error: event instanceof ErrorEvent ? event.message : "WebSocket error",
-      });
-    });
-
-    return response;
+  socket.addEventListener("open", () => {
+    log.info("Twilio media stream connected", { slug });
+    void session.start();
   });
 
-  return app;
+  socket.addEventListener("message", (event) => {
+    if (typeof event.data !== "string") return;
+    let json: unknown;
+    try {
+      json = JSON.parse(event.data);
+    } catch {
+      return;
+    }
+    const parsed = TwilioMessageSchema.safeParse(json);
+    if (!parsed.success) return;
+    const msg = parsed.data;
+
+    switch (msg.event) {
+      case "start":
+        transport.streamSid = msg.start?.streamSid ?? null;
+        log.info("Twilio stream started", {
+          slug,
+          streamSid: transport.streamSid,
+        });
+        session.onAudioReady();
+        break;
+      case "media":
+        if (msg.media?.payload) {
+          audioBuf.push(decodeTwilioFrame(msg.media.payload));
+        }
+        break;
+      case "stop":
+        audioBuf.drain();
+        log.info("Twilio stream stopped", { slug });
+        void session.stop();
+        break;
+    }
+  });
+
+  socket.addEventListener("close", () => {
+    log.info("Twilio media stream disconnected", { slug });
+    void session.stop();
+    trackSessionClose(slot);
+  });
+
+  socket.addEventListener("error", (event) => {
+    log.error("Twilio media stream error", {
+      slug,
+      error: event instanceof ErrorEvent ? event.message : "WebSocket error",
+    });
+  });
+
+  return response;
 }

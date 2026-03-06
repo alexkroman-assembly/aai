@@ -24,17 +24,10 @@ Rules:
       description:
         "Search the embedded knowledge base for a question. Returns the closest matching FAQ entry.",
       parameters: {
-        type: "object",
-        properties: {
-          query: {
-            type: "string",
-            description: "The user's question to search for",
-          },
-        },
-        required: ["query"],
+        query: "The user's question to search for",
       },
-      execute: ({ query }) => {
-        const q = query.toLowerCase();
+      execute: (args) => {
+        const q = (args.query as string).toLowerCase();
         const match = faqs.find((f) =>
           f.question.toLowerCase().includes(q) ||
           q.includes(f.question.toLowerCase()) ||
@@ -45,7 +38,7 @@ Rules:
     },
     list_topics: {
       description: "List all available FAQ topics in the knowledge base.",
-      parameters: { type: "object", properties: {} },
+      parameters: {},
       execute: () => faqs.map((f) => f.question),
     },
   },

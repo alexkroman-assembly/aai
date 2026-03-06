@@ -1,8 +1,10 @@
 import { z } from "zod";
-import { getLogger } from "./logger.ts";
-import type { ToolContext, ToolDef } from "./agent_types.ts";
+import {
+  normalizeParameters,
+  type ToolContext,
+  type ToolDef,
+} from "./types.ts";
 
-const log = getLogger("tool-executor");
 export const TOOL_HANDLER_TIMEOUT = 30_000;
 
 type JSONSchemaParam = Parameters<typeof z.fromJSONSchema>[0];
@@ -18,14 +20,13 @@ export async function executeToolCall(
   tool: ToolDef,
   secrets: Record<string, string>,
 ): Promise<string> {
-  const validator = z.fromJSONSchema(tool.parameters as JSONSchemaParam);
+  const params = normalizeParameters(tool.parameters);
+  const validator = z.fromJSONSchema(params as JSONSchemaParam);
   const parsed = validator.safeParse(args);
   if (!parsed.success) {
-    // deno-lint-ignore no-explicit-any
-    const issues = ((parsed as any).error?.issues ?? [])
-      .map((i: { path: (string | number)[]; message: string }) =>
-        `${i.path.join(".")}: ${i.message}`
-      ).join(", ");
+    const issues = (parsed.error?.issues ?? [])
+      .map((i) => `${i.path.map(String).join(".")}: ${i.message}`)
+      .join(", ");
     return `Error: Invalid arguments for tool "${name}": ${issues}`;
   }
 
@@ -43,10 +44,10 @@ export async function executeToolCall(
     return typeof result === "string" ? result : JSON.stringify(result);
   } catch (err: unknown) {
     if (err instanceof DOMException && err.name === "TimeoutError") {
-      log.warn("Tool execution timed out", { tool: name });
+      console.warn(`[tool-executor] Tool execution timed out: ${name}`);
       return `Error: Tool "${name}" timed out after ${TOOL_HANDLER_TIMEOUT}ms`;
     }
-    log.warn("Tool execution failed", { err, tool: name });
+    console.warn(`[tool-executor] Tool execution failed: ${name}`, err);
     return `Error: ${err instanceof Error ? err.message : String(err)}`;
   }
 }

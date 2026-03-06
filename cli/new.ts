@@ -1,6 +1,24 @@
 import { join } from "@std/path";
-import { log } from "./_output.ts";
+import { step } from "./_output.ts";
 import { generateTypes } from "./types.ts";
+import {
+  adjectives,
+  animals,
+  type Config,
+  uniqueNamesGenerator,
+} from "unique-names-generator";
+
+const slugConfig: Config = {
+  dictionaries: [adjectives, animals],
+  separator: "-",
+  length: 2,
+  style: "lowerCase",
+};
+
+/** Generate a unique, memorable slug like "calm-fox" or "bright-creek". */
+export function generateSlug(): string {
+  return uniqueNamesGenerator(slugConfig);
+}
 
 export interface NewOptions {
   slug: string;
@@ -36,15 +54,14 @@ export async function runNew(opts: NewOptions): Promise<string> {
 
   if (!available.includes(template)) {
     throw new Error(
-      `unknown template '${template}' — available: ${available.join(", ")}`,
+      `unknown template '${template}' -- available: ${available.join(", ")}`,
     );
   }
 
   const src = join(templatesDir, template);
 
-  log.step("Create", `${slug} from template '${template}'`);
+  step("Create", `${slug} from template '${template}'`);
 
-  // Copy template files into target directory (skip node_modules)
   for await (const entry of Deno.readDir(src)) {
     if (entry.name === "node_modules") continue;
     const srcPath = join(src, entry.name);
@@ -67,7 +84,7 @@ export async function runNew(opts: NewOptions): Promise<string> {
       JSON.stringify(config, null, 2) + "\n",
     );
   } catch {
-    // No agent.json to update — that's fine
+    // No agent.json to update
   }
 
   // Install npm dependencies if agent.json declares them
@@ -82,7 +99,7 @@ export async function runNew(opts: NewOptions): Promise<string> {
       join(targetDir, "package.json"),
       JSON.stringify(pkgJson, null, 2) + "\n",
     );
-    log.step("Install", "npm dependencies");
+    step("Install", "npm dependencies");
     const npm = new Deno.Command("npm", {
       args: ["install", "--silent"],
       cwd: targetDir,
@@ -96,18 +113,18 @@ export async function runNew(opts: NewOptions): Promise<string> {
     }
   }
 
-  // Generate ambient type declarations for editor autocomplete
-  // (after npm install so deno.json can detect package.json)
   await generateTypes(targetDir);
 
   // Copy .env.example as .env
-  const envExamplePath = join(targetDir, ".env.example");
   try {
-    await Deno.copyFile(envExamplePath, join(targetDir, ".env"));
+    await Deno.copyFile(
+      join(targetDir, ".env.example"),
+      join(targetDir, ".env"),
+    );
   } catch {
-    // No .env.example in template — skip
+    // No .env.example in template
   }
 
-  log.step("Done", targetDir);
+  step("Done", targetDir);
   return targetDir;
 }

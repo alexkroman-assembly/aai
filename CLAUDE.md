@@ -68,7 +68,7 @@ Agent code runs in Deno Workers with only `net: true` permission. The worker com
 
 ## Agent API (for user-facing CLAUDE.md)
 
-The `cli/claude.md` file is copied into user agent directories as their CLAUDE.md. It documents the `defineAgent()` API. When modifying the agent API surface (`server/agent_types.ts`), update `cli/claude.md` to match.
+The `cli/claude.md` file is copied into user agent directories as their CLAUDE.md. It documents the `defineAgent()` API. When modifying the agent API surface (`sdk/types.ts`), update `cli/claude.md` to match.
 
 ## Key Conventions
 
@@ -77,5 +77,5 @@ The `cli/claude.md` file is copied into user agent directories as their CLAUDE.m
 - Tests use `@std/testing/bdd` (`describe`/`it`) and `@std/expect`
 - Test files are co-located: `foo.ts` → `foo_test.ts`
 - The CLI should only open the browser when scaffolding a new agent, not when running dev on an existing agent
-- `shared/` contains JSON schemas used by both CLI and server for validation
+- `sdk/` contains the stable agent SDK: types, defineAgent, worker entry, protocol, and JSON schemas. cli/, server/, and ui/ all depend on sdk/ but never on each other
 - `templates/` contains agent scaffolding templates (simple, etc.)

@@ -8,7 +8,7 @@ import {
   setupDOM,
 } from "./_test_utils.ts";
 import { createSessionControls, useSession } from "./signals.tsx";
-import { VoiceSession } from "./session.ts";
+import { createVoiceSession, type VoiceSession } from "./session.ts";
 
 function withSignalsEnv(
   fn: (ctx: {
@@ -22,7 +22,9 @@ function withSignalsEnv(
   return async () => {
     const mock = installMockWebSocket();
     const loc = installMockLocation();
-    const session = new VoiceSession({ platformUrl: "http://localhost:3000" });
+    const session = createVoiceSession({
+      platformUrl: "http://localhost:3000",
+    });
     const signals = createSessionControls(session);
     try {
       await fn({

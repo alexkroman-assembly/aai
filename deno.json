@@ -1,6 +1,6 @@
 {
   "version": "0.1.3",
-  "workspace": ["server", "ui", "cli"],
+  "workspace": ["server", "ui", "cli", "sdk"],
   "tasks": {
     "setup": "git config core.hooksPath .githooks",
     "dev": "deno run --allow-net --allow-env --allow-read --allow-write --allow-run --unstable-worker-options cli/cli.ts dev",
@@ -8,7 +8,8 @@
     "types": "deno run --allow-write --allow-env --allow-read cli/cli.ts types",
     "deploy": "deno run --allow-net --allow-env --allow-read --allow-write --allow-run cli/cli.ts deploy",
     "test": "deno test --allow-net --allow-read --allow-write --allow-env --allow-run --unstable-worker-options",
-    "check": "deno check server/**/*.ts ui/**/*.ts ui/**/*.tsx cli/**/*.ts $(find templates -name '*.ts' ! -path 'templates/npm-tools/*') && deno lint && deno fmt --check && deno test --quiet --allow-net --allow-read --allow-write --allow-env --allow-run --unstable-worker-options && deno task test:templates",
+    "check": "deno check server/**/*.ts ui/**/*.ts ui/**/*.tsx cli/**/*.ts sdk/**/*.ts $(find templates -name '*.ts' ! -path 'templates/npm-tools/*') && deno lint && deno fmt --check && deno task check:boundaries && deno test --quiet --allow-net --allow-read --allow-write --allow-env --allow-run --unstable-worker-options && deno task test:templates",
+    "check:boundaries": "deno run --allow-read scripts/check_boundaries.ts",
     "test:templates": "deno run --allow-all --unstable-worker-options cli/test_templates.ts",
     "install-dev": "echo '#!/bin/sh\nINIT_CWD=\"$(pwd)\" exec deno run --allow-all --unstable-worker-options '\"$(pwd)/cli/cli.ts\"' \"$@\"' > \"$HOME/.deno/bin/aai-dev\" && chmod +x \"$HOME/.deno/bin/aai-dev\" && echo 'Installed aai-dev to ~/.deno/bin/aai-dev'"
   },
@@ -23,6 +24,7 @@
     "@std/dotenv": "jsr:@std/dotenv@0.225.6",
     "@std/html": "jsr:@std/html@^1.0.5",
     "@std/bytes": "jsr:@std/bytes@^1.0.6",
+    "@std/fs": "jsr:@std/fs@^1.0.17",
     "@std/encoding": "jsr:@std/encoding@^1.0.7",
     "@astral/astral": "jsr:@astral/astral@^0.5.5",
     "preact": "npm:preact@^10.28.4",
@@ -55,6 +57,7 @@
       "server/",
       "ui/",
       "cli/",
+      "sdk/",
       "templates/"
     ]
   },
@@ -63,6 +66,7 @@
       "server/",
       "ui/",
       "cli/",
+      "sdk/",
       "templates/"
     ],
     "rules": {

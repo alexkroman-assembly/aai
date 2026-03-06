@@ -1,6 +1,6 @@
 import { expect } from "@std/expect";
-import { executeToolCall } from "./tool_executor.ts";
-import type { ToolDef, ToolParameters } from "./agent_types.ts";
+import { executeToolCall } from "../sdk/_tool_executor.ts";
+import type { ToolDef, ToolParameters } from "../sdk/types.ts";
 
 function makeTool(
   parameters: ToolParameters,

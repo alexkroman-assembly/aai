@@ -1,14 +1,17 @@
 import type { SessionOptions, SessionTransport } from "./session.ts";
 import type { SttEvents, SttHandle } from "./stt.ts";
-import type { ExecuteTool } from "./tool_executor.ts";
+import type { ExecuteTool } from "../sdk/_tool_executor.ts";
 import type { PlatformConfig } from "./config.ts";
 import type { CallLLMOptions } from "./llm.ts";
 import type { ChatMessage, LLMResponse, ToolSchema } from "./types.ts";
 import { DEFAULT_STT_CONFIG, DEFAULT_TTS_CONFIG } from "./types.ts";
-import { TigrisBundleStore } from "./bundle_store_tigris.ts";
-import { createMemoryS3Client } from "./s3_memory.ts";
+import {
+  type BundleStore,
+  createBundleStore,
+  createMemoryS3Client,
+} from "./bundle_store_tigris.ts";
 
-import type { ToolContext } from "./agent_types.ts";
+import type { ToolContext } from "../sdk/types.ts";
 
 export function createTestContext(
   overrides?: Partial<ToolContext>,
@@ -305,6 +308,6 @@ export const VALID_ENV = {
   ASSEMBLYAI_API_KEY: "test-key",
 };
 
-export function createTestStore(): TigrisBundleStore {
-  return new TigrisBundleStore(createMemoryS3Client(), "test-bucket");
+export function createTestStore(): BundleStore {
+  return createBundleStore(createMemoryS3Client(), "test-bucket");
 }

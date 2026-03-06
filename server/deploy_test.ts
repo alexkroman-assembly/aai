@@ -1,13 +1,12 @@
 import { expect } from "@std/expect";
-import { createDeployRoute, hashApiKey } from "./deploy.ts";
+import { handleDeploy, hashApiKey } from "./deploy.ts";
 import type { AgentSlot } from "./worker_pool.ts";
 import { createTestStore, VALID_ENV } from "./_test_utils.ts";
 
 function setup() {
   const store = createTestStore();
   const slots = new Map<string, AgentSlot>();
-  const app = createDeployRoute({ slots, store });
-  return { app, store, slots };
+  return { store, slots };
 }
 
 function deployRequest(slug: string, apiKey?: string) {
@@ -31,16 +30,19 @@ function deployRequest(slug: string, apiKey?: string) {
 
 Deno.test("deploy ownership", async (t) => {
   await t.step("rejects missing Authorization header", async () => {
-    const { app } = setup();
-    const res = await app.request(deployRequest("my-agent"));
+    const { store, slots } = setup();
+    const res = await handleDeploy(deployRequest("my-agent"), { slots, store });
     expect(res.status).toBe(400);
     const text = await res.text();
     expect(text).toContain("Missing Authorization header");
   });
 
   await t.step("new slug succeeds and stores owner_hash", async () => {
-    const { app, store } = setup();
-    const res = await app.request(deployRequest("my-agent", "key1"));
+    const { store, slots } = setup();
+    const res = await handleDeploy(deployRequest("my-agent", "key1"), {
+      slots,
+      store,
+    });
     expect(res.status).toBe(200);
 
     const manifest = await store.getManifest("my-agent");
@@ -49,31 +51,49 @@ Deno.test("deploy ownership", async (t) => {
   });
 
   await t.step("same key can redeploy to same slug", async () => {
-    const { app } = setup();
-    const res1 = await app.request(deployRequest("my-agent", "key1"));
+    const { store, slots } = setup();
+    const res1 = await handleDeploy(deployRequest("my-agent", "key1"), {
+      slots,
+      store,
+    });
     expect(res1.status).toBe(200);
 
-    const res2 = await app.request(deployRequest("my-agent", "key1"));
+    const res2 = await handleDeploy(deployRequest("my-agent", "key1"), {
+      slots,
+      store,
+    });
     expect(res2.status).toBe(200);
   });
 
   await t.step("different key is rejected for existing slug", async () => {
-    const { app } = setup();
-    const res1 = await app.request(deployRequest("my-agent", "key1"));
+    const { store, slots } = setup();
+    const res1 = await handleDeploy(deployRequest("my-agent", "key1"), {
+      slots,
+      store,
+    });
     expect(res1.status).toBe(200);
 
-    const res2 = await app.request(deployRequest("my-agent", "key2"));
+    const res2 = await handleDeploy(deployRequest("my-agent", "key2"), {
+      slots,
+      store,
+    });
     expect(res2.status).toBe(403);
     const text = await res2.text();
     expect(text).toContain("Slug already taken");
   });
 
   await t.step("different slugs with different keys both succeed", async () => {
-    const { app } = setup();
-    const res1 = await app.request(deployRequest("agent-a", "key1"));
+    const { store, slots } = setup();
+    const res1 = await handleDeploy(deployRequest("agent-a", "key1"), {
+      slots,
+      store,
+    });
     expect(res1.status).toBe(200);
 
-    const res2 = await app.request(deployRequest("agent-b", "key2"));
+    const res2 = await handleDeploy(deployRequest("agent-b", "key2"), {
+      slots,
+      store,
+    });
     expect(res2.status).toBe(200);
   });
 });

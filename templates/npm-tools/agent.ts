@@ -58,28 +58,25 @@ Rules:
 - Suggest new games if the user seems stuck`,
   greeting:
     "Hey, I'm Word Wizard. Want to play a word game? I can give you random words, test your vocabulary, or help you brainstorm creative names.",
-  voice: "luna",
-  builtinTools: ["run_code", "user_input", "final_answer"],
+  builtinTools: ["run_code"],
   tools: {
     random_words: {
       description:
         "Get random words from a category. Use this for word games and creative challenges.",
       parameters: {
-        type: "object",
-        properties: {
-          category: {
-            type: "string",
-            enum: ["animals", "colors", "foods"],
-            description: "Category to pick words from",
-          },
-          count: {
-            type: "number",
-            description: "Number of random words to return (1-6)",
-          },
+        category: {
+          type: "string",
+          enum: ["animals", "colors", "foods"],
+          description: "Category to pick words from",
         },
-        required: ["category", "count"],
+        count: {
+          type: "number",
+          description: "Number of random words to return (1-6)",
+        },
       },
-      execute: ({ category, count }) => {
+      execute: (args) => {
+        const category = args.category as string;
+        const count = args.count as number;
         const list = WORD_LISTS[category];
         if (!list) return { error: `Unknown category: ${category}` };
         const n = Math.min(Math.max(1, count), 6);
@@ -92,21 +89,17 @@ Rules:
       description:
         "Shuffle the letters or words in a phrase. Use for anagram challenges.",
       parameters: {
-        type: "object",
-        properties: {
-          phrase: {
-            type: "string",
-            description: "The phrase to shuffle",
-          },
-          mode: {
-            type: "string",
-            enum: ["letters", "words"],
-            description: "Shuffle individual letters or whole words",
-          },
+        phrase: "The phrase to shuffle",
+        mode: {
+          type: "string",
+          enum: ["letters", "words"],
+          description: "Shuffle individual letters or whole words",
+          optional: true,
         },
-        required: ["phrase"],
       },
-      execute: ({ phrase, mode }) => {
+      execute: (args) => {
+        const phrase = args.phrase as string;
+        const mode = args.mode as string | undefined;
         if (mode === "words") {
           return { result: shuffle(words(phrase)).join(" ") };
         }

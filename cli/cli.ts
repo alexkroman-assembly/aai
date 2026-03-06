@@ -1,7 +1,9 @@
 import { parseArgs } from "@std/cli/parse-args";
+import { exists } from "@std/fs/exists";
 import { bold, cyan, dim, green } from "@std/fmt/colors";
 import { dirname, fromFileUrl, join } from "@std/path";
-import { log } from "./_output.ts";
+import { error } from "./_output.ts";
+import { promptUpgradeIfAvailable } from "./_update.ts";
 
 const denoConfig = await import("../deno.json", { with: { type: "json" } });
 const VERSION: string = denoConfig.default.version;
@@ -24,16 +26,6 @@ ${bold("OPTIONS:")}
 
 ${dim("https://github.com/alexkroman/aai")}
 `);
-}
-
-/** Check if agent.ts exists in the given directory. */
-async function hasAgent(dir: string): Promise<boolean> {
-  try {
-    await Deno.stat(join(dir, "agent.ts"));
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 export async function main(args: string[]): Promise<number> {
@@ -61,12 +53,13 @@ export async function main(args: string[]): Promise<number> {
     return 0;
   }
 
-  const { getApiKey } = await import("./_config.ts");
+  await promptUpgradeIfAvailable(VERSION);
+
+  const { getApiKey } = await import("./_discover.ts");
   const cwd = Deno.env.get("INIT_CWD") || Deno.cwd();
   const serverUrl = flags.url || "https://aai-agent.fly.dev";
 
   if (flags["dry-run"]) {
-    // Set a dummy key so loadAgent doesn't prompt for one
     if (!Deno.env.get("ASSEMBLYAI_API_KEY")) {
       Deno.env.set("ASSEMBLYAI_API_KEY", "dry-run");
     }
@@ -75,21 +68,20 @@ export async function main(args: string[]): Promise<number> {
   }
 
   let isNewAgent = false;
-  if (!await hasAgent(cwd)) {
+  if (!await exists(join(cwd, "agent.ts"))) {
     isNewAgent = true;
     if (!flags.yes) {
       console.log(`\n${green(bold("aai"))} ${dim(VERSION)}`);
       console.log("Voice agent development kit\n");
 
       const answer = prompt(`Set up a new agent in "${cwd}"? (Y/n)`);
-      if (answer === null) return 0; // Ctrl-C
+      if (answer === null) return 0;
       if (answer !== "" && answer.toLowerCase() !== "y") return 0;
     }
 
     const cliDir = dirname(fromFileUrl(import.meta.url));
     const templatesDir = join(cliDir, "..", "templates");
-    const { generateSlug } = await import("./_slug.ts");
-    const { runNew } = await import("./new.ts");
+    const { generateSlug, runNew } = await import("./new.ts");
 
     await runNew({
       slug: generateSlug(),
@@ -116,7 +108,7 @@ if (import.meta.main) {
     const code = await main(Deno.args);
     if (code !== 0) Deno.exit(code);
   } catch (err: unknown) {
-    log.error(err instanceof Error ? err.message : String(err));
+    error(err instanceof Error ? err.message : String(err));
     Deno.exit(1);
   }
 }

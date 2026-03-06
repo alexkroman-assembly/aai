@@ -1,25 +1,69 @@
-import { Hono } from "@hono/hono";
 import { escape } from "@std/html";
+
+const ENTITY: Record<string, string> = {
+  "&amp;": "&",
+  "&lt;": "<",
+  "&gt;": ">",
+  "&quot;": '"',
+  "&#39;": "'",
+  "&apos;": "'",
+  "&nbsp;": " ",
+};
+
+function decodeEntities(s: string): string {
+  return s
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+    .replace(
+      /&#x([0-9a-fA-F]+);/g,
+      (_, n) => String.fromCharCode(parseInt(n, 16)),
+    )
+    .replace(/&\w+;/g, (m) => ENTITY[m] ?? m);
+}
+
+export function htmlToMarkdown(html: string): string {
+  let s = html;
+  // Strip script, style, head
+  s = s.replace(/<script[\s\S]*?<\/script>/gi, "");
+  s = s.replace(/<style[\s\S]*?<\/style>/gi, "");
+  s = s.replace(/<head[\s\S]*?<\/head>/gi, "");
+  // Headings
+  for (let i = 6; i >= 1; i--) {
+    const re = new RegExp(`<h${i}[^>]*>(.*?)<\\/h${i}>`, "gi");
+    s = s.replace(
+      re,
+      (_, c) => `\n${"#".repeat(i)} ${decodeEntities(c.trim())}\n`,
+    );
+  }
+  // Bold
+  s = s.replace(/<(b|strong)[^>]*>(.*?)<\/\1>/gi, (_, _t, c) => `**${c}**`);
+  // Italic
+  s = s.replace(/<(i|em)[^>]*>(.*?)<\/\1>/gi, (_, _t, c) => `_${c}_`);
+  // Links
+  s = s.replace(
+    /<a[^>]+href="([^"]*)"[^>]*>(.*?)<\/a>/gi,
+    (_, href, text) => `[${text}](${href})`,
+  );
+  // List items
+  s = s.replace(/<li[^>]*>(.*?)<\/li>/gi, (_, c) => `* ${c.trim()}\n`);
+  // Remove remaining tags
+  s = s.replace(/<[^>]+>/g, "");
+  // Decode entities
+  s = decodeEntities(s);
+  // Collapse blank lines
+  s = s.replace(/\n{3,}/g, "\n\n");
+  return s.trim();
+}
 
 export const FAVICON_SVG: string =
   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="45" fill="#2196F3"/><path d="M50 25c-6 0-11 5-11 11v14c0 6 5 11 11 11s11-5 11-11V36c0-6-5-11-11-11z" fill="white"/><path d="M71 50c0 11-9 21-21 21s-21-10-21-21h-6c0 14 10 25 24 27v8h6v-8c14-2 24-13 24-27h-6z" fill="white"/></svg>`;
 
-const FAVICON_HEADERS = {
-  "Content-Type": "image/svg+xml",
-  "Cache-Control": "public, max-age=86400",
-};
-
-export function faviconRoutes(): Hono {
-  const routes = new Hono();
-  routes.get(
-    "/favicon.ico",
-    (c) => c.body(FAVICON_SVG, { headers: FAVICON_HEADERS }),
-  );
-  routes.get(
-    "/favicon.svg",
-    (c) => c.body(FAVICON_SVG, { headers: FAVICON_HEADERS }),
-  );
-  return routes;
+export function handleFavicon(): Response {
+  return new Response(FAVICON_SVG, {
+    headers: {
+      "Content-Type": "image/svg+xml",
+      "Cache-Control": "public, max-age=86400",
+    },
+  });
 }
 
 export function renderLandingPage(): string {

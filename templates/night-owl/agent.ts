@@ -74,33 +74,25 @@ Use run_code for sleep calculations:
 - Format as HH:MM`,
   greeting:
     "Hey there, night owl. Try asking me for a cozy movie recommendation, or tell me what time you need to wake up and I'll calculate the best time to fall asleep.",
-  voice: "luna",
   prompt:
     "Transcribe movie titles, music artists, book names, and times accurately. Listen for genres like horror, comedy, sci-fi, jazz, ambient, and mood words like chill, intense, cozy, spooky.",
-  builtinTools: ["run_code", "user_input", "final_answer"],
+  builtinTools: ["run_code"],
   tools: {
     recommend: {
       description:
         "Get recommendations for movies, music, or books based on mood.",
       parameters: {
-        type: "object",
-        properties: {
-          category: {
-            type: "string",
-            enum: ["movie", "music", "book"],
-          },
-          mood: {
-            type: "string",
-            enum: ["chill", "intense", "cozy", "spooky", "funny"],
-          },
+        category: { type: "string", enum: ["movie", "music", "book"] },
+        mood: {
+          type: "string",
+          enum: ["chill", "intense", "cozy", "spooky", "funny"],
         },
-        required: ["category", "mood"],
       },
-      execute: ({ category, mood }) => ({
-        category,
-        mood,
-        picks: PICKS[category]?.[mood] ?? [],
-      }),
+      execute: (args) => {
+        const category = args.category as string;
+        const mood = args.mood as string;
+        return { category, mood, picks: PICKS[category]?.[mood] ?? [] };
+      },
     },
   },
 });

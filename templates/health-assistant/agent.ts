@@ -127,41 +127,23 @@ Use run_code for health calculations:
 - Weight-based dosage: dose_mg = weight_kg * dose_per_kg. Always note this is an estimate.`,
   greeting:
     "Hey, I'm Dr. Sage. Try asking me something like, what are the side effects of ibuprofen, can I take aspirin and warfarin together, or calculate my BMI. Just remember, I'm not a real doctor, so always check with your healthcare provider.",
-  voice: "luna",
-  prompt: "",
-  builtinTools: ["web_search", "run_code", "user_input", "final_answer"],
+  builtinTools: ["web_search", "run_code"],
   tools: {
     drug_info: {
       description:
         "Look up detailed information about a medication from the FDA database including usage, warnings, and side effects.",
       parameters: {
-        type: "object",
-        properties: {
-          name: {
-            type: "string",
-            description:
-              "Medication name (generic or brand, e.g. 'ibuprofen' or 'Advil')",
-          },
-        },
-        required: ["name"],
+        name: "Medication name (generic or brand, e.g. 'ibuprofen' or 'Advil')",
       },
-      execute: ({ name }, ctx) => lookupDrug(name, ctx),
+      execute: (args, ctx) => lookupDrug(args.name as string, ctx),
     },
     check_interaction: {
       description:
         "Check for known interactions between two or more medications using the NIH database.",
       parameters: {
-        type: "object",
-        properties: {
-          drugs: {
-            type: "string",
-            description:
-              "Comma-separated medication names (e.g. 'ibuprofen, warfarin')",
-          },
-        },
-        required: ["drugs"],
+        drugs: "Comma-separated medication names (e.g. 'ibuprofen, warfarin')",
       },
-      execute: ({ drugs }, ctx) => checkInteractions(drugs, ctx),
+      execute: (args, ctx) => checkInteractions(args.drugs as string, ctx),
     },
   },
 });

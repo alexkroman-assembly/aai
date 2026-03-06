@@ -33,7 +33,7 @@ type BuiltinTool =
   | "visit_webpage" // Fetch & convert a webpage to markdown
   | "fetch_json" // HTTP GET a JSON REST API
   | "run_code" // Execute JavaScript in a sandboxed Deno worker
-  | "user_input" // Ask the user a follow-up question
+  | "user_input" // Ask the user a follow-up question (always auto-included)
   | "final_answer"; // Deliver spoken response (always auto-included)
 
 type Voice =
@@ -57,6 +57,12 @@ type Voice =
   | "arcana"
   | (string & {}); // any Rime speaker ID — https://docs.rime.ai/api-reference/voices
 
+// Shorthand: bare string = required string param, object = JSON Schema property
+// All params required by default; add `optional: true` to opt out
+type ParamShorthand = string | (JSONSchemaProperty & { optional?: boolean });
+type SimpleToolParameters = Record<string, ParamShorthand>;
+
+// Full JSON Schema format still supported
 interface ToolParameters {
   type: "object";
   properties: Record<string, JSONSchemaProperty>;
@@ -65,8 +71,11 @@ interface ToolParameters {
 
 interface ToolDef {
   description: string; // LLM reads this to decide when to call the tool
-  parameters: ToolParameters; // JSON Schema object
-  execute: (args: any, ctx: ToolContext) => Promise<unknown> | unknown;
+  parameters: ToolParameters | SimpleToolParameters; // shorthand or full JSON Schema
+  execute: (
+    args: Record<string, unknown>,
+    ctx: ToolContext,
+  ) => Promise<unknown> | unknown;
 }
 
 interface ToolContext {
@@ -92,18 +101,15 @@ interface AgentOptions {
 
 ## Custom tools
 
-Define custom tools using JSON Schema for parameters:
+Define custom tools with shorthand parameters — bare strings become required
+string params, all params are required by default:
 
 ```ts
 tools: {
   my_tool: {
     description: "What this tool does",
     parameters: {
-      type: "object",
-      properties: {
-        param: { type: "string", description: "What this param is" },
-      },
-      required: ["param"],
+      param: "What this param is",
     },
     execute: async ({ param }, ctx) => {
       // ctx.fetch for HTTP requests
@@ -113,6 +119,18 @@ tools: {
   },
 },
 ```
+
+For enums, numbers, or optional params, use object syntax:
+
+```ts
+parameters: {
+  category: { type: "string", enum: ["a", "b", "c"] },
+  count: { type: "number", description: "How many" },
+  label: { type: "string", description: "Optional label", optional: true },
+},
+```
+
+Full JSON Schema (`type: "object"`, `properties`, `required`) is also supported.
 
 For tools that call external APIs, use `fetchJSON`:
 
@@ -152,14 +170,14 @@ export default defineAgent({
 
 ### Research agent (web search + page reading)
 
-Use `web_search`, `visit_webpage`, `user_input`, `final_answer`. Good for agents
-that answer questions using live web data.
+Use `web_search`, `visit_webpage`. Good for agents that answer questions using
+live web data.
 
 ### Code/calculation agent (sandbox execution)
 
-Use `run_code`, `user_input`, `final_answer`. Good for math, unit conversions,
-data processing. The `run_code` tool executes JavaScript — instruct the agent to
-always compute rather than guess.
+Use `run_code`. Good for math, unit conversions, data processing. The `run_code`
+tool executes JavaScript — instruct the agent to always compute rather than
+guess.
 
 ### API-powered agent (external data)
 
@@ -180,11 +198,7 @@ export default defineAgent({
     search_faq: {
       description: "Search the knowledge base",
       parameters: {
-        type: "object",
-        properties: {
-          query: { type: "string", description: "search term" },
-        },
-        required: ["query"],
+        query: "search term",
       },
       execute: ({ query }) => {
         const results = knowledge.faqs.filter((f) =>

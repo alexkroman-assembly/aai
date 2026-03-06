@@ -1,9 +1,11 @@
 import { debounce } from "@std/async/debounce";
+import { exists } from "@std/fs/exists";
 import { dirname, fromFileUrl, join } from "@std/path";
-import { log } from "./_output.ts";
+import { error, spinner, step, stepInfo } from "./_output.ts";
 import { type AgentEntry, loadAgent } from "./_discover.ts";
 import { bundleAgent, BundleError, warmNpmCache } from "./_bundler.ts";
 import { validateAgent, type ValidationResult } from "./_validate.ts";
+import { runDeploy } from "./deploy.ts";
 import { generateTypes } from "./types.ts";
 
 export interface DevOpts {
@@ -12,47 +14,6 @@ export interface DevOpts {
   watch?: boolean;
   openBrowser?: boolean;
   dryRun?: boolean;
-}
-
-async function deploy(
-  serverUrl: string,
-  bundleDir: string,
-  slug: string,
-  apiKey: string,
-): Promise<void> {
-  const dir = `${bundleDir}/${slug}`;
-  const manifest = JSON.parse(await Deno.readTextFile(`${dir}/manifest.json`));
-  const worker = await Deno.readTextFile(`${dir}/worker.js`);
-  const client = await Deno.readTextFile(`${dir}/client.js`);
-
-  let resp: Response;
-  try {
-    resp = await fetch(`${serverUrl}/deploy`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        slug: manifest.slug,
-        env: manifest.env,
-        worker,
-        client,
-        transport: manifest.transport,
-      }),
-    });
-  } catch (err) {
-    throw new Error(
-      `Deploy request failed: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
-    );
-  }
-
-  if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`Deploy failed (${resp.status}): ${text}`);
-  }
 }
 
 async function printSummary(
@@ -66,40 +27,38 @@ async function printSummary(
   ];
 
   if (agent.transport.includes("websocket")) {
-    log.stepInfo("App", `${serverUrl}/${agent.slug}/`);
+    stepInfo("App", `${serverUrl}/${agent.slug}/`);
     const wsBase = serverUrl.replace(/^http/, "ws");
-    log.stepInfo("WS", `${wsBase}/${agent.slug}/websocket`);
+    stepInfo("WS", `${wsBase}/${agent.slug}/websocket`);
   }
   if (agent.transport.includes("twilio")) {
-    log.stepInfo("Twilio", `${serverUrl}/twilio/${agent.slug}/voice`);
+    stepInfo("Twilio", `${serverUrl}/twilio/${agent.slug}/voice`);
   }
 
   console.log();
-  log.stepInfo("Agent", validation.name ?? agent.slug);
+  stepInfo("Agent", validation.name ?? agent.slug);
   if (validation.voice) {
-    log.stepInfo("Voice", validation.voice);
+    stepInfo("Voice", validation.voice);
   }
   if (tools.length > 0) {
-    log.stepInfo("Tools", tools.join(", "));
+    stepInfo("Tools", tools.join(", "));
   }
   const envKeys = Object.keys(agent.env);
   if (envKeys.length > 0) {
-    log.stepInfo("Secrets", envKeys.join(", "));
+    stepInfo("Secrets", envKeys.join(", "));
   }
 
-  // List project files
   const files: string[] = [];
   for (const name of ["agent.ts", "agent.json", "client.tsx", ".env"]) {
-    try {
-      await Deno.stat(join(agent.dir, name));
+    if (await exists(join(agent.dir, name))) {
       files.push(name);
-    } catch { /* not present */ }
+    }
   }
   if (files.length > 0) {
-    log.stepInfo("Files", files.join(", "));
+    stepInfo("Files", files.join(", "));
   }
-  log.stepInfo("Docs", "CLAUDE.md — aai agent API reference");
-  log.stepInfo("GitHub", "https://github.com/alexkroman/aai");
+  stepInfo("Docs", "CLAUDE.md -- aai agent API reference");
+  stepInfo("GitHub", "https://github.com/alexkroman/aai");
 }
 
 /** Run `deno check` on agent files and return any diagnostics. */
@@ -116,7 +75,6 @@ async function typeCheck(agent: AgentEntry): Promise<string | null> {
   });
   const { success, stderr } = await cmd.output();
   if (success) return null;
-  // Strip Deno's "Check file://..." progress lines, keep only errors
   return new TextDecoder().decode(stderr)
     .split("\n")
     // deno-lint-ignore no-control-regex
@@ -125,43 +83,49 @@ async function typeCheck(agent: AgentEntry): Promise<string | null> {
     .trim();
 }
 
-/** Validate, bundle, and optionally deploy an agent. */
+/** Type-check, validate, bundle, and optionally deploy an agent. */
 async function buildAndDeploy(
   agent: AgentEntry,
   serverUrl: string,
   tmpDir: string,
   dryRun?: boolean,
 ): Promise<ValidationResult> {
-  log.step("Check", agent.slug);
+  step("Check", agent.slug);
 
   const diagnostics = await typeCheck(agent);
   if (diagnostics) {
     console.error(diagnostics);
-    throw new Error("type check failed — fix the errors above");
+    throw new Error("type check failed -- fix the errors above");
   }
 
   const validation = await validateAgent(agent);
   if (validation.errors.length > 0) {
     for (const e of validation.errors) {
-      log.error(`${e.field}: ${e.message}`);
+      error(`${e.field}: ${e.message}`);
     }
-    throw new Error("agent validation failed — fix the errors above");
+    throw new Error("agent validation failed -- fix the errors above");
   }
 
-  log.step("Bundle", agent.slug);
+  step("Bundle", agent.slug);
   try {
     await bundleAgent(agent, `${tmpDir}/${agent.slug}`);
   } catch (err) {
     if (err instanceof BundleError) {
       console.error(err.message);
-      throw new Error("bundle failed — fix the errors above");
+      throw new Error("bundle failed -- fix the errors above");
     }
     throw err;
   }
 
   if (!dryRun) {
-    log.step("Deploy", agent.slug);
-    await deploy(serverUrl, tmpDir, agent.slug, agent.env.ASSEMBLYAI_API_KEY);
+    step("Deploy", agent.slug);
+    await runDeploy({
+      url: serverUrl,
+      bundleDir: tmpDir,
+      slug: agent.slug,
+      dryRun: false,
+      apiKey: agent.env.ASSEMBLYAI_API_KEY,
+    });
   }
 
   return validation;
@@ -172,40 +136,37 @@ export async function runDev(opts: DevOpts): Promise<void> {
   try {
     const result = await loadAgent(opts.agentDir);
     if (!result) {
-      log.error("no agent found — needs agent.ts + agent.json");
+      error("no agent found -- needs agent.ts + agent.json");
       throw new Error("missing agent files");
     }
     agent = result;
 
-    // Always regenerate types.d.ts (auto-generated); write tsconfig.json if missing
     await generateTypes(opts.agentDir);
 
     // Write CLAUDE.md if missing
     const claudePath = join(opts.agentDir, "CLAUDE.md");
-    try {
-      await Deno.stat(claudePath);
-    } catch {
+    if (!await exists(claudePath)) {
       const cliDir = dirname(fromFileUrl(import.meta.url));
       const srcClaude = join(cliDir, "claude.md");
       await Deno.copyFile(srcClaude, claudePath);
-      log.step(
+      step(
         "Wrote",
-        "CLAUDE.md — read this file for the aai agent API reference",
+        "CLAUDE.md -- read this file for the aai agent API reference",
       );
     }
   } catch (err) {
     if (err instanceof Error && err.message === "missing agent files") {
       throw err;
     }
-    log.error(err instanceof Error ? err.message : String(err));
-    throw new Error("failed to load agent — fix the errors above");
+    error(err instanceof Error ? err.message : String(err));
+    throw new Error("failed to load agent -- fix the errors above");
   }
 
   const tmpDir = await Deno.makeTempDir({ prefix: "aai-dev-" });
 
-  const spinner = log.spinner("Setup", "preparing bundler...");
+  const sp = spinner("Setup", "preparing bundler...");
   await warmNpmCache();
-  spinner.stop();
+  sp.stop();
 
   const validation = await buildAndDeploy(
     agent,
@@ -213,7 +174,7 @@ export async function runDev(opts: DevOpts): Promise<void> {
     tmpDir,
     opts.dryRun,
   );
-  log.step(opts.dryRun ? "OK" : "Ready", agent.slug);
+  step(opts.dryRun ? "OK" : "Ready", agent.slug);
   if (!opts.dryRun) {
     await printSummary(agent, validation, opts.serverUrl);
   }
@@ -239,9 +200,10 @@ export async function runDev(opts: DevOpts): Promise<void> {
     return;
   }
 
-  // Watch for file changes → rebuild and redeploy
-  log.stepInfo("Watch", "for changes...");
+  // Watch for file changes -> rebuild and redeploy
+  stepInfo("Watch", "for changes...");
 
+  const ac = new AbortController();
   const watcher = Deno.watchFs([agent.dir], { recursive: true });
 
   const WATCHED_EXTENSIONS = [
@@ -272,10 +234,10 @@ export async function runDev(opts: DevOpts): Promise<void> {
         tmpDir,
         opts.dryRun,
       );
-      log.step("Ready", freshAgent.slug);
+      step("Ready", freshAgent.slug);
       await printSummary(freshAgent, freshValidation, opts.serverUrl);
     } catch (err: unknown) {
-      log.error(err instanceof Error ? err.message : String(err));
+      error(err instanceof Error ? err.message : String(err));
     } finally {
       building = false;
       if (pendingRebuild) {
@@ -285,25 +247,22 @@ export async function runDev(opts: DevOpts): Promise<void> {
     }
   }, 300);
 
-  (async () => {
-    for await (const event of watcher) {
-      const hasRelevantChange = event.paths.some((p) =>
-        WATCHED_EXTENSIONS.some((ext) => p.endsWith(ext))
-      );
-      if (!hasRelevantChange) continue;
-      if (event.paths.every((p) => p.includes("_test.ts"))) continue;
-      rebuild();
-    }
-  })();
-
   const cleanup = () => {
+    ac.abort();
     watcher.close();
     Deno.removeSync(tmpDir, { recursive: true });
-    Deno.exit(0);
   };
 
   Deno.addSignalListener("SIGINT", cleanup);
   Deno.addSignalListener("SIGTERM", cleanup);
 
-  await new Promise(() => {});
+  for await (const event of watcher) {
+    if (ac.signal.aborted) break;
+    const hasRelevantChange = event.paths.some((p) =>
+      WATCHED_EXTENSIONS.some((ext) => p.endsWith(ext))
+    );
+    if (!hasRelevantChange) continue;
+    if (event.paths.every((p) => p.includes("_test.ts"))) continue;
+    rebuild();
+  }
 }

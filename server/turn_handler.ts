@@ -47,30 +47,32 @@ export async function executeTurn(
     (t) => t.name === FINAL_ANSWER_TOOL,
   );
 
-  let callNum = 0;
-  callNum++;
-  logger.debug("LLM call", {
-    callNum,
-    messageCount: messages.length,
-    toolChoice: toolChoice ?? "auto",
-    tools: toolSchemas.length,
-  });
-  let response = await callLLM({
-    messages,
-    tools: toolSchemas,
-    toolChoice,
-    signal,
-  });
-  logger.debug("LLM response", {
-    callNum,
-    finishReason: response.choices[0]?.finish_reason,
-  });
+  let tools = toolSchemas;
+  let choice: ToolChoiceParam = toolChoice;
 
-  let iterations = 0;
-  while (iterations <= MAX_TOOL_ITERATIONS) {
-    const choice = response.choices[0];
-    if (!choice) break;
-    const msg = choice.message;
+  for (let iteration = 0; iteration <= MAX_TOOL_ITERATIONS; iteration++) {
+    if (signal.aborted) break;
+
+    logger.debug("LLM call", {
+      callNum: iteration + 1,
+      messageCount: messages.length,
+      toolChoice: choice ?? "auto",
+      tools: tools.length,
+    });
+    const response = await callLLM({
+      messages,
+      tools,
+      toolChoice: choice,
+      signal,
+    });
+    logger.debug("LLM response", {
+      callNum: iteration + 1,
+      finishReason: response.choices[0]?.finish_reason,
+    });
+
+    const res = response.choices[0];
+    if (!res) break;
+    const msg = res.message;
 
     // final_answer — return immediately
     const answerTc = msg.tool_calls?.find((c) =>
@@ -115,17 +117,17 @@ export async function executeTurn(
     }
 
     // Out of iterations — return whatever text we have
-    if (iterations === MAX_TOOL_ITERATIONS) {
+    if (iteration === MAX_TOOL_ITERATIONS) {
       const fallback = msg.content ?? "Sorry, I couldn't generate a response.";
       messages.push({ role: "assistant", content: fallback });
       return fallback;
     }
 
     // Truncated tool calls — LLM ran out of tokens mid-generation, retry
-    if (choice.finish_reason === "max_tokens" && msg.tool_calls?.length) {
+    if (res.finish_reason === "max_tokens" && msg.tool_calls?.length) {
       logger.warn("tool call truncated by max_tokens, retrying", {
         tools: msg.tool_calls.map((tc) => tc.function.name),
-        iteration: iterations + 1,
+        iteration: iteration + 1,
       });
       if (msg.content) {
         messages.push({ role: "assistant", content: msg.content });
@@ -147,7 +149,7 @@ export async function executeTurn(
       });
       logger.info("executing tools", {
         tools: msg.tool_calls.map((tc) => tc.function.name),
-        iteration: iterations + 1,
+        iteration: iteration + 1,
       });
 
       const results = await Promise.allSettled(
@@ -181,12 +183,12 @@ export async function executeTurn(
         });
       }
     } else if (
-      choice.finish_reason === "tool_use" ||
-      choice.finish_reason === "tool_calls"
+      res.finish_reason === "tool_use" ||
+      res.finish_reason === "tool_calls"
     ) {
       logger.warn(
         "finish_reason indicates tool use but no tool_calls present, retrying",
-        { finishReason: choice.finish_reason },
+        { finishReason: res.finish_reason },
       );
       if (msg.content) {
         messages.push({ role: "assistant", content: msg.content });
@@ -200,36 +202,15 @@ export async function executeTurn(
       return responseText;
     }
 
-    if (signal.aborted) break;
-
-    iterations++;
-
     // Force final_answer on last iteration
-    const nextTools = iterations >= MAX_TOOL_ITERATIONS && finalAnswerSchema
-      ? [finalAnswerSchema]
-      : toolSchemas;
-    const nextChoice: ToolChoiceParam =
-      iterations >= MAX_TOOL_ITERATIONS && finalAnswerSchema
-        ? { type: "function" as const, function: { name: FINAL_ANSWER_TOOL } }
-        : toolChoice;
-
-    callNum++;
-    logger.debug("LLM call", {
-      callNum,
-      messageCount: messages.length,
-      toolChoice: nextChoice ?? "auto",
-      tools: nextTools.length,
-    });
-    response = await callLLM({
-      messages,
-      tools: nextTools,
-      toolChoice: nextChoice,
-      signal,
-    });
-    logger.debug("LLM response", {
-      callNum,
-      finishReason: response.choices[0]?.finish_reason,
-    });
+    const nextIteration = iteration + 1;
+    if (nextIteration >= MAX_TOOL_ITERATIONS && finalAnswerSchema) {
+      tools = [finalAnswerSchema];
+      choice = {
+        type: "function" as const,
+        function: { name: FINAL_ANSWER_TOOL },
+      };
+    }
   }
 
   return "";

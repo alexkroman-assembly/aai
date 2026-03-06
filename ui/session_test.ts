@@ -1,6 +1,10 @@
 import { expect } from "@std/expect";
 import { FakeTime } from "@std/testing/time";
-import { parseServerMessage, VoiceSession } from "./session.ts";
+import {
+  createVoiceSession,
+  parseServerMessage,
+  type VoiceSession,
+} from "./session.ts";
 import { PING_INTERVAL_MS, type SessionOptions } from "./types.ts";
 import { flush, installMockWebSocket } from "./_test_utils.ts";
 
@@ -61,7 +65,7 @@ Deno.test("VoiceSession", async (t) => {
     mock: ReturnType<typeof installMockWebSocket>,
     opts: SessionOptions = defaultOptions,
   ): Promise<{ session: VoiceSession; ws: NonNullable<typeof mock.lastWs> }> {
-    const session = new VoiceSession(opts);
+    const session = createVoiceSession(opts);
     session.connect();
     await flush();
     return { session, ws: mock.lastWs! };
@@ -332,7 +336,7 @@ Deno.test("VoiceSession", async (t) => {
     await t.step(
       "is safe to call when not connected",
       withSessionEnv(() => {
-        const session = new VoiceSession(defaultOptions);
+        const session = createVoiceSession(defaultOptions);
         expect(() => session.disconnect()).not.toThrow();
       }),
     );
@@ -360,7 +364,7 @@ Deno.test("VoiceSession", async (t) => {
       withSessionEnv(async (mock) => {
         const time = new FakeTime();
         try {
-          const session = new VoiceSession(defaultOptions);
+          const session = createVoiceSession(defaultOptions);
           session.connect();
 
           await time.tickAsync(0);

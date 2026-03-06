@@ -2,7 +2,7 @@ import { h, render } from "preact";
 import type { ComponentType } from "preact";
 import { createPortal } from "preact/compat";
 import { setup } from "goober";
-import { VoiceSession } from "./session.ts";
+import { createVoiceSession, type VoiceSession } from "./session.ts";
 import {
   createSessionControls,
   SessionProvider,
@@ -57,7 +57,7 @@ export function mount(
 
   const platformUrl = options?.platformUrl ??
     new URL(".", globalThis.location.href).href.replace(/\/$/, "");
-  const session = new VoiceSession({ platformUrl });
+  const session = createVoiceSession({ platformUrl });
   const signals = createSessionControls(session);
 
   render(

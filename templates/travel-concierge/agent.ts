@@ -23,13 +23,5 @@ API endpoints (use fetch_json):
   Returns { rates: { USD: 1.0, EUR: 0.85, ... } }`,
   greeting:
     "Hey, I'm Aria, your travel concierge. Try asking me something like, what's the weather in Tokyo this week, or help me plan a long weekend in Barcelona.",
-  voice: "luna",
-  prompt: "",
-  builtinTools: [
-    "web_search",
-    "visit_webpage",
-    "fetch_json",
-    "user_input",
-    "final_answer",
-  ],
+  builtinTools: ["web_search", "visit_webpage", "fetch_json"],
 });

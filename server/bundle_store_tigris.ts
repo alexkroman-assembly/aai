@@ -6,6 +6,7 @@ import {
   S3Client,
 } from "@aws-sdk/client-s3";
 import type { AgentMetadata } from "./worker_pool.ts";
+import { AgentMetadataSchema } from "../sdk/_rpc_schema.ts";
 
 export type FileKey = "worker" | "client" | "client_map";
 
@@ -52,109 +53,32 @@ export function createS3Client(): S3Client {
   });
 }
 
-export class TigrisBundleStore implements BundleStore {
-  #s3: S3Client;
-  #bucket: string;
-  #cache = new Map<string, CacheEntry>();
+function isS3Error(err: unknown, codeOrStatus: string): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const e = err as Record<string, unknown>;
+  return (
+    e.name === codeOrStatus ||
+    e.Code === codeOrStatus ||
+    String(
+        e.$metadata && (e.$metadata as Record<string, unknown>).httpStatusCode,
+      ) === codeOrStatus
+  );
+}
 
-  constructor(s3: S3Client, bucket: string) {
-    this.#s3 = s3;
-    this.#bucket = bucket;
-  }
+export function createBundleStore(
+  s3: S3Client,
+  bucket: string,
+): BundleStore {
+  const cache = new Map<string, CacheEntry>();
 
-  async putAgent(bundle: {
-    slug: string;
-    env: Record<string, string>;
-    transport: ("websocket" | "twilio")[];
-    worker: string;
-    client: string;
-    client_map?: string;
-    owner_hash?: string;
-  }): Promise<void> {
-    await this.deleteAgent(bundle.slug);
-
-    const manifest: AgentMetadata = {
-      slug: bundle.slug,
-      env: bundle.env,
-      transport: bundle.transport,
-      ...(bundle.owner_hash ? { owner_hash: bundle.owner_hash } : {}),
-    };
-    await this.#put(
-      objectKey(bundle.slug, "manifest.json"),
-      JSON.stringify(manifest),
-      "application/json",
-    );
-
-    await this.#put(
-      objectKey(bundle.slug, "worker.js"),
-      bundle.worker,
-      "application/javascript",
-    );
-
-    await this.#put(
-      objectKey(bundle.slug, "client.js"),
-      bundle.client,
-      "application/javascript",
-    );
-
-    if (bundle.client_map) {
-      await this.#put(
-        objectKey(bundle.slug, "client.js.map"),
-        bundle.client_map,
-        "application/json",
-      );
-    }
-  }
-
-  async getManifest(slug: string): Promise<AgentMetadata | null> {
-    const data = await this.#get(objectKey(slug, "manifest.json"));
-    if (data === null) return null;
-    return JSON.parse(data) as AgentMetadata;
-  }
-
-  async getFile(slug: string, file: FileKey): Promise<string | null> {
-    const fileName = FILE_NAMES[file];
-    return await this.#get(objectKey(slug, fileName));
-  }
-
-  async deleteAgent(slug: string): Promise<void> {
-    const prefix = `agents/${slug}/`;
-    const listed = await this.#s3.send(
-      new ListObjectsV2Command({
-        Bucket: this.#bucket,
-        Prefix: prefix,
-      }),
-    );
-
-    const objects = listed.Contents;
-    if (!objects || objects.length === 0) return;
-
-    await this.#s3.send(
-      new DeleteObjectsCommand({
-        Bucket: this.#bucket,
-        Delete: {
-          Objects: objects.map((o) => ({ Key: o.Key })),
-        },
-      }),
-    );
-
-    for (const o of objects) {
-      if (o.Key) this.#cache.delete(o.Key);
-    }
-  }
-
-  close(): void {
-    // S3 client has no close
-  }
-
-  [Symbol.dispose](): void {
-    this.close();
-  }
-
-  async #put(key: string, body: string, contentType: string): Promise<void> {
-    const result = await this.#s3.send(
+  async function put(
+    key: string,
+    body: string,
+    contentType: string,
+  ): Promise<void> {
+    const result = await s3.send(
       new PutObjectCommand({
-        Bucket: this.#bucket,
+        Bucket: bucket,
         Key: key,
         Body: body,
         ContentType: contentType,
@@ -162,17 +86,17 @@ export class TigrisBundleStore implements BundleStore {
     );
 
     if (result.ETag) {
-      this.#cache.set(key, { data: body, etag: result.ETag });
+      cache.set(key, { data: body, etag: result.ETag });
     }
   }
 
-  async #get(key: string): Promise<string | null> {
-    const cached = this.#cache.get(key);
+  async function get(key: string): Promise<string | null> {
+    const cached = cache.get(key);
 
     try {
-      const result = await this.#s3.send(
+      const result = await s3.send(
         new GetObjectCommand({
-          Bucket: this.#bucket,
+          Bucket: bucket,
           Key: key,
           ...(cached ? { IfNoneMatch: cached.etag } : {}),
         }),
@@ -180,7 +104,7 @@ export class TigrisBundleStore implements BundleStore {
 
       const data = await result.Body!.transformToString();
       if (result.ETag) {
-        this.#cache.set(key, { data, etag: result.ETag });
+        cache.set(key, { data, etag: result.ETag });
       }
       return data;
     } catch (err: unknown) {
@@ -193,16 +117,147 @@ export class TigrisBundleStore implements BundleStore {
       throw err;
     }
   }
+
+  async function deleteAgent(slug: string): Promise<void> {
+    const prefix = `agents/${slug}/`;
+    const listed = await s3.send(
+      new ListObjectsV2Command({
+        Bucket: bucket,
+        Prefix: prefix,
+      }),
+    );
+
+    const objects = listed.Contents;
+    if (!objects || objects.length === 0) return;
+
+    await s3.send(
+      new DeleteObjectsCommand({
+        Bucket: bucket,
+        Delete: {
+          Objects: objects.map((o) => ({ Key: o.Key })),
+        },
+      }),
+    );
+
+    for (const o of objects) {
+      if (o.Key) cache.delete(o.Key);
+    }
+  }
+
+  return {
+    async putAgent(bundle) {
+      await deleteAgent(bundle.slug);
+
+      const manifest: AgentMetadata = {
+        slug: bundle.slug,
+        env: bundle.env,
+        transport: bundle.transport,
+        ...(bundle.owner_hash ? { owner_hash: bundle.owner_hash } : {}),
+      };
+      await put(
+        objectKey(bundle.slug, "manifest.json"),
+        JSON.stringify(manifest),
+        "application/json",
+      );
+
+      await put(
+        objectKey(bundle.slug, "worker.js"),
+        bundle.worker,
+        "application/javascript",
+      );
+
+      await put(
+        objectKey(bundle.slug, "client.js"),
+        bundle.client,
+        "application/javascript",
+      );
+
+      if (bundle.client_map) {
+        await put(
+          objectKey(bundle.slug, "client.js.map"),
+          bundle.client_map,
+          "application/json",
+        );
+      }
+    },
+
+    async getManifest(slug) {
+      const data = await get(objectKey(slug, "manifest.json"));
+      if (data === null) return null;
+      const parsed = AgentMetadataSchema.safeParse(JSON.parse(data));
+      if (!parsed.success) return null;
+      return parsed.data as AgentMetadata;
+    },
+
+    async getFile(slug, file) {
+      const fileName = FILE_NAMES[file];
+      return await get(objectKey(slug, fileName));
+    },
+
+    deleteAgent,
+
+    close() {
+      // S3 client has no close
+    },
+
+    [Symbol.dispose]() {
+      // no-op
+    },
+  };
 }
 
-function isS3Error(err: unknown, codeOrStatus: string): boolean {
-  if (typeof err !== "object" || err === null) return false;
-  const e = err as Record<string, unknown>;
-  return (
-    e.name === codeOrStatus ||
-    e.Code === codeOrStatus ||
-    String(
-        e.$metadata && (e.$metadata as Record<string, unknown>).httpStatusCode,
-      ) === codeOrStatus
-  );
+/** In-memory S3-compatible client for local development. */
+export function createMemoryS3Client(): S3Client {
+  const store = new Map<string, { body: string; etag: string }>();
+
+  return {
+    send(command: unknown): Promise<unknown> {
+      if (command instanceof PutObjectCommand) {
+        const key = command.input.Key!;
+        const body = command.input.Body as string;
+        const etag = `"${Date.now()}"`;
+        store.set(key, { body, etag });
+        return Promise.resolve({ ETag: etag });
+      }
+
+      if (command instanceof GetObjectCommand) {
+        const key = command.input.Key!;
+        const entry = store.get(key);
+        if (!entry) {
+          return Promise.reject({ name: "NoSuchKey" });
+        }
+        if (
+          command.input.IfNoneMatch &&
+          command.input.IfNoneMatch === entry.etag
+        ) {
+          return Promise.reject({ name: "304" });
+        }
+        return Promise.resolve({
+          Body: { transformToString: () => Promise.resolve(entry.body) },
+          ETag: entry.etag,
+        });
+      }
+
+      if (command instanceof ListObjectsV2Command) {
+        const prefix = command.input.Prefix ?? "";
+        const contents = [...store.keys()]
+          .filter((k) => k.startsWith(prefix))
+          .map((k) => ({ Key: k }));
+        return Promise.resolve({ Contents: contents });
+      }
+
+      if (command instanceof DeleteObjectsCommand) {
+        const objects = command.input.Delete?.Objects ?? [];
+        for (const obj of objects) {
+          if (obj.Key) store.delete(obj.Key);
+        }
+        return Promise.resolve({});
+      }
+
+      return Promise.reject(new Error(`Unsupported S3 command`));
+    },
+    destroy() {},
+    config: {} as S3Client["config"],
+    middlewareStack: {} as S3Client["middlewareStack"],
+  } as unknown as S3Client;
 }

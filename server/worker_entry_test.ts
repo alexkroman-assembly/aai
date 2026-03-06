@@ -1,7 +1,7 @@
 import { expect } from "@std/expect";
-import type { ToolDef } from "./agent_types.ts";
-import { startWorker } from "./worker_entry.ts";
-import { createWorkerRpc } from "./worker_pool.ts";
+import type { BuiltinTool, ToolDef } from "../sdk/types.ts";
+import { startWorker } from "../sdk/_worker_entry.ts";
+import { createWorkerRpc } from "./rpc.ts";
 
 function createHarness(
   agent: {
@@ -10,7 +10,7 @@ function createHarness(
     greeting: string;
     voice: string;
     prompt?: string;
-    builtinTools?: readonly string[];
+    builtinTools?: readonly BuiltinTool[];
     tools: Record<string, ToolDef>;
   },
   secrets: Record<string, string> = {},

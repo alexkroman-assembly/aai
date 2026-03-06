@@ -1,68 +1,93 @@
-// Playback worklet: receives Int16 PCM chunks via postMessage, converts to
-// Float32, queues them, and shifts 128-sample buffers into process() output.
-// Modeled after pipecat's stream_processor worklet.
+// Playback worklet: receives raw PCM16 LE bytes, handles byte alignment,
+// converts to float32, and plays with a small jitter buffer.
 
 const PlaybackProcessorWorklet = `
 class PlaybackProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
-    this.hasStarted = false;
-    this.hasInterrupted = false;
-    this.outputBuffers = [];
-    this.bufferLength = 128;
-    // Buffer ~200ms at 24kHz before starting playback (24000/128 * 0.2 ≈ 37)
-    this.minBufferCount = 37;
-    this.write = { buffer: new Float32Array(this.bufferLength) };
-    this.writeOffset = 0;
+    this.interrupted = false;
+    this.isDone = false;
+    this.playing = false;
+    // Wait for ~200ms of audio (4800 samples @ 24kHz) before starting.
+    // If 'done' arrives first (short utterance), start immediately.
+    this.jitterSamples = 4800;
+    // Carry-over byte for split samples across chunks
+    this.carry = null;
+    // Float32 sample buffer — 60s at 24kHz (~5.5MB)
+    this.samples = new Float32Array(24000 * 60);
+    this.writePos = 0;
+    this.readPos = 0;
+
     this.port.onmessage = (e) => {
-      const payload = e.data;
-      if (payload.event === 'write') {
-        const int16Array = payload.buffer;
-        const float32Array = new Float32Array(int16Array.length);
-        for (let i = 0; i < int16Array.length; i++) {
-          float32Array[i] = int16Array[i] / 0x8000;
-        }
-        this.writeData(float32Array);
-      } else if (payload.event === 'interrupt') {
-        this.hasInterrupted = true;
+      const d = e.data;
+      if (d.event === 'write') {
+        this.ingestBytes(d.buffer);
+      } else if (d.event === 'interrupt') {
+        this.interrupted = true;
+      } else if (d.event === 'done') {
+        this.isDone = true;
       }
     };
   }
 
-  writeData(float32Array) {
-    let { buffer } = this.write;
-    let offset = this.writeOffset;
-    for (let i = 0; i < float32Array.length; i++) {
-      buffer[offset++] = float32Array[i];
-      if (offset >= buffer.length) {
-        this.outputBuffers.push(this.write);
-        this.write = { buffer: new Float32Array(this.bufferLength) };
-        buffer = this.write.buffer;
-        offset = 0;
-      }
+  ingestBytes(uint8) {
+    let bytes = uint8;
+
+    if (this.carry !== null) {
+      const merged = new Uint8Array(1 + bytes.length);
+      merged[0] = this.carry;
+      merged.set(bytes, 1);
+      bytes = merged;
+      this.carry = null;
     }
-    this.writeOffset = offset;
+
+    if (bytes.length % 2 !== 0) {
+      this.carry = bytes[bytes.length - 1];
+      bytes = bytes.subarray(0, bytes.length - 1);
+    }
+
+    if (bytes.length === 0) return;
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.length);
+    const numSamples = bytes.length / 2;
+    for (let i = 0; i < numSamples; i++) {
+      this.samples[this.writePos++] = view.getInt16(i * 2, true) / 0x8000;
+    }
   }
 
   process(inputs, outputs) {
-    const output = outputs[0];
-    const outputChannelData = output[0];
-    if (this.hasInterrupted) {
+    const out = outputs[0][0];
+    if (this.interrupted) {
       this.port.postMessage({ event: 'stop' });
       return false;
-    } else if (this.outputBuffers.length && (this.hasStarted || this.outputBuffers.length >= this.minBufferCount)) {
-      this.hasStarted = true;
-      const { buffer } = this.outputBuffers.shift();
-      for (let i = 0; i < outputChannelData.length; i++) {
-        outputChannelData[i] = buffer[i] || 0;
+    }
+
+    const avail = this.writePos - this.readPos;
+
+    // Wait for jitter buffer to fill, unless done (short utterance)
+    if (!this.playing) {
+      if (avail >= this.jitterSamples || this.isDone) {
+        this.playing = true;
+      } else {
+        for (let i = 0; i < out.length; i++) out[i] = 0;
+        return true;
       }
-      return true;
-    } else if (this.hasStarted) {
-      this.port.postMessage({ event: 'stop' });
-      return false;
-    } else {
+    }
+
+    if (avail > 0) {
+      const n = Math.min(avail, out.length);
+      out.set(this.samples.subarray(this.readPos, this.readPos + n));
+      this.readPos += n;
+      for (let i = n; i < out.length; i++) out[i] = 0;
       return true;
     }
+
+    // No data: output silence, stop only when done
+    for (let i = 0; i < out.length; i++) out[i] = 0;
+    if (this.isDone) {
+      this.port.postMessage({ event: 'stop' });
+      return false;
+    }
+    return true;
   }
 }
 

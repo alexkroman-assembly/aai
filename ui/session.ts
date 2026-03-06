@@ -4,7 +4,7 @@ import {
   DEFAULT_TTS_SAMPLE_RATE,
   type ErrorMessage,
   type ServerMessage,
-} from "@aai/server/protocol";
+} from "@aai/sdk/protocol";
 
 import {
   type AgentState,
@@ -72,188 +72,98 @@ export function parseServerMessage(data: string): ServerMessage | null {
   }
 }
 
-export class VoiceSession {
-  readonly state: Signal<AgentState> = signal<AgentState>("connecting");
-  readonly messages: Signal<Message[]> = signal<Message[]>([]);
-  readonly transcript: Signal<string> = signal<string>("");
-  readonly error: Signal<SessionError | null> = signal<SessionError | null>(
-    null,
-  );
-  readonly disconnected: Signal<{ intentional: boolean } | null> = signal<
-    { intentional: boolean } | null
-  >(null);
+export interface VoiceSession {
+  readonly state: Signal<AgentState>;
+  readonly messages: Signal<Message[]>;
+  readonly transcript: Signal<string>;
+  readonly error: Signal<SessionError | null>;
+  readonly disconnected: Signal<{ intentional: boolean } | null>;
+  connect(options?: { signal?: AbortSignal }): void;
+  cancel(): void;
+  resetState(): void;
+  reset(): void;
+  disconnect(): void;
+  [Symbol.dispose](): void;
+}
 
-  private ws: WebSocket | null = null;
-  private voiceIO: VoiceIO | null = null;
-  private streamingMessage = false;
-  private reconnector = createReconnect();
-  private connectionController: AbortController | null = null;
-  private hasConnected = false;
-  private audioSetupInFlight = false;
-  private pongReceived = true;
+export function createVoiceSession(options: SessionOptions): VoiceSession {
+  const state = signal<AgentState>("connecting");
+  const messages = signal<Message[]>([]);
+  const transcript = signal<string>("");
+  const error = signal<SessionError | null>(null);
+  const disconnected = signal<{ intentional: boolean } | null>(null);
 
-  constructor(private options: SessionOptions) {}
+  let ws: WebSocket | null = null;
+  let voiceIO: VoiceIO | null = null;
+  let streamingMessage = false;
+  const reconnector = createReconnect();
+  let connectionController: AbortController | null = null;
+  let hasConnected = false;
+  let audioSetupInFlight = false;
+  let pongReceived = true;
 
-  connect(options?: { signal?: AbortSignal }): void {
-    this.disconnected.value = null;
-    this.connectionController?.abort();
-    const controller = new AbortController();
-    this.connectionController = controller;
-    const { signal } = controller;
-
-    if (options?.signal) {
-      options.signal.addEventListener("abort", () => this.disconnect(), {
-        signal,
-      });
-    }
-
-    const base = this.options.platformUrl;
-    const wsUrl = new URL("websocket", base.endsWith("/") ? base : base + "/");
-    wsUrl.protocol = wsUrl.protocol === "https:" ? "wss:" : "ws:";
-    if (this.hasConnected) wsUrl.searchParams.set("resume", "1");
-    const ws = new WebSocket(wsUrl);
-    this.ws = ws;
-    ws.binaryType = "arraybuffer";
-
-    ws.addEventListener("open", () => {
-      if (this.hasConnected && this.messages.value.length > 0) {
-        ws.send(JSON.stringify({
-          type: "history",
-          messages: this.messages.value.map((m) => ({
-            role: m.role,
-            text: m.text,
-          })),
-        }));
+  function trySend(msg: Record<string, unknown>): boolean {
+    try {
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(msg));
+        return true;
       }
-      this.state.value = "ready";
-      this.startPing(signal);
-    }, { signal });
-
-    ws.addEventListener("message", (event) => {
-      this.handleServerMessage(event);
-    }, { signal });
-
-    ws.addEventListener("close", () => {
-      if (signal.aborted) {
-        this.state.value = "connecting";
-        return;
-      }
-      controller.abort();
-      this.disconnected.value = { intentional: false };
-      this.cleanupAudio();
-      this.scheduleReconnect();
-    }, { signal });
+    } catch { /* ws may have closed between check and send */ }
+    return false;
   }
 
-  private handleServerMessage(event: MessageEvent): void {
-    if (event.data instanceof ArrayBuffer) {
-      if (this.state.value === "speaking") {
-        this.voiceIO?.enqueue(event.data);
-      }
-      return;
-    }
+  function cleanupAudio(): void {
+    audioSetupInFlight = false;
+    void voiceIO?.close();
+    voiceIO = null;
+  }
 
-    const msg = parseServerMessage(event.data as string);
-    if (!msg) return;
-
+  function resetState(): void {
     batch(() => {
-      switch (msg.type) {
-        case "ready":
-          this.hasConnected = true;
-          this.reconnector.reset();
-          void this.handleReady(msg);
-          break;
-        case "partial_transcript":
-          this.transcript.value = msg.text;
-          break;
-        case "final_transcript":
-          this.transcript.value = msg.text;
-          break;
-        case "turn":
-          this.transcript.value = "";
-          this.messages.value = [
-            ...this.messages.value,
-            { role: "user", text: msg.text },
-          ];
-          this.state.value = "thinking";
-          break;
-        case "chat":
-          this.messages.value = [
-            ...this.messages.value,
-            { role: "assistant", text: msg.text },
-          ];
-          this.state.value = "speaking";
-          break;
-        case "chat_delta": {
-          const msgs = this.messages.value;
-          const last = msgs[msgs.length - 1];
-          if (last && last.role === "assistant" && this.streamingMessage) {
-            // Append to existing streaming message
-            this.messages.value = [
-              ...msgs.slice(0, -1),
-              { role: "assistant", text: last.text + msg.text },
-            ];
-          } else {
-            // First delta — create new message
-            this.streamingMessage = true;
-            this.messages.value = [
-              ...msgs,
-              { role: "assistant", text: msg.text },
-            ];
-          }
-          this.state.value = "speaking";
-          break;
-        }
-        case "chat_done":
-          this.streamingMessage = false;
-          // Replace the streaming message with the final complete text
-          if (msg.text) {
-            const msgs = this.messages.value;
-            const last = msgs[msgs.length - 1];
-            if (last && last.role === "assistant") {
-              this.messages.value = [
-                ...msgs.slice(0, -1),
-                { role: "assistant", text: msg.text },
-              ];
-            }
-          }
-          break;
-        case "tts_done":
-          this.streamingMessage = false;
-          this.state.value = "listening";
-          break;
-        case "cancelled":
-          this.voiceIO?.flush();
-          this.state.value = "listening";
-          break;
-        case "reset":
-          this.voiceIO?.flush();
-          this.resetState();
-          break;
-        case "pong":
-          this.pongReceived = true;
-          break;
-        case "error": {
-          const details = (msg as ErrorMessage).details;
-          const fullMessage = details?.length
-            ? `${msg.message}: ${details.join(", ")}`
-            : msg.message;
-          console.error("Agent error:", fullMessage);
-          this.error.value = { code: "protocol", message: fullMessage };
-          this.state.value = "error";
-          break;
-        }
-      }
+      messages.value = [];
+      transcript.value = "";
+      error.value = null;
     });
   }
 
-  private async handleReady(
+  function startPing(sig: AbortSignal): void {
+    pongReceived = true;
+    const id = setInterval(() => {
+      if (!pongReceived) {
+        ws?.close();
+        return;
+      }
+      pongReceived = false;
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "ping" }));
+      }
+    }, PING_INTERVAL_MS);
+    sig.addEventListener("abort", () => clearInterval(id));
+  }
+
+  function scheduleReconnect(): void {
+    const scheduled = reconnector.schedule(() => {
+      connect();
+    });
+    if (!scheduled) {
+      batch(() => {
+        error.value = {
+          code: "connection",
+          message: "Connection lost. Please refresh.",
+        };
+        state.value = "error";
+      });
+      return;
+    }
+    state.value = "connecting";
+  }
+
+  async function handleReady(
     msg: Extract<ServerMessage, { type: "ready" }>,
   ): Promise<void> {
-    if (this.audioSetupInFlight) return;
-    this.audioSetupInFlight = true;
+    if (audioSetupInFlight) return;
+    audioSetupInFlight = true;
     try {
-      // esbuild inlines these as strings; Deno sees JS modules, so we cast.
       const [
         { createVoiceIO },
         captureWorklet,
@@ -267,119 +177,226 @@ export class VoiceSession {
           m.default as unknown as string
         ),
       ]);
-      const ws = this.ws!;
-      const voiceIO = await createVoiceIO({
+      const currentWs = ws!;
+      const io = await createVoiceIO({
         sttSampleRate: msg.sample_rate ?? DEFAULT_STT_SAMPLE_RATE,
         ttsSampleRate: msg.tts_sample_rate ?? DEFAULT_TTS_SAMPLE_RATE,
         captureWorkletSrc: captureWorklet,
         playbackWorkletSrc: playbackWorklet,
         onMicData: (pcm16: ArrayBuffer) => {
-          if (ws.readyState === WebSocket.OPEN) ws.send(pcm16);
+          if (currentWs.readyState === WebSocket.OPEN) currentWs.send(pcm16);
         },
       });
-      if (this.ws?.readyState !== WebSocket.OPEN) {
-        voiceIO.close();
+      if (ws?.readyState !== WebSocket.OPEN) {
+        io.close();
         return;
       }
-      this.voiceIO = voiceIO;
-      this.ws.send(JSON.stringify({ type: "audio_ready" }));
-      this.state.value = "listening";
+      voiceIO = io;
+      ws.send(JSON.stringify({ type: "audio_ready" }));
+      state.value = "listening";
     } catch (err: unknown) {
-      if (this.ws?.readyState !== WebSocket.OPEN) return;
+      if (ws?.readyState !== WebSocket.OPEN) return;
       batch(() => {
-        this.error.value = {
+        error.value = {
           code: "audio",
           message: `Microphone access failed: ${(err as Error).message}`,
         };
-        this.state.value = "error";
+        state.value = "error";
       });
     } finally {
-      this.audioSetupInFlight = false;
+      audioSetupInFlight = false;
     }
   }
 
-  private startPing(signal: AbortSignal): void {
-    this.pongReceived = true;
-    const id = setInterval(() => {
-      if (!this.pongReceived) {
-        this.ws?.close();
-        return;
+  function handleServerMessage(event: MessageEvent): void {
+    if (event.data instanceof ArrayBuffer) {
+      if (state.value === "speaking") {
+        voiceIO?.enqueue(event.data);
       }
-      this.pongReceived = false;
-      if (this.ws?.readyState === WebSocket.OPEN) {
-        this.ws.send(JSON.stringify({ type: "ping" }));
-      }
-    }, PING_INTERVAL_MS);
-    signal.addEventListener("abort", () => clearInterval(id));
-  }
-
-  private scheduleReconnect(): void {
-    const scheduled = this.reconnector.schedule(() => {
-      this.connect();
-    });
-    if (!scheduled) {
-      batch(() => {
-        this.error.value = {
-          code: "connection",
-          message: "Connection lost. Please refresh.",
-        };
-        this.state.value = "error";
-      });
       return;
     }
-    this.state.value = "connecting";
-  }
 
-  private cleanupAudio(): void {
-    this.audioSetupInFlight = false;
-    void this.voiceIO?.close();
-    this.voiceIO = null;
-  }
+    const msg = parseServerMessage(event.data as string);
+    if (!msg) return;
 
-  private trySend(msg: Record<string, unknown>): boolean {
-    try {
-      if (this.ws?.readyState === WebSocket.OPEN) {
-        this.ws.send(JSON.stringify(msg));
-        return true;
-      }
-    } catch { /* ws may have closed between check and send */ }
-    return false;
-  }
-
-  cancel(): void {
-    this.voiceIO?.flush();
-    this.state.value = "listening";
-    this.trySend({ type: "cancel" });
-  }
-
-  resetState(): void {
     batch(() => {
-      this.messages.value = [];
-      this.transcript.value = "";
-      this.error.value = null;
+      switch (msg.type) {
+        case "ready":
+          hasConnected = true;
+          reconnector.reset();
+          void handleReady(msg);
+          break;
+        case "partial_transcript":
+          transcript.value = msg.text;
+          break;
+        case "final_transcript":
+          transcript.value = msg.text;
+          break;
+        case "turn":
+          transcript.value = "";
+          messages.value = [
+            ...messages.value,
+            { role: "user", text: msg.text },
+          ];
+          state.value = "thinking";
+          break;
+        case "chat":
+          messages.value = [
+            ...messages.value,
+            { role: "assistant", text: msg.text },
+          ];
+          state.value = "speaking";
+          break;
+        case "chat_delta": {
+          const msgs = messages.value;
+          const last = msgs[msgs.length - 1];
+          if (last && last.role === "assistant" && streamingMessage) {
+            messages.value = [
+              ...msgs.slice(0, -1),
+              { role: "assistant", text: last.text + msg.text },
+            ];
+          } else {
+            streamingMessage = true;
+            messages.value = [
+              ...msgs,
+              { role: "assistant", text: msg.text },
+            ];
+          }
+          state.value = "speaking";
+          break;
+        }
+        case "chat_done":
+          streamingMessage = false;
+          if (msg.text) {
+            const msgs = messages.value;
+            const last = msgs[msgs.length - 1];
+            if (last && last.role === "assistant") {
+              messages.value = [
+                ...msgs.slice(0, -1),
+                { role: "assistant", text: msg.text },
+              ];
+            }
+          }
+          break;
+        case "tts_done":
+          streamingMessage = false;
+          voiceIO?.done();
+          state.value = "listening";
+          break;
+        case "cancelled":
+          voiceIO?.flush();
+          state.value = "listening";
+          break;
+        case "reset":
+          voiceIO?.flush();
+          resetState();
+          break;
+        case "pong":
+          pongReceived = true;
+          break;
+        case "error": {
+          const details = (msg as ErrorMessage).details;
+          const fullMessage = details?.length
+            ? `${msg.message}: ${details.join(", ")}`
+            : msg.message;
+          console.error("Agent error:", fullMessage);
+          error.value = { code: "protocol", message: fullMessage };
+          state.value = "error";
+          break;
+        }
+      }
     });
   }
 
-  reset(): void {
-    this.voiceIO?.flush();
-    if (this.trySend({ type: "reset" })) return;
-    this.resetState();
-    this.disconnect();
-    this.connect();
+  function connect(opts?: { signal?: AbortSignal }): void {
+    disconnected.value = null;
+    connectionController?.abort();
+    const controller = new AbortController();
+    connectionController = controller;
+    const { signal: sig } = controller;
+
+    if (opts?.signal) {
+      opts.signal.addEventListener("abort", () => disconnect(), {
+        signal: sig,
+      });
+    }
+
+    const base = options.platformUrl;
+    const wsUrl = new URL("websocket", base.endsWith("/") ? base : base + "/");
+    wsUrl.protocol = wsUrl.protocol === "https:" ? "wss:" : "ws:";
+    if (hasConnected) wsUrl.searchParams.set("resume", "1");
+    const socket = new WebSocket(wsUrl);
+    ws = socket;
+    socket.binaryType = "arraybuffer";
+
+    socket.addEventListener("open", () => {
+      if (hasConnected && messages.value.length > 0) {
+        socket.send(JSON.stringify({
+          type: "history",
+          messages: messages.value.map((m) => ({
+            role: m.role,
+            text: m.text,
+          })),
+        }));
+      }
+      state.value = "ready";
+      startPing(sig);
+    }, { signal: sig });
+
+    socket.addEventListener("message", (event) => {
+      handleServerMessage(event);
+    }, { signal: sig });
+
+    socket.addEventListener("close", () => {
+      if (sig.aborted) {
+        state.value = "connecting";
+        return;
+      }
+      controller.abort();
+      disconnected.value = { intentional: false };
+      cleanupAudio();
+      scheduleReconnect();
+    }, { signal: sig });
   }
 
-  disconnect(): void {
-    this.connectionController?.abort();
-    this.connectionController = null;
-    this.reconnector.cancel();
-    this.cleanupAudio();
-    this.ws?.close();
-    this.ws = null;
-    this.state.value = "connecting";
-    this.disconnected.value = { intentional: true };
+  function cancel(): void {
+    voiceIO?.flush();
+    state.value = "listening";
+    trySend({ type: "cancel" });
   }
 
-  [Symbol.dispose](): void {
-    this.disconnect();
+  function reset(): void {
+    voiceIO?.flush();
+    if (trySend({ type: "reset" })) return;
+    resetState();
+    disconnect();
+    connect();
   }
+
+  function disconnect(): void {
+    connectionController?.abort();
+    connectionController = null;
+    reconnector.cancel();
+    cleanupAudio();
+    ws?.close();
+    ws = null;
+    state.value = "connecting";
+    disconnected.value = { intentional: true };
+  }
+
+  return {
+    state,
+    messages,
+    transcript,
+    error,
+    disconnected,
+    connect,
+    cancel,
+    resetState,
+    reset,
+    disconnect,
+    [Symbol.dispose]() {
+      disconnect();
+    },
+  };
 }

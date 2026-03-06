@@ -1,45 +1,33 @@
 import { expect } from "@std/expect";
+import { join } from "@std/path";
+import { exists } from "@std/fs/exists";
 import { runBuild } from "./build.ts";
-import type { AgentEntry } from "./_discover.ts";
 
-const fakeAgent: AgentEntry = {
-  slug: "test-agent",
-  dir: "templates/test-agent",
-  entryPoint: "templates/test-agent/agent.ts",
-  env: { SLUG: "test-agent" },
-  clientEntry: "ui/client.tsx",
-  transport: ["websocket"],
-  hasNpmDeps: false,
-};
+Deno.test(
+  { name: "runBuild", sanitizeOps: false, sanitizeResources: false },
+  async (t) => {
+    await t.step("validates and bundles agent from agentDir", async () => {
+      const tmpOut = await Deno.makeTempDir({ prefix: "aai-build-test-" });
+      const agentDir = join(
+        new URL("../templates/simple", import.meta.url).pathname,
+      );
 
-Deno.test("runBuild", async (t) => {
-  await t.step("bundles the agent from agentDir", async () => {
-    const bundled: string[] = [];
+      try {
+        await runBuild({ outDir: tmpOut, agentDir });
 
-    await runBuild(
-      { outDir: "dist/bundle", agentDir: "templates/test-agent" },
-      () => Promise.resolve(fakeAgent),
-      (agent, _outDir) => {
-        bundled.push(agent.slug);
-        return Promise.resolve({ workerBytes: 1024, clientBytes: 512 });
-      },
-      () => Promise.resolve({ errors: [] }),
-    );
-    expect(bundled).toEqual(["test-agent"]);
-  });
+        // Find the slug from the template's agent.json
+        const agentJson = JSON.parse(
+          await Deno.readTextFile(join(agentDir, "agent.json")),
+        );
+        const slug = agentJson.slug;
+        const outDir = join(tmpOut, slug);
 
-  await t.step("bundles into the specified output directory", async () => {
-    const dirs: string[] = [];
-
-    await runBuild(
-      { outDir: "/custom/path", agentDir: "templates/test-agent" },
-      () => Promise.resolve(fakeAgent),
-      (_agent, outDir) => {
-        dirs.push(outDir);
-        return Promise.resolve({ workerBytes: 100, clientBytes: 100 });
-      },
-      () => Promise.resolve({ errors: [] }),
-    );
-    expect(dirs).toEqual(["/custom/path/test-agent"]);
-  });
-});
+        expect(await exists(join(outDir, "worker.js"))).toBe(true);
+        expect(await exists(join(outDir, "client.js"))).toBe(true);
+        expect(await exists(join(outDir, "manifest.json"))).toBe(true);
+      } finally {
+        await Deno.remove(tmpOut, { recursive: true });
+      }
+    });
+  },
+);

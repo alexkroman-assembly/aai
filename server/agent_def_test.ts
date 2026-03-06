@@ -1,6 +1,6 @@
 import { expect } from "@std/expect";
-import { defineAgent } from "./agent.ts";
-import { DEFAULT_GREETING, DEFAULT_INSTRUCTIONS } from "./agent_types.ts";
+import { defineAgent } from "../sdk/define_agent.ts";
+import { DEFAULT_GREETING, DEFAULT_INSTRUCTIONS } from "../sdk/types.ts";
 
 Deno.test("defineAgent - fills defaults", () => {
   const agent = defineAgent({ name: "Minimal" });

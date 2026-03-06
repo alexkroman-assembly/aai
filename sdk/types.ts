@@ -1,3 +1,5 @@
+// --- Agent types (stable SDK surface baked into deployed bundles) ---
+
 export interface ToolContext {
   secrets: Record<string, string>;
   fetch: typeof globalThis.fetch;
@@ -23,11 +25,61 @@ export interface ToolParameters {
   [key: string]: unknown;
 }
 
+/**
+ * Shorthand parameter definition.
+ * - Bare string → `{ type: "string", description: string }`
+ * - Object with `optional: true` → not included in `required`
+ */
+export type ParamShorthand =
+  | string
+  | (JSONSchemaProperty & { optional?: boolean });
+
+/**
+ * Shorthand tool parameters: a flat record of param names to definitions.
+ * `type: "object"` and `required` are auto-generated.
+ * All params are required by default; mark with `optional: true` to opt out.
+ */
+export type SimpleToolParameters = Record<string, ParamShorthand>;
+
+/** Normalize shorthand parameters into full JSON Schema ToolParameters. */
+export function normalizeParameters(
+  params: ToolParameters | SimpleToolParameters,
+): ToolParameters {
+  if (
+    params && typeof params === "object" && "type" in params &&
+    params.type === "object" && "properties" in params &&
+    typeof params.properties === "object"
+  ) {
+    return params as ToolParameters;
+  }
+  const properties: Record<string, JSONSchemaProperty> = {};
+  const required: string[] = [];
+  for (const [name, def] of Object.entries(params)) {
+    if (typeof def === "string") {
+      properties[name] = { type: "string", description: def };
+      required.push(name);
+    } else {
+      const { optional, ...schema } = def as JSONSchemaProperty & {
+        optional?: boolean;
+      };
+      properties[name] = schema;
+      if (!optional) required.push(name);
+    }
+  }
+  return {
+    type: "object",
+    properties,
+    ...(required.length ? { required } : {}),
+  };
+}
+
 export interface ToolDef {
   description: string;
-  parameters: ToolParameters;
-  // deno-lint-ignore no-explicit-any
-  execute: (args: any, ctx: ToolContext) => Promise<unknown> | unknown;
+  parameters: ToolParameters | SimpleToolParameters;
+  execute: (
+    args: Record<string, unknown>,
+    ctx: ToolContext,
+  ) => Promise<unknown> | unknown;
 }
 
 /** Built-in tools provided by the framework. */
@@ -112,6 +164,31 @@ export function agentToolsToSchemas(
   return Object.entries(tools).map(([name, def]) => ({
     name,
     description: def.description,
-    parameters: def.parameters,
+    parameters: normalizeParameters(def.parameters),
   }));
+}
+
+/** Agent config passed from worker to server via RPC. */
+export interface AgentConfig {
+  readonly name?: string;
+  readonly instructions: string;
+  readonly greeting: string;
+  readonly voice: string;
+  readonly prompt?: string;
+  readonly builtinTools?: readonly BuiltinTool[];
+}
+
+/** Frozen agent definition returned by defineAgent(). */
+export interface AgentDef {
+  readonly name: string;
+  readonly instructions: string;
+  readonly greeting: string;
+  readonly voice: string;
+  readonly prompt?: string;
+  readonly builtinTools?: readonly BuiltinTool[];
+  readonly tools: Readonly<Record<string, ToolDef>>;
+  readonly onConnect?: AgentOptions["onConnect"];
+  readonly onDisconnect?: AgentOptions["onDisconnect"];
+  readonly onError?: AgentOptions["onError"];
+  readonly onTurn?: AgentOptions["onTurn"];
 }

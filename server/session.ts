@@ -1,7 +1,7 @@
 import type { PlatformConfig } from "./config.ts";
 import { callLLM as defaultCallLLM, type CallLLMOptions } from "./llm.ts";
 import { getLogger } from "./logger.ts";
-import type { ExecuteTool } from "./tool_executor.ts";
+import type { ExecuteTool } from "../sdk/_tool_executor.ts";
 import {
   connectStt as defaultConnectStt,
   type SttEvents,
@@ -17,7 +17,7 @@ import type {
   STTConfig,
   ToolSchema,
 } from "./types.ts";
-import { DEFAULT_GREETING } from "./agent_types.ts";
+import { DEFAULT_GREETING } from "../sdk/types.ts";
 import { buildSystemPrompt } from "./system_prompt.ts";
 
 export interface SessionTransport {

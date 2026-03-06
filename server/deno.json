@@ -3,16 +3,11 @@
   "version": "0.1.0",
   "exports": {
     ".": "./main.ts",
-    "./agent": "./agent.ts",
-    "./agent-types": "./agent_types.ts",
-    "./fetch-json": "./fetch_json.ts",
     "./types": "./types.ts",
-    "./protocol": "./protocol.ts",
     "./testing": "./_test_utils.ts",
     "./testing/mock-ws": "./_mock_ws.ts"
   },
   "imports": {
-    "@hono/hono": "jsr:@hono/hono@^4.12.4",
     "@aws-sdk/client-s3": "npm:@aws-sdk/client-s3@^3.1001.0"
   }
 }

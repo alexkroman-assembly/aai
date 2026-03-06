@@ -1,10 +1,12 @@
 import {
+  type AgentConfig,
   agentToolsToSchemas,
+  type BuiltinTool,
   type ToolDef,
   type ToolSchema,
-} from "./agent_types.ts";
-import { executeToolCall } from "./tool_executor.ts";
-import type { AgentConfig } from "./types.ts";
+} from "./types.ts";
+import { executeToolCall } from "./_tool_executor.ts";
+import { type RpcRequest, RpcRequestSchema } from "./_rpc_schema.ts";
 
 interface MessageTarget {
   onmessage: ((e: MessageEvent) => void) | null;
@@ -17,7 +19,7 @@ interface AgentLike {
   readonly greeting: string;
   readonly voice: string;
   readonly prompt?: string;
-  readonly builtinTools?: readonly string[];
+  readonly builtinTools?: readonly BuiltinTool[];
   readonly tools: Readonly<Record<string, ToolDef>>;
 }
 
@@ -68,7 +70,12 @@ export function startWorker(
   const port: MessageTarget = endpoint ?? self as unknown as MessageTarget;
 
   port.onmessage = async (e: MessageEvent) => {
-    const msg = e.data;
+    const parsed = RpcRequestSchema.safeParse(e.data);
+    if (!parsed.success) {
+      console.warn("[worker] Invalid RPC message:", parsed.error.message);
+      return;
+    }
+    const msg: RpcRequest = parsed.data;
     try {
       let result: unknown;
       if (msg.type === "getConfig") {
@@ -76,7 +83,10 @@ export function startWorker(
       } else if (msg.type === "executeTool") {
         result = await api.executeTool(msg.name, msg.args);
       } else {
-        throw new Error(`Unknown message type: ${msg.type}`);
+        const _exhaustive: never = msg;
+        throw new Error(
+          `Unknown message type: ${(_exhaustive as RpcRequest).type}`,
+        );
       }
       port.postMessage({ id: msg.id, result });
     } catch (err: unknown) {

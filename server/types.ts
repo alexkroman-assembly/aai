@@ -2,7 +2,28 @@ import { z } from "zod";
 import {
   DEFAULT_STT_SAMPLE_RATE,
   DEFAULT_TTS_SAMPLE_RATE,
-} from "./protocol.ts";
+} from "../sdk/_protocol.ts";
+
+// Re-export agent types from sdk/
+export {
+  type AgentConfig,
+  type AgentOptions,
+  agentToolsToSchemas,
+  type BuiltinTool,
+  DEFAULT_GREETING,
+  DEFAULT_INSTRUCTIONS,
+  type JSONSchemaProperty,
+  normalizeParameters,
+  type ParamShorthand,
+  type SimpleToolParameters,
+  type ToolContext,
+  type ToolDef,
+  type ToolParameters,
+  type ToolSchema,
+  type Voice,
+} from "../sdk/types.ts";
+
+// --- Config types (plain interfaces — not validated at boundaries) ---
 
 export interface STTConfig {
   sampleRate: number;
@@ -49,7 +70,9 @@ export const DEFAULT_TTS_CONFIG: TTSConfig = {
 
 export const DEFAULT_MODEL = "claude-haiku-4-5-20251001";
 
-export interface SttMessage {
+// --- STT message types (Zod-first) ---
+
+export type SttMessage = {
   type: string;
   transcript?: string;
   is_final?: boolean;
@@ -60,7 +83,7 @@ export interface SttMessage {
   audio_duration_seconds?: number;
   session_duration_seconds?: number;
   [key: string]: unknown;
-}
+};
 
 export const SttMessageSchema: z.ZodType<SttMessage> = z
   .object({
@@ -76,7 +99,9 @@ export const SttMessageSchema: z.ZodType<SttMessage> = z
   })
   .passthrough();
 
-export interface ChatMessage {
+// --- LLM types (Zod-first) ---
+
+export type ChatMessage = {
   role: "system" | "user" | "assistant" | "tool";
   content: string | null;
   tool_calls?: {
@@ -87,7 +112,7 @@ export interface ChatMessage {
   }[];
   tool_call_id?: string;
   [key: string]: unknown;
-}
+};
 
 const ChatMessageSchema: z.ZodType<ChatMessage> = z.object({
   role: z.enum(["system", "user", "assistant", "tool"]),
@@ -103,11 +128,11 @@ const ChatMessageSchema: z.ZodType<ChatMessage> = z.object({
   tool_call_id: z.string().optional(),
 }).passthrough();
 
-export interface LLMResponse {
+export type LLMResponse = {
   id?: string;
   choices: { index?: number; message: ChatMessage; finish_reason: string }[];
   [key: string]: unknown;
-}
+};
 
 export const LLMResponseSchema: z.ZodType<LLMResponse> = z
   .object({
@@ -119,14 +144,3 @@ export const LLMResponseSchema: z.ZodType<LLMResponse> = z
     })).nullable().transform((v) => v ?? []),
   })
   .passthrough();
-
-export type { ToolSchema } from "./agent_types.ts";
-
-export interface AgentConfig {
-  name?: string;
-  instructions: string;
-  greeting: string;
-  voice: string;
-  prompt?: string;
-  builtinTools?: string[];
-}

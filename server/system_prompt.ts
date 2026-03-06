@@ -1,4 +1,4 @@
-import { DEFAULT_INSTRUCTIONS } from "./agent_types.ts";
+import { DEFAULT_INSTRUCTIONS } from "../sdk/types.ts";
 import type { AgentConfig, ToolSchema } from "./types.ts";
 
 const VOICE_RULES =

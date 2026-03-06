@@ -2,7 +2,8 @@
 
 export { css, keyframes, styled } from "goober";
 
-export { VoiceSession } from "./session.ts";
+export { createVoiceSession } from "./session.ts";
+export type { VoiceSession } from "./session.ts";
 export type {
   AgentState,
   Message,

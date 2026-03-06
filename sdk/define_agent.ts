@@ -1,23 +1,9 @@
 import {
+  type AgentDef,
   type AgentOptions,
   DEFAULT_GREETING,
   DEFAULT_INSTRUCTIONS,
-  type ToolDef,
-} from "./agent_types.ts";
-
-export interface AgentDef {
-  readonly name: string;
-  readonly instructions: string;
-  readonly greeting: string;
-  readonly voice: string;
-  readonly prompt?: string;
-  readonly builtinTools?: readonly string[];
-  readonly tools: Readonly<Record<string, ToolDef>>;
-  readonly onConnect?: AgentOptions["onConnect"];
-  readonly onDisconnect?: AgentOptions["onDisconnect"];
-  readonly onError?: AgentOptions["onError"];
-  readonly onTurn?: AgentOptions["onTurn"];
-}
+} from "./types.ts";
 
 /**
  * Create a voice agent definition with sensible defaults.

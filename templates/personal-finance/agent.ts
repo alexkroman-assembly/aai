@@ -1,6 +1,5 @@
 export default defineAgent({
   name: "Penny",
-  voice: "luna",
   greeting:
     "Hey, I'm Penny, your personal finance helper. Try asking me something like, what's 100 dollars in euros, what's the price of bitcoin, or help me split a 120 dollar bill four ways with 20 percent tip.",
   instructions:
@@ -21,6 +20,5 @@ Math calculations (use run_code):
 - Compound interest: FV = principal * (1 + rate/n)^(n*years) + monthly * ((1 + rate/n)^(n*years) - 1) / (rate/n)
 - Loan payment: M = P * (r(1+r)^n) / ((1+r)^n - 1) where r = annual_rate/12, n = years*12
 - Tip calculator: tip = bill * percent/100, per_person = (bill + tip) / people`,
-  prompt: "",
-  builtinTools: ["run_code", "fetch_json", "user_input", "final_answer"],
+  builtinTools: ["run_code", "fetch_json"],
 });

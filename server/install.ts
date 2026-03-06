@@ -1,5 +1,3 @@
-import { Hono } from "@hono/hono";
-
 const INSTALL_SCRIPT = `#!/bin/sh
 set -e
 
@@ -82,12 +80,8 @@ esac
 echo "Run 'aai' to get started"
 `;
 
-export function installRoute(): Hono {
-  const routes = new Hono();
-  routes.get("/install", (c) => {
-    return c.body(INSTALL_SCRIPT, {
-      headers: { "Content-Type": "text/plain; charset=utf-8" },
-    });
+export function handleInstall(): Response {
+  return new Response(INSTALL_SCRIPT, {
+    headers: { "Content-Type": "text/plain; charset=utf-8" },
   });
-  return routes;
 }

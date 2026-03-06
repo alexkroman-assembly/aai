@@ -66,10 +66,15 @@ jobs:
     needs: [build]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
+
+      - name: Create version file
+        run: jq -r .version deno.json > artifacts/VERSION
 
       - name: Generate checksums
         run: |
@@ -94,3 +99,4 @@ jobs:
           files: |
             artifacts/*.tar.gz
             artifacts/checksums.txt
+            artifacts/VERSION

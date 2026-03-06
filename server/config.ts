@@ -6,11 +6,7 @@ import {
   type STTConfig,
   type TTSConfig,
 } from "./types.ts";
-
-const EnvSchema = z.object({
-  ASSEMBLYAI_API_KEY: z.string().min(1, "ASSEMBLYAI_API_KEY is required"),
-  LLM_MODEL: z.string().optional(),
-});
+import { EnvSchema } from "../sdk/_schema.ts";
 
 const ServerEnvSchema = z.object({
   RIME_API_KEY: z.string().min(

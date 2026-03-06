@@ -1,66 +1,23 @@
 import { z } from "zod";
 import { getLogger } from "./logger.ts";
-import { createSandboxRpc } from "./worker_pool.ts";
+import { createSandboxRpc } from "./rpc.ts";
 import type { ToolSchema } from "./types.ts";
-import type { ToolParameters } from "./agent_types.ts";
+import type { ToolParameters } from "../sdk/types.ts";
+import { htmlToMarkdown } from "./html.ts";
 
 const log = getLogger("builtin-tools");
 
 type JSONSchemaParam = Parameters<typeof z.fromJSONSchema>[0];
 
-const ENTITY: Record<string, string> = {
-  "&amp;": "&",
-  "&lt;": "<",
-  "&gt;": ">",
-  "&quot;": '"',
-  "&#39;": "'",
-  "&apos;": "'",
-  "&nbsp;": " ",
-};
-
-function decodeEntities(s: string): string {
-  return s
-    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
-    .replace(
-      /&#x([0-9a-fA-F]+);/g,
-      (_, n) => String.fromCharCode(parseInt(n, 16)),
-    )
-    .replace(/&\w+;/g, (m) => ENTITY[m] ?? m);
-}
-
-export function htmlToMarkdown(html: string): string {
-  let s = html;
-  // Strip script, style, head
-  s = s.replace(/<script[\s\S]*?<\/script>/gi, "");
-  s = s.replace(/<style[\s\S]*?<\/style>/gi, "");
-  s = s.replace(/<head[\s\S]*?<\/head>/gi, "");
-  // Headings
-  for (let i = 6; i >= 1; i--) {
-    const re = new RegExp(`<h${i}[^>]*>(.*?)<\\/h${i}>`, "gi");
-    s = s.replace(
-      re,
-      (_, c) => `\n${"#".repeat(i)} ${decodeEntities(c.trim())}\n`,
-    );
-  }
-  // Bold
-  s = s.replace(/<(b|strong)[^>]*>(.*?)<\/\1>/gi, (_, _t, c) => `**${c}**`);
-  // Italic
-  s = s.replace(/<(i|em)[^>]*>(.*?)<\/\1>/gi, (_, _t, c) => `_${c}_`);
-  // Links
-  s = s.replace(
-    /<a[^>]+href="([^"]*)"[^>]*>(.*?)<\/a>/gi,
-    (_, href, text) => `[${text}](${href})`,
-  );
-  // List items
-  s = s.replace(/<li[^>]*>(.*?)<\/li>/gi, (_, c) => `* ${c.trim()}\n`);
-  // Remove remaining tags
-  s = s.replace(/<[^>]+>/g, "");
-  // Decode entities
-  s = decodeEntities(s);
-  // Collapse blank lines
-  s = s.replace(/\n{3,}/g, "\n\n");
-  return s.trim();
-}
+const BraveSearchResponseSchema = z.object({
+  web: z.object({
+    results: z.array(z.object({
+      title: z.string(),
+      url: z.string(),
+      description: z.string(),
+    })),
+  }).optional(),
+});
 
 interface BuiltinTool {
   name: string;
@@ -130,15 +87,26 @@ const webSearch: BuiltinTool = {
       });
     }
 
-    const data = await resp.json() as {
-      web?: { results?: { title: string; url: string; description: string }[] };
-    };
+    const raw = await resp.json();
+    const data = BraveSearchResponseSchema.safeParse(raw);
+    if (!data.success) {
+      log.error("Unexpected Brave Search response", {
+        error: data.error.message,
+      });
+      return JSON.stringify({
+        results: [],
+        note:
+          "No search results available. Answer the user's question to the best of your ability.",
+      });
+    }
 
-    const results = (data.web?.results ?? []).slice(0, maxResults).map((r) => ({
-      title: r.title,
-      url: r.url,
-      description: r.description,
-    }));
+    const results = (data.data.web?.results ?? []).slice(0, maxResults).map(
+      (r) => ({
+        title: r.title,
+        url: r.url,
+        description: r.description,
+      }),
+    );
 
     return JSON.stringify(results);
   },
@@ -356,7 +324,7 @@ const finalAnswer: BuiltinTool = {
 export const FINAL_ANSWER_TOOL = "final_answer";
 export const USER_INPUT_TOOL = "user_input";
 
-const REQUIRED_BUILTIN_TOOLS = [FINAL_ANSWER_TOOL];
+const REQUIRED_BUILTIN_TOOLS = [FINAL_ANSWER_TOOL, USER_INPUT_TOOL];
 
 const BUILTIN_TOOLS: Record<string, BuiltinTool> = {
   web_search: webSearch,
@@ -367,7 +335,7 @@ const BUILTIN_TOOLS: Record<string, BuiltinTool> = {
   final_answer: finalAnswer,
 };
 
-export function getBuiltinToolSchemas(names: string[]): ToolSchema[] {
+export function getBuiltinToolSchemas(names: readonly string[]): ToolSchema[] {
   const allNames = [...new Set([...REQUIRED_BUILTIN_TOOLS, ...names])];
   return allNames.flatMap((name) => {
     const tool = BUILTIN_TOOLS[name];

@@ -1,13 +1,15 @@
 import { expect } from "@std/expect";
 import {
-  createAudioBuffer,
-  createTwilioTransport,
   decodeMulaw,
-  decodeTwilioFrame,
   encodeMulaw,
   mulawToPcm16,
   pcm16ToMulaw,
   resample,
+} from "./mulaw.ts";
+import {
+  createAudioBuffer,
+  createTwilioTransport,
+  decodeTwilioFrame,
   twiml,
 } from "./transport_twilio.ts";
 

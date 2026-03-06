@@ -1,10 +1,63 @@
 import { parse as parseDotenv } from "@std/dotenv/parse";
+import { exists } from "@std/fs/exists";
 import { dirname, fromFileUrl, join, resolve } from "@std/path";
-import { getApiKey } from "./_config.ts";
-import { AgentJsonSchema, normalizeTransport } from "../shared/schema.ts";
+import { step } from "./_output.ts";
+import { AgentJsonSchema, normalizeTransport } from "../sdk/_schema.ts";
 
 /** Root of the aai framework (parent of cli/). */
 const AAI_ROOT = resolve(dirname(fromFileUrl(import.meta.url)), "..");
+
+// -- API key config -----------------------------------------------------------
+
+const CONFIG_DIR = join(
+  Deno.env.get("HOME") ?? Deno.env.get("USERPROFILE") ?? ".",
+  ".config",
+  "aai",
+);
+const CONFIG_FILE = join(CONFIG_DIR, "config.json");
+
+interface CliConfig {
+  assemblyai_api_key?: string;
+}
+
+async function readConfig(): Promise<CliConfig> {
+  try {
+    return JSON.parse(await Deno.readTextFile(CONFIG_FILE));
+  } catch {
+    return {};
+  }
+}
+
+async function writeConfig(config: CliConfig): Promise<void> {
+  await Deno.mkdir(CONFIG_DIR, { recursive: true });
+  await Deno.writeTextFile(
+    CONFIG_FILE,
+    JSON.stringify(config, null, 2) + "\n",
+  );
+}
+
+/** Get the stored API key, prompting the user if not set. */
+export async function getApiKey(): Promise<string> {
+  const envKey = Deno.env.get("ASSEMBLYAI_API_KEY");
+  if (envKey) return envKey;
+
+  const config = await readConfig();
+  if (config.assemblyai_api_key) return config.assemblyai_api_key;
+
+  step("Setup", "AssemblyAI API key required for speech-to-text");
+  console.log("Get one at https://www.assemblyai.com/dashboard/signup\n");
+  const key = prompt("Enter your ASSEMBLYAI_API_KEY:")?.trim();
+  if (!key) {
+    throw new Error("ASSEMBLYAI_API_KEY is required");
+  }
+
+  config.assemblyai_api_key = key;
+  await writeConfig(config);
+  step("Saved", CONFIG_FILE);
+  return key;
+}
+
+// -- Agent discovery ----------------------------------------------------------
 
 export interface AgentEntry {
   slug: string;
@@ -17,17 +70,8 @@ export interface AgentEntry {
 }
 
 export async function loadAgent(dir: string): Promise<AgentEntry | null> {
-  let hasAgentTs = false;
-  try {
-    await Deno.stat(join(dir, "agent.ts"));
-    hasAgentTs = true;
-  } catch { /* missing */ }
-
-  let hasAgentJson = false;
-  try {
-    await Deno.stat(join(dir, "agent.json"));
-    hasAgentJson = true;
-  } catch { /* missing */ }
+  const hasAgentTs = await exists(join(dir, "agent.ts"));
+  const hasAgentJson = await exists(join(dir, "agent.json"));
 
   if (!hasAgentTs && !hasAgentJson) return null;
   if (!hasAgentTs) {
@@ -41,20 +85,12 @@ export async function loadAgent(dir: string): Promise<AgentEntry | null> {
   const parsed = AgentJsonSchema.safeParse(JSON.parse(raw));
   if (!parsed.success) {
     const issues = parsed.error.issues
-      .map((i) => `${i.path.join(".")}: ${i.message}`)
+      .map((i) => `${i.path.map(String).join(".")}: ${i.message}`)
       .join(", ");
     throw new Error(`invalid agent.json: ${issues}`);
   }
-  const { slug } = parsed.data;
-
-  const declared = parsed.data.env as string[];
-  const transport = normalizeTransport(
-    parsed.data.transport as
-      | "websocket"
-      | "twilio"
-      | ("websocket" | "twilio")[]
-      | undefined,
-  );
+  const { slug, env: declared } = parsed.data;
+  const transport = normalizeTransport(parsed.data.transport);
 
   const dotenvText = await Deno.readTextFile(join(dir, ".env")).catch(() => "");
   const dotenv = parseDotenv(dotenvText);
@@ -71,7 +107,6 @@ export async function loadAgent(dir: string): Promise<AgentEntry | null> {
     }
   }
 
-  // Resolve missing ASSEMBLYAI_API_KEY from global config (prompts on first use)
   if (missing.includes("ASSEMBLYAI_API_KEY")) {
     env.ASSEMBLYAI_API_KEY = await getApiKey();
     missing.splice(missing.indexOf("ASSEMBLYAI_API_KEY"), 1);
@@ -85,17 +120,11 @@ export async function loadAgent(dir: string): Promise<AgentEntry | null> {
     );
   }
 
-  let clientEntry = resolve(AAI_ROOT, "ui/client.tsx");
-  try {
-    await Deno.stat(join(dir, "client.tsx"));
-    clientEntry = join(dir, "client.tsx");
-  } catch { /* use default */ }
+  const clientEntry = await exists(join(dir, "client.tsx"))
+    ? join(dir, "client.tsx")
+    : resolve(AAI_ROOT, "ui/client.tsx");
 
-  let hasNpmDeps = false;
-  try {
-    await Deno.stat(join(dir, "node_modules"));
-    hasNpmDeps = true;
-  } catch { /* no node_modules */ }
+  const hasNpmDeps = await exists(join(dir, "node_modules"));
 
   return {
     slug,

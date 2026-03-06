@@ -17,10 +17,10 @@ export interface ValidationResult {
 
 /**
  * Validate an agent by dynamically importing agent.ts.
- * defineAgent() already validates fields — we just check that
+ * defineAgent() already validates fields -- we just check that
  * the module loads and produces a valid default export.
  *
- * Agents with npm deps skip validation here — esbuild catches errors during bundling.
+ * Agents with npm deps skip validation here -- esbuild catches errors during bundling.
  */
 export async function validateAgent(
   agent: AgentEntry,
@@ -31,7 +31,6 @@ export async function validateAgent(
 
   const errors: ValidationError[] = [];
 
-  // Temporarily inject the globals that agent.ts expects
   const saved = {
     defineAgent: (globalThis as Record<string, unknown>).defineAgent,
     fetchJSON: (globalThis as Record<string, unknown>).fetchJSON,
@@ -39,23 +38,22 @@ export async function validateAgent(
 
   let mod: Record<string, unknown>;
   try {
-    const { defineAgent } = await import("../server/agent.ts");
-    const { fetchJSON } = await import("../server/fetch_json.ts");
+    const { defineAgent } = await import("../sdk/define_agent.ts");
+    const { fetchJSON } = await import("../sdk/fetch_json.ts");
     Object.assign(globalThis, { defineAgent, fetchJSON });
 
     mod = await import(
       `${toFileUrl(resolve(agent.entryPoint)).href}?t=${Date.now()}`
     );
-  } catch (err) {
+  } catch (cause) {
     errors.push({
       field: "agent.ts",
       message: `failed to import: ${
-        err instanceof Error ? err.message : String(err)
+        cause instanceof Error ? cause.message : String(cause)
       }`,
     });
     return { errors };
   } finally {
-    // Restore previous global state
     for (const [k, v] of Object.entries(saved)) {
       if (v === undefined) {
         delete (globalThis as Record<string, unknown>)[k];
@@ -69,7 +67,7 @@ export async function validateAgent(
     errors.push({
       field: "agent.ts",
       message:
-        "missing default export — use `export default defineAgent({...})`",
+        "missing default export -- use `export default defineAgent({...})`",
     });
     return { errors };
   }

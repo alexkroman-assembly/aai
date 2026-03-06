@@ -1,11 +1,11 @@
 import { expect } from "@std/expect";
 import {
   type AgentSlot,
-  createRpcCall,
   registerSlot,
   trackSessionClose,
   trackSessionOpen,
 } from "./worker_pool.ts";
+import { createRpcCall } from "./rpc.ts";
 import { VALID_ENV } from "./_test_utils.ts";
 
 function makeSlot(overrides?: Partial<AgentSlot>): AgentSlot {

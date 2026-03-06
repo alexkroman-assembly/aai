@@ -11,6 +11,9 @@ export interface VoiceIOOptions {
 
 export interface VoiceIO extends AsyncDisposable {
   enqueue(pcm16Buffer: ArrayBuffer): void;
+  /** Signal that TTS is complete — worklet will drain remaining audio then stop. */
+  done(): void;
+  /** Immediately interrupt and discard buffered audio. */
   flush(): void;
   close(): Promise<void>;
 }
@@ -39,7 +42,7 @@ export async function createVoiceIO(
   const contextRate = ttsSampleRate;
   const ctx = new AudioContext({
     sampleRate: contextRate,
-    latencyHint: "interactive",
+    latencyHint: "playback",
   });
   await ctx.resume();
 
@@ -113,10 +116,12 @@ export async function createVoiceIO(
   };
 
   // ── Playback ──
+  // Pass raw bytes straight to the worklet — no conversion on main thread.
   let playNode: AudioWorkletNode | null = null;
   let closed = false;
 
-  function startPlayNode(): AudioWorkletNode {
+  function ensurePlayNode(): AudioWorkletNode {
+    if (playNode) return playNode;
     const node = new AudioWorkletNode(ctx, "playback-processor");
     node.connect(ctx.destination);
     node.port.onmessage = (e: MessageEvent) => {
@@ -125,24 +130,23 @@ export async function createVoiceIO(
         if (playNode === node) playNode = null;
       }
     };
+    playNode = node;
     return node;
   }
 
   const io: VoiceIO = {
     enqueue(pcm16Buffer: ArrayBuffer) {
       if (closed) return;
-
-      const len = pcm16Buffer.byteLength & ~1;
-      if (len === 0) return;
-      const samples = new Int16Array(pcm16Buffer, 0, len / 2);
-
-      if (!playNode) playNode = startPlayNode();
-
-      // Send Int16 PCM directly to the worklet (it converts to Float32)
-      playNode.port.postMessage(
-        { event: "write", buffer: samples },
-        [samples.buffer],
+      if (pcm16Buffer.byteLength === 0) return;
+      const node = ensurePlayNode();
+      node.port.postMessage(
+        { event: "write", buffer: new Uint8Array(pcm16Buffer) },
+        [pcm16Buffer],
       );
+    },
+
+    done() {
+      if (playNode) playNode.port.postMessage({ event: "done" });
     },
 
     flush() {
