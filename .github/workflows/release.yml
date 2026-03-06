@@ -40,6 +40,7 @@ jobs:
             --allow-all \
             --unstable-worker-options \
             --include templates/ \
+            --include sdk/ \
             --include server/ \
             --include ui/ \
             --include cli/claude.md \

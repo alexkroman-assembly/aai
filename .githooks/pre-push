@@ -15,10 +15,12 @@ deno compile \
   --allow-all \
   --unstable-worker-options \
   --include templates/ \
+  --include sdk/ \
   --include server/ \
   --include ui/ \
   --include cli/claude.md \
   --include cli/types.template \
+  --include cli/deno.json \
   --output /tmp/aai-compile-check \
   cli/cli.ts || exit 1
 /tmp/aai-compile-check --version || exit 1
