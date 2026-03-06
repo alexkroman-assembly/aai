@@ -33,10 +33,14 @@ jobs:
         with:
           deno-version: ${{ env.DENO_VERSION }}
 
+      - name: Stamp build version
+        run: |
+          SHA="${GITHUB_SHA::7}"
+          jq --arg v "$SHA" '.version = $v' deno.json > deno.json.tmp && mv deno.json.tmp deno.json
+
       - name: Compile binary
         run: |
           deno compile \
-            --frozen \
             --allow-all \
             --unstable-worker-options \
             --include templates/ \
@@ -76,7 +80,7 @@ jobs:
           merge-multiple: true
 
       - name: Create version file
-        run: jq -r .version deno.json > artifacts/VERSION
+        run: echo "${GITHUB_SHA::7}" > artifacts/VERSION
 
       - name: Generate checksums
         run: |

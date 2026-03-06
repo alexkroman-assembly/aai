@@ -5,22 +5,6 @@ const VERSION_URL =
   `https://github.com/${REPO}/releases/download/latest/VERSION`;
 const CHECK_TIMEOUT_MS = 3000;
 
-function parseVersion(v: string): number[] {
-  return v.replace(/^v/, "").split(".").map(Number);
-}
-
-function isNewer(remote: string, local: string): boolean {
-  const r = parseVersion(remote);
-  const l = parseVersion(local);
-  for (let i = 0; i < Math.max(r.length, l.length); i++) {
-    const rv = r[i] ?? 0;
-    const lv = l[i] ?? 0;
-    if (rv > lv) return true;
-    if (rv < lv) return false;
-  }
-  return false;
-}
-
 function detectTarget(): string {
   const os = Deno.build.os === "darwin" ? "darwin" : "linux";
   const arch = Deno.build.arch === "aarch64" ? "arm64" : "x64";
@@ -38,7 +22,7 @@ export async function checkForUpdate(
     clearTimeout(timer);
     if (!resp.ok) return null;
     const remote = (await resp.text()).trim();
-    return isNewer(remote, currentVersion) ? remote : null;
+    return remote !== currentVersion ? remote : null;
   } catch {
     return null;
   }
@@ -48,9 +32,9 @@ export async function checkForUpdate(
 async function doUpgrade(newVersion: string): Promise<boolean> {
   const target = detectTarget();
   const url =
-    `https://github.com/${REPO}/releases/download/v${newVersion}/${target}.tar.gz`;
+    `https://github.com/${REPO}/releases/download/latest/${target}.tar.gz`;
 
-  console.log(`Downloading aai v${newVersion}...`);
+  console.log(`Downloading aai ${newVersion}...`);
 
   try {
     const resp = await fetch(url);
@@ -82,7 +66,7 @@ async function doUpgrade(newVersion: string): Promise<boolean> {
     await Deno.chmod(binPath, 0o755);
     await Deno.remove(tmp, { recursive: true });
 
-    console.log(`Updated aai to v${newVersion}`);
+    console.log(`Updated aai to ${newVersion}`);
     return true;
   } catch (err) {
     console.error(`Upgrade failed: ${err}`);
