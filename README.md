@@ -2,30 +2,7 @@
 
 Build voice agents with a single command.
 
-## Install
-
-```sh
-curl -fsSL https://aai-agent.fly.dev/install | sh
-```
-
-## Quick start
-
-```sh
-mkdir my-agent && cd my-agent
-aai
-```
-
-## Claude Code skill
-
-Install the Claude Code skill to create agents with `/new-agent`:
-
-```sh
-aai install-skill
-```
-
-Then in Claude Code, type `/new-agent a travel assistant that helps plan trips` and it will scaffold a complete agent for you.
-
-## Setup
+See [CLAUDE.md](CLAUDE.md) for architecture, commands, and contributor guidance. See [claude/claude.md](claude/claude.md) for the agent development API reference.
 
 After cloning, configure git hooks:
 

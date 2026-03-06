@@ -57,9 +57,9 @@ jobs:
             --allow-all \
             --unstable-worker-options \
             --include templates/ \
-            --include skills/ \
             --include server/ \
             --include ui/ \
+            --include claude/ \
             --include cli/deno.json \
             --include node_modules/.deno/esbuild-wasm@0.27.3/node_modules/esbuild-wasm/esbuild.wasm \
             --target ${{ matrix.target }} \

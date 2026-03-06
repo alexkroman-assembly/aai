@@ -27,9 +27,9 @@ jobs:
             --allow-all \
             --unstable-worker-options \
             --include templates/ \
-            --include skills/ \
             --include server/ \
             --include ui/ \
+            --include claude/ \
             --output dist/aai \
             cli/cli.ts
 
