@@ -24,6 +24,11 @@
           "items": { "enum": ["websocket", "twilio"] }
         }
       ]
+    },
+    "npm": {
+      "type": "object",
+      "description": "npm dependencies to install. Keys are package names, values are version ranges.",
+      "additionalProperties": { "type": "string" }
     }
   },
   "additionalProperties": false

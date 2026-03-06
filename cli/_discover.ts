@@ -13,6 +13,7 @@ export interface AgentEntry {
   env: Record<string, string>;
   clientEntry: string;
   transport: ("websocket" | "twilio")[];
+  hasNpmDeps: boolean;
 }
 
 export async function loadAgent(dir: string): Promise<AgentEntry | null> {
@@ -90,6 +91,12 @@ export async function loadAgent(dir: string): Promise<AgentEntry | null> {
     clientEntry = join(dir, "client.tsx");
   } catch { /* use default */ }
 
+  let hasNpmDeps = false;
+  try {
+    await Deno.stat(join(dir, "node_modules"));
+    hasNpmDeps = true;
+  } catch { /* no node_modules */ }
+
   return {
     slug,
     dir,
@@ -97,5 +104,6 @@ export async function loadAgent(dir: string): Promise<AgentEntry | null> {
     env,
     clientEntry,
     transport,
+    hasNpmDeps,
   };
 }

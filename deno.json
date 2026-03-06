@@ -8,7 +8,8 @@
     "types": "deno run --allow-write --allow-env --allow-read cli/cli.ts types",
     "deploy": "deno run --allow-net --allow-env --allow-read --allow-write --allow-run cli/cli.ts deploy",
     "test": "deno test --allow-net --allow-read --allow-write --allow-env --allow-run --unstable-worker-options",
-    "check": "deno check server/**/*.ts ui/**/*.ts ui/**/*.tsx cli/**/*.ts templates/**/*.ts && deno lint && deno fmt --check && deno test --quiet --allow-net --allow-read --allow-write --allow-env --allow-run --unstable-worker-options",
+    "check": "deno check server/**/*.ts ui/**/*.ts ui/**/*.tsx cli/**/*.ts $(find templates -name '*.ts' ! -path 'templates/npm-tools/*') && deno lint && deno fmt --check && deno test --quiet --allow-net --allow-read --allow-write --allow-env --allow-run --unstable-worker-options && deno task test:templates",
+    "test:templates": "deno run --allow-all --unstable-worker-options cli/test_templates.ts",
     "install-dev": "echo '#!/bin/sh\nINIT_CWD=\"$(pwd)\" exec deno run --allow-all --unstable-worker-options '\"$(pwd)/cli/cli.ts\"' \"$@\"' > \"$HOME/.deno/bin/aai-dev\" && chmod +x \"$HOME/.deno/bin/aai-dev\" && echo 'Installed aai-dev to ~/.deno/bin/aai-dev'"
   },
   "imports": {
@@ -31,7 +32,8 @@
     "goober": "npm:goober@^2.1.18",
     "zod": "jsr:@zod/zod@^4.3.6",
     "esbuild": "npm:esbuild-wasm@^0.27.3",
-    "unique-names-generator": "npm:unique-names-generator@^4.7.1"
+    "unique-names-generator": "npm:unique-names-generator@^4.7.1",
+    "lodash-es": "npm:lodash-es@^4.17.21"
   },
   "nodeModulesDir": "auto",
   "compilerOptions": {

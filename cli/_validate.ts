@@ -19,10 +19,16 @@ export interface ValidationResult {
  * Validate an agent by dynamically importing agent.ts.
  * defineAgent() already validates fields — we just check that
  * the module loads and produces a valid default export.
+ *
+ * Agents with npm deps skip validation here — esbuild catches errors during bundling.
  */
 export async function validateAgent(
   agent: AgentEntry,
 ): Promise<ValidationResult> {
+  if (agent.hasNpmDeps) {
+    return { errors: [] };
+  }
+
   const errors: ValidationError[] = [];
 
   // Temporarily inject the globals that agent.ts expects
@@ -70,7 +76,6 @@ export async function validateAgent(
 
   const def = mod.default as Record<string, unknown>;
 
-  // defineAgent() freezes the object and sets defaults — just extract metadata
   const name = typeof def.name === "string" ? def.name : undefined;
   if (!name) {
     errors.push({ field: "name", message: "must be a non-empty string" });

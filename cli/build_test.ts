@@ -9,6 +9,7 @@ const fakeAgent: AgentEntry = {
   env: { SLUG: "test-agent" },
   clientEntry: "ui/client.tsx",
   transport: ["websocket"],
+  hasNpmDeps: false,
 };
 
 Deno.test("runBuild", async (t) => {

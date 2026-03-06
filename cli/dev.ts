@@ -11,6 +11,7 @@ export interface DevOpts {
   serverUrl: string;
   watch?: boolean;
   openBrowser?: boolean;
+  dryRun?: boolean;
 }
 
 async function deploy(
@@ -109,6 +110,7 @@ async function typeCheck(agent: AgentEntry): Promise<string | null> {
   }
   const cmd = new Deno.Command("deno", {
     args: ["check", ...files],
+    cwd: agent.dir,
     stdout: "piped",
     stderr: "piped",
   });
@@ -123,11 +125,12 @@ async function typeCheck(agent: AgentEntry): Promise<string | null> {
     .trim();
 }
 
-/** Validate, bundle, and deploy an agent. */
+/** Validate, bundle, and optionally deploy an agent. */
 async function buildAndDeploy(
   agent: AgentEntry,
   serverUrl: string,
   tmpDir: string,
+  dryRun?: boolean,
 ): Promise<ValidationResult> {
   log.step("Check", agent.slug);
 
@@ -155,8 +158,11 @@ async function buildAndDeploy(
     }
     throw err;
   }
-  log.step("Deploy", agent.slug);
-  await deploy(serverUrl, tmpDir, agent.slug, agent.env.ASSEMBLYAI_API_KEY);
+
+  if (!dryRun) {
+    log.step("Deploy", agent.slug);
+    await deploy(serverUrl, tmpDir, agent.slug, agent.env.ASSEMBLYAI_API_KEY);
+  }
 
   return validation;
 }
@@ -201,9 +207,21 @@ export async function runDev(opts: DevOpts): Promise<void> {
   await warmNpmCache();
   spinner.stop();
 
-  const validation = await buildAndDeploy(agent, opts.serverUrl, tmpDir);
-  log.step("Ready", agent.slug);
-  await printSummary(agent, validation, opts.serverUrl);
+  const validation = await buildAndDeploy(
+    agent,
+    opts.serverUrl,
+    tmpDir,
+    opts.dryRun,
+  );
+  log.step(opts.dryRun ? "OK" : "Ready", agent.slug);
+  if (!opts.dryRun) {
+    await printSummary(agent, validation, opts.serverUrl);
+  }
+
+  if (opts.dryRun) {
+    Deno.removeSync(tmpDir, { recursive: true });
+    return;
+  }
 
   // Open in browser (only for newly created agents)
   const agentUrl = `${opts.serverUrl}/${agent.slug}/`;
@@ -252,6 +270,7 @@ export async function runDev(opts: DevOpts): Promise<void> {
         freshAgent,
         opts.serverUrl,
         tmpDir,
+        opts.dryRun,
       );
       log.step("Ready", freshAgent.slug);
       await printSummary(freshAgent, freshValidation, opts.serverUrl);

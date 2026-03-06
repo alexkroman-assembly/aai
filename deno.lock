@@ -50,6 +50,7 @@
     "npm:esbuild@~0.25.5": "0.25.12",
     "npm:goober@2.1.18": "2.1.18_csstype@3.2.3",
     "npm:goober@^2.1.18": "2.1.18_csstype@3.2.3",
+    "npm:lodash-es@^4.17.21": "4.17.23",
     "npm:preact@10.28.4": "10.28.4",
     "npm:preact@^10.28.4": "10.28.4",
     "npm:unique-names-generator@^4.7.1": "4.7.1"
@@ -1353,6 +1354,9 @@
         "csstype"
       ]
     },
+    "lodash-es@4.17.23": {
+      "integrity": "sha512-kVI48u3PZr38HdYz98UmfPnXl2DXrpdctLrFLCd3kOx1xUkOmpFPx7gCWWM5MPkL/fD8zb+Ph0QzjGFs4+hHWg=="
+    },
     "preact@10.28.4": {
       "integrity": "sha512-uKFfOHWuSNpRFVTnljsCluEFq57OKT+0QdOiQo8XWnQ/pSvg7OpX5eNOejELXJMWy+BwM2nobz0FkvzmnpCNsQ=="
     },
@@ -1403,6 +1407,7 @@
       "npm:@preact/signals@^2.8.1",
       "npm:esbuild-wasm@~0.27.3",
       "npm:goober@^2.1.18",
+      "npm:lodash-es@^4.17.21",
       "npm:preact@^10.28.4",
       "npm:unique-names-generator@^4.7.1"
     ],

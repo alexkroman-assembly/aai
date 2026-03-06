@@ -44,8 +44,9 @@ export async function runNew(opts: NewOptions): Promise<string> {
 
   log.step("Create", `${slug} from template '${template}'`);
 
-  // Copy template files into target directory
+  // Copy template files into target directory (skip node_modules)
   for await (const entry of Deno.readDir(src)) {
+    if (entry.name === "node_modules") continue;
     const srcPath = join(src, entry.name);
     const destPath = join(targetDir, entry.name);
     if (entry.isDirectory) {
@@ -69,7 +70,34 @@ export async function runNew(opts: NewOptions): Promise<string> {
     // No agent.json to update — that's fine
   }
 
+  // Install npm dependencies if agent.json declares them
+  const agentRaw = await Deno.readTextFile(agentJsonPath).catch(() => "{}");
+  const agentConfig = JSON.parse(agentRaw);
+  if (agentConfig.npm && Object.keys(agentConfig.npm).length > 0) {
+    const pkgJson = {
+      private: true,
+      dependencies: agentConfig.npm,
+    };
+    await Deno.writeTextFile(
+      join(targetDir, "package.json"),
+      JSON.stringify(pkgJson, null, 2) + "\n",
+    );
+    log.step("Install", "npm dependencies");
+    const npm = new Deno.Command("npm", {
+      args: ["install", "--silent"],
+      cwd: targetDir,
+      stdout: "piped",
+      stderr: "piped",
+    });
+    const { success, stderr } = await npm.output();
+    if (!success) {
+      const err = new TextDecoder().decode(stderr).trim();
+      throw new Error(`npm install failed: ${err}`);
+    }
+  }
+
   // Generate ambient type declarations for editor autocomplete
+  // (after npm install so deno.json can detect package.json)
   await generateTypes(targetDir);
 
   // Copy .env.example as .env

@@ -7,6 +7,7 @@ const denoConfig = await import("../deno.json", { with: { type: "json" } });
 const VERSION: string = denoConfig.default.version;
 
 function printUsage(): void {
+  const dryRun = cyan("-n, --dry-run");
   console.log(`${green(bold("aai"))} ${dim(VERSION)}
 Voice agent development kit
 
@@ -19,6 +20,7 @@ ${bold("OPTIONS:")}
     ${cyan("-w, --watch")}      Watch for changes and auto-reload
     ${cyan("-y, --yes")}        Skip confirmation prompts (for automation)
     ${cyan("-t, --template")}   Template to use for new agents (default: simple)
+    ${dryRun}    Type-check, validate, and bundle without deploying
 
 ${dim("https://github.com/alexkroman/aai")}
 `);
@@ -44,8 +46,9 @@ export async function main(args: string[]): Promise<number> {
       w: "watch",
       y: "yes",
       t: "template",
+      n: "dry-run",
     },
-    boolean: ["help", "version", "watch", "yes"],
+    boolean: ["help", "version", "watch", "yes", "dry-run"],
   });
 
   if (flags.help) {
@@ -62,7 +65,14 @@ export async function main(args: string[]): Promise<number> {
   const cwd = Deno.env.get("INIT_CWD") || Deno.cwd();
   const serverUrl = flags.url || "https://aai-agent.fly.dev";
 
-  await getApiKey();
+  if (flags["dry-run"]) {
+    // Set a dummy key so loadAgent doesn't prompt for one
+    if (!Deno.env.get("ASSEMBLYAI_API_KEY")) {
+      Deno.env.set("ASSEMBLYAI_API_KEY", "dry-run");
+    }
+  } else {
+    await getApiKey();
+  }
 
   let isNewAgent = false;
   if (!await hasAgent(cwd)) {
@@ -95,6 +105,7 @@ export async function main(args: string[]): Promise<number> {
     serverUrl,
     watch: flags.watch,
     openBrowser: isNewAgent,
+    dryRun: flags["dry-run"],
   });
 
   return 0;

@@ -1,0 +1,7 @@
+{
+  "slug": "npm-tools",
+  "env": ["ASSEMBLYAI_API_KEY"],
+  "npm": {
+    "lodash-es": "^4.17.21"
+  }
+}

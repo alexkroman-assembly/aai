@@ -152,6 +152,10 @@ export function clientBuildOptions(
 }
 
 async function precomputeSchemas(agent: AgentEntry) {
+  // Agents with npm deps can't be dynamically imported in this process —
+  // return null and let the worker compute schemas at runtime.
+  if (agent.hasNpmDeps) return null;
+
   const { agentToolsToSchemas } = await import("../server/agent_types.ts");
   const { defineAgent } = await import("../server/agent.ts");
   const { fetchJSON } = await import("../server/fetch_json.ts");
@@ -209,9 +213,38 @@ export async function bundleAgent(
       `Object.assign(globalThis, { mount, useSession, css, keyframes, styled, darkTheme, defaultTheme, applyTheme, App, ChatView, ErrorBanner, MessageBubble, StateIndicator, Transcript, SessionProvider, createSessionControls, VoiceSession, useEffect, useRef, useState, useCallback, useMemo });\n`,
   );
 
+  // Plugin to resolve bare npm imports from the agent's node_modules
+  // before denoPlugin (which only knows the aai project's import map).
+  const agentNpmPlugin: Plugin = {
+    name: "agent-npm",
+    setup(b) {
+      if (!agent.hasNpmDeps) return;
+      const nmDir = resolve(agent.dir, "node_modules");
+      b.onResolve({ filter: /^[^./]/ }, async (args) => {
+        // Only intercept imports originating from the agent's directory
+        if (!args.resolveDir.startsWith(agent.dir)) return undefined;
+        const pkgDir = resolve(nmDir, args.path);
+        try {
+          await Deno.stat(pkgDir);
+        } catch {
+          return undefined; // fall through to denoPlugin
+        }
+        // Read the package.json to find the entry point
+        try {
+          const raw = await Deno.readTextFile(resolve(pkgDir, "package.json"));
+          const pkg = JSON.parse(raw);
+          const entry = pkg.module ?? pkg.main ?? "index.js";
+          return { path: resolve(pkgDir, entry) };
+        } catch {
+          return { path: resolve(pkgDir, "index.js") };
+        }
+      });
+    },
+  };
+
   const workerResult = await buildWithCleanErrors({
     ...BASE,
-    plugins: [denoPlugin({ configPath })],
+    plugins: [agentNpmPlugin, denoPlugin({ configPath })],
     stdin: {
       contents: `import agent from "${agentAbsolute}";\n` +
         `import { startWorker } from "${workerEntryAbsolute}";\n` +

@@ -14,6 +14,7 @@ export interface AgentJson {
   slug: string;
   env: string[];
   transport?: Transport | Transport[];
+  npm?: Record<string, string>;
 }
 
 export interface DeployBody {
