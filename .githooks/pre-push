@@ -17,7 +17,7 @@ deno compile \
   --include templates/ \
   --include server/ \
   --include ui/ \
-  --include claude/ \
+  --include cli/claude.md \
   --output /tmp/aai-compile-check \
   cli/cli.ts || exit 1
 /tmp/aai-compile-check --version || exit 1

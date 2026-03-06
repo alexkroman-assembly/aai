@@ -180,7 +180,7 @@ export async function runDev(opts: DevOpts): Promise<void> {
       await Deno.stat(claudePath);
     } catch {
       const cliDir = dirname(fromFileUrl(import.meta.url));
-      const srcClaude = join(cliDir, "..", "claude", "claude.md");
+      const srcClaude = join(cliDir, "claude.md");
       await Deno.copyFile(srcClaude, claudePath);
       log.step(
         "Wrote",

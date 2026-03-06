@@ -6,20 +6,22 @@ argument-hint: <description of the agent to create or update>
 
 # Create or update an aai voice agent
 
-You are building a voice agent using the **aai** framework. Generate or update files based on the user's description in `$ARGUMENTS`.
+You are building a voice agent using the **aai** framework. Generate or update
+files based on the user's description in `$ARGUMENTS`.
 
 ## Agent structure
 
-Every agent exports a default `defineAgent()` call. No imports needed — `defineAgent` and `fetchJSON` are ambient globals provided by the framework:
+Every agent exports a default `defineAgent()` call. No imports needed —
+`defineAgent` and `fetchJSON` are ambient globals provided by the framework:
 
 ```ts
 export default defineAgent({
   name: "Agent Name",
   instructions: "...",
   greeting: "...",
-  voice: "luna",              // see Voice type below
-  builtinTools: [],            // see BuiltinTool type below
-  tools: {},                   // custom tools defined inline
+  voice: "luna", // see Voice type below
+  builtinTools: [], // see BuiltinTool type below
+  tools: {}, // custom tools defined inline
 });
 ```
 
@@ -27,18 +29,33 @@ export default defineAgent({
 
 ```ts
 type BuiltinTool =
-  | "web_search"      // Search the web via Brave Search API
-  | "visit_webpage"   // Fetch & convert a webpage to markdown
-  | "fetch_json"      // HTTP GET a JSON REST API
-  | "run_code"        // Execute JavaScript in a sandboxed Deno worker
-  | "user_input"      // Ask the user a follow-up question
-  | "final_answer";   // Deliver spoken response (always auto-included)
+  | "web_search" // Search the web via Brave Search API
+  | "visit_webpage" // Fetch & convert a webpage to markdown
+  | "fetch_json" // HTTP GET a JSON REST API
+  | "run_code" // Execute JavaScript in a sandboxed Deno worker
+  | "user_input" // Ask the user a follow-up question
+  | "final_answer"; // Deliver spoken response (always auto-included)
 
 type Voice =
-  | "luna" | "andromeda" | "celeste" | "orion" | "sirius" | "lyra"
-  | "estelle" | "esther" | "kima" | "bond" | "thalassa" | "vespera"
-  | "moss" | "fern" | "astra" | "tauro" | "walnut" | "arcana"
-  | (string & {});  // any Rime speaker ID — https://docs.rime.ai/api-reference/voices
+  | "luna"
+  | "andromeda"
+  | "celeste"
+  | "orion"
+  | "sirius"
+  | "lyra"
+  | "estelle"
+  | "esther"
+  | "kima"
+  | "bond"
+  | "thalassa"
+  | "vespera"
+  | "moss"
+  | "fern"
+  | "astra"
+  | "tauro"
+  | "walnut"
+  | "arcana"
+  | (string & {}); // any Rime speaker ID — https://docs.rime.ai/api-reference/voices
 
 interface ToolParameters {
   type: "object";
@@ -47,25 +64,25 @@ interface ToolParameters {
 }
 
 interface ToolDef {
-  description: string;           // LLM reads this to decide when to call the tool
-  parameters: ToolParameters;    // JSON Schema object
+  description: string; // LLM reads this to decide when to call the tool
+  parameters: ToolParameters; // JSON Schema object
   execute: (args: any, ctx: ToolContext) => Promise<unknown> | unknown;
 }
 
 interface ToolContext {
-  secrets: Record<string, string>;  // env vars from .env
-  fetch: typeof globalThis.fetch;   // HTTP client
+  secrets: Record<string, string>; // env vars from .env
+  fetch: typeof globalThis.fetch; // HTTP client
   signal?: AbortSignal;
 }
 
 interface AgentOptions {
-  name: string;                          // Required: display name
-  instructions?: string;                 // System prompt (voice-first default provided)
-  greeting?: string;                     // Spoken on connect
-  voice?: Voice;                         // Rime TTS voice (default: "luna")
-  prompt?: string;                       // TTS voice guidance (pacing, tone, emotion)
-  builtinTools?: BuiltinTool[];          // Subset of built-in tools to enable
-  tools?: Record<string, ToolDef>;       // Custom tools keyed by name
+  name: string; // Required: display name
+  instructions?: string; // System prompt (voice-first default provided)
+  greeting?: string; // Spoken on connect
+  voice?: Voice; // Rime TTS voice (default: "luna")
+  prompt?: string; // TTS voice guidance (pacing, tone, emotion)
+  builtinTools?: BuiltinTool[]; // Subset of built-in tools to enable
+  tools?: Record<string, ToolDef>; // Custom tools keyed by name
   onConnect?: (ctx: { sessionId: string }) => void | Promise<void>;
   onDisconnect?: (ctx: { sessionId: string }) => void | Promise<void>;
   onError?: (error: Error, ctx?: { sessionId: string }) => void;
@@ -111,8 +128,10 @@ execute: async ({ query }, ctx) => {
 ## Voice-first instructions guidelines
 
 When writing the `instructions` field:
+
 - Optimize for spoken responses — short, punchy sentences
-- Never mention "search results" or "sources" — speak as if knowledge is your own
+- Never mention "search results" or "sources" — speak as if knowledge is your
+  own
 - No visual formatting references (no "bullet point", "bold", etc.)
 - Use "First", "Next", "Finally" instead of numbered lists
 - Start with the most important information
@@ -124,6 +143,7 @@ When writing the `instructions` field:
 ## Example agents by category
 
 ### Minimal agent
+
 ```ts
 export default defineAgent({
   name: "Simple Assistant",
@@ -131,16 +151,26 @@ export default defineAgent({
 ```
 
 ### Research agent (web search + page reading)
-Use `web_search`, `visit_webpage`, `user_input`, `final_answer`. Good for agents that answer questions using live web data.
+
+Use `web_search`, `visit_webpage`, `user_input`, `final_answer`. Good for agents
+that answer questions using live web data.
 
 ### Code/calculation agent (sandbox execution)
-Use `run_code`, `user_input`, `final_answer`. Good for math, unit conversions, data processing. The `run_code` tool executes JavaScript — instruct the agent to always compute rather than guess.
+
+Use `run_code`, `user_input`, `final_answer`. Good for math, unit conversions,
+data processing. The `run_code` tool executes JavaScript — instruct the agent to
+always compute rather than guess.
 
 ### API-powered agent (external data)
-Use `fetch_json` and/or custom tools with `ctx.fetch`. Good for weather, finance, health data, or any REST API. Include the API endpoint URLs and expected response shapes in the instructions.
+
+Use `fetch_json` and/or custom tools with `ctx.fetch`. Good for weather,
+finance, health data, or any REST API. Include the API endpoint URLs and
+expected response shapes in the instructions.
 
 ### Embedded knowledge agent (local data)
+
 Import a JSON file and expose it through custom tools:
+
 ```ts
 import knowledge from "./knowledge.json" with { type: "json" };
 
@@ -168,7 +198,9 @@ export default defineAgent({
 ```
 
 ### Phone agent (Twilio integration)
+
 Same as any agent, but `agent.json` includes a transport array:
+
 ```json
 {
   "slug": "phone-agent",
@@ -177,8 +209,46 @@ Same as any agent, but `agent.json` includes a transport array:
 }
 ```
 
+### npm dependencies agent
+
+When an agent needs npm packages, declare them in `agent.json`:
+
+```json
+{
+  "slug": "my-agent",
+  "env": ["ASSEMBLYAI_API_KEY"],
+  "npm": {
+    "lodash-es": "^4.17.21"
+  }
+}
+```
+
+Then import them as bare specifiers in `agent.ts`:
+
+```ts
+import { capitalize } from "lodash-es";
+
+export default defineAgent({
+  name: "My Agent",
+  tools: {
+    format_name: {
+      description: "Capitalize a name",
+      parameters: {
+        type: "object",
+        properties: { name: { type: "string", description: "Name to format" } },
+        required: ["name"],
+      },
+      execute: ({ name }) => capitalize(name),
+    },
+  },
+});
+```
+
 ### Custom UI agent
-Add a `client.tsx` file alongside `agent.ts`. It receives the session via `useSession()`:
+
+Add a `client.tsx` file alongside `agent.ts`. It receives the session via
+`useSession()`:
+
 ```tsx
 import { useSession } from "aai/client";
 
@@ -198,6 +268,7 @@ export default function App() {
 After creating `agent.ts`, also create:
 
 1. **`agent.json`** with agent metadata:
+
 ```json
 {
   "slug": "agent-slug-name",
@@ -206,12 +277,19 @@ After creating `agent.ts`, also create:
 ```
 
 **agent.json schema:**
+
 - `slug` (string, required) — Unique agent identifier used in URLs
-- `env` (string[], required) — Environment variable names required by the agent. Must include `"ASSEMBLYAI_API_KEY"`. Values are read from `.env` or the process environment.
-- `transport` (optional) — Either a single transport string or an array: `"websocket"` | `"twilio"`. Defaults to `["websocket"]`.
-- No other properties are allowed.
+- `env` (string[], required) — Environment variable names required by the agent.
+  Must include `"ASSEMBLYAI_API_KEY"`. Values are read from `.env` or the
+  process environment.
+- `transport` (optional) — Either a single transport string or an array:
+  `"websocket"` | `"twilio"`. Defaults to `["websocket"]`.
+- `npm` (optional) — Object mapping npm package names to version ranges. When
+  present, the CLI generates a `package.json`, runs `npm install`, and
+  configures esbuild to resolve bare imports from `node_modules`.
 
 2. **`.env`** with required API keys:
+
 ```
 ASSEMBLYAI_API_KEY=<user needs to add>
 ```
@@ -221,16 +299,20 @@ ASSEMBLYAI_API_KEY=<user needs to add>
 ## Running and deploying the agent
 
 After creating files, tell the user to run:
+
 ```sh
 aai
 ```
 
-This single command runs the agent locally in dev mode. To point at a local server:
+This single command runs the agent locally in dev mode. To point at a local
+server:
+
 ```sh
 aai --url http://localhost:3100
 ```
 
 If they don't have aai installed:
+
 ```sh
 curl -fsSL https://aai-agent.fly.dev/install | sh
 ```

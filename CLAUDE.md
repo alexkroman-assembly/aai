@@ -68,7 +68,7 @@ Agent code runs in Deno Workers with only `net: true` permission. The worker com
 
 ## Agent API (for user-facing CLAUDE.md)
 
-The `claude/claude.md` file is copied into user agent directories as their CLAUDE.md. It documents the `defineAgent()` API. When modifying the agent API surface (`server/agent_types.ts`), update `claude/claude.md` to match.
+The `cli/claude.md` file is copied into user agent directories as their CLAUDE.md. It documents the `defineAgent()` API. When modifying the agent API surface (`server/agent_types.ts`), update `cli/claude.md` to match.
 
 ## Key Conventions
 

@@ -29,7 +29,7 @@ jobs:
             --include templates/ \
             --include server/ \
             --include ui/ \
-            --include claude/ \
+            --include cli/claude.md \
             --output dist/aai \
             cli/cli.ts
 
