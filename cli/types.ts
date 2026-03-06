@@ -1,7 +1,9 @@
 import { join } from "@std/path";
 import { step } from "./_output.ts";
 
-const TYPES_TEMPLATE = new URL("./types.template", import.meta.url);
+const TYPES_TEMPLATE = Deno.readTextFileSync(
+  new URL("./types.template", import.meta.url),
+);
 
 function buildDenoJson(dir: string): string {
   // deno-lint-ignore no-explicit-any
@@ -29,8 +31,7 @@ function buildDenoJson(dir: string): string {
 /** Write types.d.ts (and deno.json if missing) to the given directory. */
 export async function generateTypes(dir: string): Promise<string> {
   const dest = join(dir, "types.d.ts");
-  const content = await Deno.readTextFile(TYPES_TEMPLATE);
-  await Deno.writeTextFile(dest, content);
+  await Deno.writeTextFile(dest, TYPES_TEMPLATE);
 
   const denoJsonPath = join(dir, "deno.json");
   const tsconfigPath = join(dir, "tsconfig.json");

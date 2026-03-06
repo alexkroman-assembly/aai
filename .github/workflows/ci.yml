@@ -30,6 +30,7 @@ jobs:
             --include server/ \
             --include ui/ \
             --include cli/claude.md \
+            --include cli/types.template \
             --output dist/aai \
             cli/cli.ts
 
