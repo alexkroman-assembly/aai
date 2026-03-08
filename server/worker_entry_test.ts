@@ -1,24 +1,42 @@
 import { z } from "zod";
 import { expect } from "@std/expect";
-import type { BuiltinTool, ToolDef } from "../sdk/types.ts";
-import { startWorker } from "../sdk/_worker_entry.ts";
-import { createWorkerRpc } from "./rpc.ts";
+import type { AgentDef, ToolDef } from "../sdk/types.ts";
+import { DEFAULT_GREETING, DEFAULT_INSTRUCTIONS } from "../sdk/types.ts";
+import { startWorker, type WorkerApi } from "../core/_worker_entry.ts";
+import { createRpcCaller } from "../core/_rpc.ts";
+
+function makeAgent(tools: Record<string, ToolDef>): AgentDef {
+  return {
+    name: "test",
+    env: [],
+    transport: ["websocket"],
+    instructions: DEFAULT_INSTRUCTIONS,
+    greeting: DEFAULT_GREETING,
+    voice: "luna",
+    tools,
+  };
+}
 
 function createHarness(
-  agent: {
-    name: string;
-    instructions: string;
-    greeting: string;
-    voice: string;
-    prompt?: string;
-    builtinTools?: readonly BuiltinTool[];
-    tools: Record<string, ToolDef>;
-  },
+  agent: AgentDef,
   env: Record<string, string> = {},
 ) {
   const channel = new MessageChannel();
-  startWorker(agent, env, undefined, channel.port1);
-  const workerApi = createWorkerRpc(channel.port2);
+  startWorker(agent, env, channel.port1);
+  const call = createRpcCaller(channel.port2);
+  const workerApi: WorkerApi = {
+    async executeTool(name, args, sessionId, timeoutMs) {
+      const raw = await call(
+        "executeTool",
+        { name, args, sessionId },
+        timeoutMs,
+      );
+      return typeof raw === "string" ? raw : String(raw ?? "");
+    },
+    async invokeHook(hook, sessionId, extra, timeoutMs) {
+      await call("invokeHook", { hook, sessionId, ...extra }, timeoutMs);
+    },
+  };
 
   return {
     workerApi,
@@ -29,49 +47,14 @@ function createHarness(
   };
 }
 
-const BASE_AGENT = {
-  name: "TestBot",
-  instructions: "Test instructions",
-  greeting: "Hi!",
-  voice: "luna",
-  tools: {},
-};
-
-Deno.test("getConfig returns agent config and tool schemas", async () => {
-  const h = createHarness({
-    ...BASE_AGENT,
-    tools: {
-      greet: {
-        description: "Greet someone",
-        parameters: z.object({ name: z.string() }),
-        execute: ({ name }) => `Hi ${name}`,
-      },
-    },
-  });
-  try {
-    const { config, toolSchemas } = await h.workerApi.getConfig();
-    expect(config.name).toBe("TestBot");
-    expect(config.instructions).toBe("Test instructions");
-    expect(config.greeting).toBe("Hi!");
-    expect(config.voice).toBe("luna");
-    expect(toolSchemas.length).toBe(1);
-    expect(toolSchemas[0].name).toBe("greet");
-  } finally {
-    h.close();
-  }
-});
-
 Deno.test("executeTool runs handler through worker RPC", async () => {
-  const h = createHarness({
-    ...BASE_AGENT,
-    tools: {
-      greet: {
-        description: "Greet",
-        parameters: z.object({ name: z.string() }),
-        execute: ({ name }) => `Hello, ${name}!`,
-      },
+  const h = createHarness(makeAgent({
+    greet: {
+      description: "Greet",
+      parameters: z.object({ name: z.string() }),
+      execute: ({ name }) => `Hello, ${name}!`,
     },
-  });
+  }));
   try {
     expect(
       await h.workerApi.executeTool("greet", { name: "World" }),
@@ -82,7 +65,7 @@ Deno.test("executeTool runs handler through worker RPC", async () => {
 });
 
 Deno.test("executeTool returns error string for unknown tool", async () => {
-  const h = createHarness(BASE_AGENT);
+  const h = createHarness(makeAgent({}));
   try {
     expect(
       await h.workerApi.executeTool("nope", {}),

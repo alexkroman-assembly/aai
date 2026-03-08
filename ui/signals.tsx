@@ -7,7 +7,7 @@ import type { VoiceSession } from "./session.ts";
 
 import type { AgentState, Message, SessionError } from "./types.ts";
 
-export interface SessionSignals {
+export type SessionSignals = {
   state: Signal<AgentState>;
   messages: Signal<Message[]>;
   transcript: Signal<string>;
@@ -19,7 +19,7 @@ export interface SessionSignals {
   toggle(): void;
   reset(): void;
   [Symbol.dispose](): void;
-}
+};
 
 export function createSessionControls(session: VoiceSession): SessionSignals {
   const started = signal(false);

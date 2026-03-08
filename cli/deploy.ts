@@ -1,86 +1,135 @@
 import { info, step, stepInfo, warn } from "./_output.ts";
+import type { BundleOutput } from "./_bundler.ts";
+import { incrementName } from "./_discover.ts";
 
-export interface DeployOpts {
+export const _internals = {
+  fetch: globalThis.fetch.bind(globalThis),
+};
+
+export type DeployOpts = {
   url: string;
-  bundleDir: string;
+  bundle: BundleOutput;
+  namespace: string;
   slug: string;
   dryRun: boolean;
   apiKey: string;
-}
+};
 
-export async function runDeploy(opts: DeployOpts): Promise<void> {
-  const dir = `${opts.bundleDir}/${opts.slug}`;
+export type DeployResult = {
+  namespace: string;
+  slug: string;
+};
 
-  let manifest: {
-    slug: string;
-    env: Record<string, string>;
-    transport?: string[];
-  };
-  let worker: string;
-  let client: string;
-  try {
-    manifest = JSON.parse(await Deno.readTextFile(`${dir}/manifest.json`));
-    worker = await Deno.readTextFile(`${dir}/worker.js`);
-    client = await Deno.readTextFile(`${dir}/client.js`);
-  } catch (cause) {
-    throw new Error(
-      `no bundle found for ${opts.slug} in ${opts.bundleDir}/ -- run "aai build" first`,
-      { cause },
-    );
-  }
-
-  if (opts.dryRun) {
-    stepInfo("Dry run", "would deploy:");
-    info(`${opts.slug} -> ${opts.url}/${opts.slug}/`);
-    return;
-  }
-
-  const resp = await fetch(`${opts.url}/deploy`, {
+async function attemptDeploy(
+  url: string,
+  namespace: string,
+  slug: string,
+  apiKey: string,
+  manifest: Record<string, unknown>,
+  worker: string,
+  client: string,
+): Promise<Response> {
+  const fullPath = `${namespace}/${slug}`;
+  return await _internals.fetch(`${url}/${fullPath}/deploy`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Authorization": `Bearer ${opts.apiKey}`,
+      "Authorization": `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      slug: manifest.slug,
       env: manifest.env,
       worker,
       client,
       transport: manifest.transport,
+      config: manifest.config,
+      toolSchemas: manifest.toolSchemas,
     }),
   });
+}
 
-  if (resp.ok) {
-    const transport = manifest.transport ?? ["websocket"];
-    const urls: string[] = [];
-    if (transport.includes("websocket")) {
-      urls.push(`${opts.url}/${opts.slug}/`);
-    }
-    if (transport.includes("twilio")) {
-      urls.push(`${opts.url}/twilio/${opts.slug}/voice`);
-    }
-    step("Deploy", `${opts.slug} -> ${urls[0] ?? opts.url}`);
-    for (const url of urls.slice(1)) {
-      info(url);
-    }
+const MAX_RETRIES = 20;
 
-    // Health check: best-effort verification
-    try {
-      const healthResp = await fetch(`${opts.url}/${opts.slug}/health`);
-      const ok = healthResp.ok &&
-        (await healthResp.json()).status === "ok";
-      if (ok) {
-        step("Ready", opts.slug);
-      } else {
-        warn(
-          `${opts.slug} deployed but health check failed -- check for runtime errors`,
-        );
+export async function runDeploy(
+  opts: DeployOpts,
+): Promise<DeployResult> {
+  const manifest = JSON.parse(opts.bundle.manifest);
+  const worker = opts.bundle.worker;
+  const client = opts.bundle.client;
+
+  let namespace = opts.namespace;
+  const slug = opts.slug;
+
+  if (opts.dryRun) {
+    const fullPath = `${namespace}/${slug}`;
+    stepInfo("Dry run", "would deploy:");
+    info(`${fullPath} -> ${opts.url}/${fullPath}/`);
+    return { namespace, slug };
+  }
+
+  // Try deploying, auto-incrementing namespace on 403
+  for (let i = 0; i < MAX_RETRIES; i++) {
+    const resp = await attemptDeploy(
+      opts.url,
+      namespace,
+      slug,
+      opts.apiKey,
+      manifest,
+      worker,
+      client,
+    );
+
+    if (resp.ok) {
+      const fullPath = `${namespace}/${slug}`;
+      const transport = manifest.transport ?? ["websocket"];
+      const urls: string[] = [];
+      if (transport.includes("websocket")) {
+        urls.push(`${opts.url}/${fullPath}/`);
       }
-    } catch {
-      // Health check is best-effort
+      if (transport.includes("twilio")) {
+        urls.push(`${opts.url}/${fullPath}/twilio/voice`);
+      }
+      step("Deploy", `${fullPath} -> ${urls[0] ?? opts.url}`);
+      for (const url of urls.slice(1)) {
+        info(url);
+      }
+
+      // Health check: best-effort verification
+      try {
+        const healthResp = await _internals.fetch(
+          `${opts.url}/${fullPath}/health`,
+        );
+        const ok = healthResp.ok &&
+          (await healthResp.json()).status === "ok";
+        if (ok) {
+          step("Ready", fullPath);
+        } else {
+          warn(
+            `${fullPath} deployed but health check failed -- check for runtime errors`,
+          );
+        }
+      } catch {
+        // Health check is best-effort
+      }
+
+      return { namespace, slug };
     }
-  } else {
+
+    if (resp.status === 403) {
+      const text = await resp.text();
+      // Namespace conflict — increment and retry
+      if (text.includes("Namespace")) {
+        const next = incrementName(namespace);
+        step("Retry", `namespace "${namespace}" taken, trying "${next}"`);
+        namespace = next;
+        continue;
+      }
+    }
+
     const text = await resp.text();
     throw new Error(`deploy failed (${resp.status}): ${text}`);
   }
+
+  throw new Error(
+    `deploy failed: could not find available namespace after ${MAX_RETRIES} attempts`,
+  );
 }

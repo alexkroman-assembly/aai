@@ -1,5 +1,5 @@
 import { expect } from "@std/expect";
-import { fetchJSON, HttpError } from "../sdk/fetch_json.ts";
+import { fetchJSON } from "../sdk/fetch_json.ts";
 
 const fakeFetch = (resp: Response): typeof globalThis.fetch => () =>
   Promise.resolve(resp);
@@ -18,7 +18,7 @@ Deno.test("fetchJSON - throws HttpError on 404", async () => {
   );
   await expect(
     fetchJSON("https://example.com", { fetch }),
-  ).rejects.toThrow(HttpError);
+  ).rejects.toThrow("404 Not Found");
 });
 
 Deno.test("fetchJSON - throws on invalid JSON", async () => {

@@ -1,9 +1,3 @@
----
-name: voice-agent
-description: Create or update an aai voice agent. Use when the user wants to build a voice agent, create an agent, modify an existing agent, or scaffold an aai project.
-argument-hint: <description of the agent to create or update>
----
-
 # Create or update an aai voice agent
 
 You are building a voice agent using the **aai** framework. Generate or update
@@ -11,11 +5,11 @@ files based on the user's description in `$ARGUMENTS`.
 
 ## Agent structure
 
-Every agent exports a default `defineAgent()` call. No imports needed —
-`defineAgent`, `fetchJSON`, and `z` (Zod) are ambient globals provided by the
-framework:
+Every agent imports from `@aai/sdk` and exports a default `defineAgent()` call:
 
 ```ts
+import { defineAgent } from "@aai/sdk";
+
 export default defineAgent({
   name: "Agent Name",
   instructions: "...",
@@ -26,7 +20,20 @@ export default defineAgent({
 });
 ```
 
-## TypeScript types (enforced by types.d.ts)
+For tools with parameters, also import Zod:
+
+```ts
+import { defineAgent } from "@aai/sdk";
+import { z } from "zod";
+```
+
+For tools that call external APIs, import `fetchJSON`:
+
+```ts
+import { defineAgent, fetchJSON } from "@aai/sdk";
+```
+
+## TypeScript types
 
 ```ts
 type BuiltinTool =
@@ -80,7 +87,6 @@ interface HookContext {
 
 interface AgentOptions {
   name: string; // Required: display name
-  slug?: string; // URL identifier (auto-derived from name if omitted)
   env?: string[]; // Env var names to load (default: ["ASSEMBLYAI_API_KEY"])
   transport?: Transport | Transport[]; // "websocket" | "twilio" (default: ["websocket"])
   instructions?: string; // System prompt (voice-first default provided)
@@ -100,9 +106,8 @@ type Transport = "websocket" | "twilio";
 
 ## Custom tools
 
-Tool parameters are defined using Zod schemas. The `z` global is provided by the
-framework — no import needed. Use `z.object({...})` to define the parameter
-schema:
+Tool parameters are defined using Zod schemas. Import `z` from `"zod"` and use
+`z.object({...})` to define the parameter schema:
 
 ```ts
 tools: {
@@ -147,7 +152,9 @@ parameter for type-safe responses:
 interface SearchResult { items: { title: string; url: string }[] }
 
 execute: async ({ query }) => {
-  const data = await fetchJSON<SearchResult>("https://api.example.com/data?q=" + encodeURIComponent(query));
+  const url = "https://api.example.com/data?q=" +
+    encodeURIComponent(query);
+  const data = await fetchJSON<SearchResult>(url);
   return data.items;
 },
 ```
@@ -308,10 +315,13 @@ Both `npm:` and `jsr:` specifiers are supported in the import map.
 
 ### Custom UI agent
 
-Add a `client.tsx` file alongside `agent.ts`. Just export a default component —
-the framework auto-mounts it for you:
+Add a `client.tsx` file alongside `agent.ts`. Import from `@aai/ui` and
+`preact/hooks`, then export a default component — the framework auto-mounts it
+for you:
 
 ```tsx
+import { useSession } from "@aai/ui";
+
 export default function App() {
   const session = useSession();
   const msgs = session.messages.value;
@@ -330,12 +340,13 @@ export default function App() {
 **Rules for `client.tsx`:**
 
 - Export a default function component — the framework auto-mounts it for you
-- No imports needed — `useSession`, `css`, `keyframes`, `styled`, and Preact
-  hooks (`useEffect`, `useRef`, `useState`, `useCallback`, `useMemo`) are
-  provided as globals by the framework
+- Import `useSession`, `css`, `keyframes`, `styled`, and UI components from
+  `@aai/ui`
+- Import Preact hooks (`useEffect`, `useRef`, `useState`, etc.) from
+  `preact/hooks`
 - The component is auto-mounted to the page — do not call `mount()` yourself
 
-**Available globals for styling (from goober):**
+**Available styling imports from `@aai/ui` (powered by goober):**
 
 - `css` — tagged template for class names: ``const myClass = css`color: red`;``
 - `keyframes` — tagged template for animations:
@@ -359,34 +370,26 @@ export default function App() {
 
 After creating `agent.ts`, also create:
 
-1. **`.env`** with required API keys:
+**`.env`** with required API keys:
 
-```
+```sh
 ASSEMBLYAI_API_KEY=<user needs to add>
 ```
 
-2. **`.env.example`** — same as `.env` but without values, for version control.
-
 ## Running and deploying the agent
 
-The `aai` CLI handles validation, bundling, and deployment in a single command.
-There is no separate build step or deploy tool.
-
 ```sh
-aai
+aai dev       # Run local dev server with file watching
+aai deploy    # Bundle and deploy to production
+aai new       # Scaffold a new agent project
 ```
 
-This validates the config, bundles the code, and deploys it to the dev server.
-Use it every time you make changes.
+`aai dev` starts a local server, bundles and deploys the agent to it, and
+watches for file changes. Use it during development.
 
-To validate and bundle without deploying:
+`aai deploy` bundles and deploys to the production server.
 
-```sh
-aai --dry-run
-```
-
-Use `--dry-run` to catch config issues before deploying. It runs the same checks
-as a full deploy but skips the upload.
+`aai deploy --dry-run` validates and bundles without deploying.
 
 If they don't have aai installed:
 

@@ -1,33 +1,13 @@
 import { join } from "@std/path";
 import { step } from "./_output.ts";
-import { generateTypes } from "./types.ts";
-import {
-  adjectives,
-  animals,
-  type Config,
-  uniqueNamesGenerator,
-} from "unique-names-generator";
 
-const slugConfig: Config = {
-  dictionaries: [adjectives, animals],
-  separator: "-",
-  length: 2,
-  style: "lowerCase",
-};
-
-/** Generate a unique, memorable slug like "calm-fox" or "bright-creek". */
-export function generateSlug(): string {
-  return uniqueNamesGenerator(slugConfig);
-}
-
-export interface NewOptions {
-  slug: string;
+export type NewOptions = {
   targetDir: string;
   template: string;
   templatesDir: string;
-}
+};
 
-async function listTemplates(dir: string): Promise<string[]> {
+export async function listTemplates(dir: string): Promise<string[]> {
   const templates: string[] = [];
   for await (const entry of Deno.readDir(dir)) {
     if (entry.isDirectory) templates.push(entry.name);
@@ -49,7 +29,7 @@ async function copyDir(src: string, dest: string): Promise<void> {
 }
 
 export async function runNew(opts: NewOptions): Promise<string> {
-  const { slug, targetDir, template, templatesDir } = opts;
+  const { targetDir, template, templatesDir } = opts;
   const available = await listTemplates(templatesDir);
 
   if (!available.includes(template)) {
@@ -60,12 +40,14 @@ export async function runNew(opts: NewOptions): Promise<string> {
 
   const src = join(templatesDir, template);
 
-  step("Create", `${slug} from template '${template}'`);
+  step("Create", `from template '${template}'`);
 
   for await (const entry of Deno.readDir(src)) {
     if (entry.name === "node_modules") continue;
     const srcPath = join(src, entry.name);
-    const destPath = join(targetDir, entry.name);
+    // _deno.json/_package.json stored with underscore to avoid workspace conflicts
+    const destName = entry.name === "_deno.json" ? "deno.json" : entry.name;
+    const destPath = join(targetDir, destName);
     if (entry.isDirectory) {
       await copyDir(srcPath, destPath);
     } else {
@@ -73,31 +55,12 @@ export async function runNew(opts: NewOptions): Promise<string> {
     }
   }
 
-  // Update slug in agent.ts defineAgent() call
-  const agentTsPath = join(targetDir, "agent.ts");
-  try {
-    const src = await Deno.readTextFile(agentTsPath);
-    // Insert slug as first field after defineAgent({
-    const updated = src.replace(
-      /defineAgent\(\{/,
-      `defineAgent({\n  slug: "${slug}",`,
-    );
-    await Deno.writeTextFile(agentTsPath, updated);
-  } catch {
-    // No agent.ts to update
-  }
-
-  await generateTypes(targetDir);
-
-  // Copy .env.example as .env
   try {
     await Deno.copyFile(
       join(targetDir, ".env.example"),
       join(targetDir, ".env"),
     );
-  } catch {
-    // No .env.example in template
-  }
+  } catch { /* no .env.example in template */ }
 
   step("Done", targetDir);
   return targetDir;

@@ -1,3 +1,4 @@
+import { deadline } from "@std/async/deadline";
 import { bold, cyan, dim, yellow } from "@std/fmt/colors";
 
 const REPO = "alexkroman/aai";
@@ -11,15 +12,11 @@ function detectTarget(): string {
   return `aai-${os}-${arch}`;
 }
 
-/** Check GitHub for a newer release. Returns the new version or null. */
-export async function checkForUpdate(
+async function checkForUpdate(
   currentVersion: string,
 ): Promise<string | null> {
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), CHECK_TIMEOUT_MS);
-    const resp = await fetch(VERSION_URL, { signal: controller.signal });
-    clearTimeout(timer);
+    const resp = await deadline(fetch(VERSION_URL), CHECK_TIMEOUT_MS);
     if (!resp.ok) return null;
     const remote = (await resp.text()).trim();
     return remote !== currentVersion ? remote : null;
@@ -28,7 +25,6 @@ export async function checkForUpdate(
   }
 }
 
-/** Download and replace the current binary with the latest release. */
 async function doUpgrade(newVersion: string): Promise<boolean> {
   const target = detectTarget();
   const url =
@@ -74,7 +70,6 @@ async function doUpgrade(newVersion: string): Promise<boolean> {
   }
 }
 
-/** Check for updates and prompt the user to upgrade if available. */
 export async function promptUpgradeIfAvailable(
   currentVersion: string,
 ): Promise<void> {

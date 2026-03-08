@@ -7,11 +7,13 @@ import type { AgentState, Message, SessionError } from "./types.ts";
 const HTML =
   `<!DOCTYPE html><html><head></head><body><div id="app"></div></body></html>`;
 
+// deno-lint-ignore no-explicit-any
+const g = globalThis as any;
+
 export function setupDOM() {
   installDomShim();
   const doc = new DOMParser().parseFromString(HTML, "text/html")!;
-  // deno-lint-ignore no-explicit-any
-  (globalThis as any).document = doc;
+  g.document = doc;
   return doc;
 }
 
@@ -31,12 +33,10 @@ export const flush = () => new Promise<void>((r) => queueMicrotask(r));
 
 export function installMockLocation(origin = "http://localhost:3000") {
   const had = "location" in globalThis;
-  // deno-lint-ignore no-explicit-any
-  if (!had) (globalThis as any).location = { origin };
+  if (!had) g.location = { origin };
   return {
     restore() {
-      // deno-lint-ignore no-explicit-any
-      if (!had) delete (globalThis as any).location;
+      if (!had) delete g.location;
     },
   };
 }
@@ -136,10 +136,10 @@ export class MockAudioContext {
   }
 }
 
-export interface AudioMockContext {
+export type AudioMockContext = {
   lastContext: () => MockAudioContext;
   workletNodes: () => MockAudioWorkletNode[];
-}
+};
 
 /**
  * Install Web Audio API mocks on globalThis and run `fn`.
@@ -151,23 +151,20 @@ export function withAudioMocks(
   return async () => {
     const origAudioContext = globalThis.AudioContext;
     const origAudioWorkletNode = globalThis.AudioWorkletNode;
-    // deno-lint-ignore no-explicit-any
-    const nav = globalThis.navigator as any;
+    const nav = g.navigator;
     const origGetUserMedia = nav?.mediaDevices?.getUserMedia;
 
     let _lastContext: MockAudioContext;
     const _workletNodes: MockAudioWorkletNode[] = [];
 
-    // deno-lint-ignore no-explicit-any
-    (globalThis as any).AudioContext = class extends MockAudioContext {
+    g.AudioContext = class extends MockAudioContext {
       constructor(opts?: { sampleRate?: number }) {
         super(opts);
         _lastContext = this;
       }
     };
 
-    // deno-lint-ignore no-explicit-any
-    (globalThis as any).AudioWorkletNode = class extends MockAudioWorkletNode {
+    g.AudioWorkletNode = class extends MockAudioWorkletNode {
       constructor(ctx: MockAudioContext, name: string, options?: unknown) {
         super(ctx, name, options);
         _workletNodes.push(this);

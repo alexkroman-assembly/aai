@@ -1,3 +1,6 @@
+import { defineAgent, fetchJSON } from "@aai/sdk";
+import { z } from "zod";
+
 function first(field: unknown): string | undefined {
   return Array.isArray(field) ? field[0] : undefined;
 }
@@ -31,10 +34,10 @@ async function lookupDrug(
   };
 }
 
-interface RxCui {
+type RxCui = {
   name: string;
   rxcui: string;
-}
+};
 
 async function resolveRxCui(
   name: string,

@@ -60,6 +60,9 @@ export class MockWebSocket extends EventTarget {
   }
 }
 
+// deno-lint-ignore no-explicit-any
+const g = globalThis as any;
+
 export function installMockWebSocket(): {
   restore: () => void;
   created: MockWebSocket[];
@@ -69,8 +72,7 @@ export function installMockWebSocket(): {
   const saved = globalThis.WebSocket;
   const created: MockWebSocket[] = [];
 
-  // deno-lint-ignore no-explicit-any
-  (globalThis as any).WebSocket = class extends MockWebSocket {
+  g.WebSocket = class extends MockWebSocket {
     constructor(
       url: string | URL,
       protocols?: string | string[] | Record<string, unknown>,

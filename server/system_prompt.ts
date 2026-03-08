@@ -1,5 +1,8 @@
-import { DEFAULT_INSTRUCTIONS } from "../sdk/types.ts";
-import type { AgentConfig, ToolSchema } from "./types.ts";
+import {
+  type AgentConfig,
+  DEFAULT_INSTRUCTIONS,
+  type ToolSchema,
+} from "../sdk/types.ts";
 
 const VOICE_RULES =
   "\n\nCRITICAL OUTPUT RULES — you MUST follow these for EVERY response:\n" +

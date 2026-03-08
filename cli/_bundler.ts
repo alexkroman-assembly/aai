@@ -3,20 +3,18 @@ import {
   type BuildOptions,
   formatMessages,
   initialize,
-  type Plugin,
   transform,
 } from "esbuild";
 import type { InitializeOptions } from "esbuild-wasm-types";
 import { denoPlugin } from "@deno/esbuild-plugin";
-import { exists } from "@std/fs/exists";
-import { dirname, fromFileUrl, join, resolve, toFileUrl } from "@std/path";
+import { dirname, fromFileUrl, join, resolve } from "@std/path";
+import { toFileUrl } from "@std/path/to-file-url";
 import type { AgentEntry } from "./_discover.ts";
 
-export class BundleError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "BundleError";
-  }
+export function bundleError(message: string): Error {
+  const err = new Error(message);
+  err.name = "BundleError";
+  return err;
 }
 
 async function buildWithCleanErrors(
@@ -36,7 +34,7 @@ async function buildWithCleanErrors(
         kind: "error",
         color: true,
       });
-      throw new BundleError(formatted.join("\n"));
+      throw bundleError(formatted.join("\n"));
     }
     throw err;
   }
@@ -44,20 +42,11 @@ async function buildWithCleanErrors(
 
 let esbuildReady: Promise<void> | null = null;
 
-/** Ensure esbuild-wasm is initialized (needed inside deno compile). */
 function ensureInit() {
   if (!esbuildReady) {
     esbuildReady = (async () => {
-      const wasmPath = resolve(
-        dirname(fromFileUrl(import.meta.url)),
-        "..",
-        "node_modules",
-        ".deno",
-        "esbuild-wasm@0.27.3",
-        "node_modules",
-        "esbuild-wasm",
-        "esbuild.wasm",
-      );
+      const esbuildDir = dirname(fromFileUrl(import.meta.resolve("esbuild")));
+      const wasmPath = join(esbuildDir, "..", "esbuild.wasm");
       const wasmBytes = await Deno.readFile(wasmPath);
       const wasmModule = new WebAssembly.Module(wasmBytes);
       await initialize(
@@ -70,86 +59,14 @@ function ensureInit() {
   return esbuildReady;
 }
 
-let cacheWarmed = false;
-
-/** Pre-populate Deno's npm cache so esbuild resolution doesn't trigger noisy
- *  download logs mid-build. Safe to call multiple times -- only runs once. */
-export async function warmNpmCache(): Promise<void> {
-  if (cacheWarmed) return;
-  cacheWarmed = true;
+async function stripTypes(source: string): Promise<string> {
   await ensureInit();
-  await Promise.allSettled([
-    import("preact"),
-    import("preact/hooks"),
-    import("preact/compat"),
-    import("@preact/signals"),
-    import("goober"),
-  ]);
-}
-
-/** Strip TypeScript type annotations, returning plain JavaScript.
- *  Requires esbuild to be initialized first (call warmNpmCache). */
-export async function stripTypes(source: string): Promise<string> {
   const result = await transform(source, { loader: "ts" });
   return result.code;
 }
 
-/** Root of the aai framework (parent of cli/). */
-const AAI_ROOT = resolve(dirname(fromFileUrl(import.meta.url)), "..");
+export const AAI_ROOT = resolve(dirname(fromFileUrl(import.meta.url)), "..");
 const baseConfigPath = resolve(AAI_ROOT, "deno.json");
-
-/**
- * Read the agent's deno.json imports and return an esbuild plugin that rewrites
- * bare specifiers to their mapped npm:/jsr: URLs so denoPlugin can resolve them.
- */
-async function agentImportsPlugin(agentDir: string): Promise<Plugin | null> {
-  const imports: Record<string, string> = {};
-  try {
-    const raw = JSON.parse(
-      await Deno.readTextFile(join(agentDir, "deno.json")),
-    );
-    Object.assign(imports, raw.imports ?? {});
-  } catch { /* no agent deno.json */ }
-
-  if (Object.keys(imports).length === 0) return null;
-
-  return {
-    name: "agent-imports",
-    setup(b) {
-      // Rewrite bare specifiers to their mapped npm:/jsr: URLs, then
-      // re-resolve so denoPlugin handles them.
-      b.onResolve({ filter: /^[^./]/ }, async (args) => {
-        const mapped = imports[args.path];
-        if (!mapped) return undefined;
-        const result = await b.resolve(mapped, {
-          resolveDir: args.resolveDir,
-          kind: args.kind,
-        });
-        return result;
-      });
-    },
-  };
-}
-
-/** Loads .worklet.js files as text strings so they can be passed to
- *  AudioContext.audioWorklet.addModule() at runtime. Must be listed
- *  before denoPlugin so it intercepts the resolve first. */
-const workletTextPlugin: Plugin = {
-  name: "worklet-text",
-  setup(build) {
-    build.onResolve({ filter: /\.worklet\.js$/ }, (args) => ({
-      path: resolve(args.resolveDir, args.path),
-      namespace: "worklet-text",
-    }));
-    build.onLoad(
-      { filter: /.*/, namespace: "worklet-text" },
-      async (args) => ({
-        contents: await Deno.readTextFile(args.path),
-        loader: "text" as const,
-      }),
-    );
-  },
-};
 
 const BASE: BuildOptions = {
   bundle: true,
@@ -166,65 +83,6 @@ const BASE: BuildOptions = {
   logOverride: { "commonjs-variable-in-esm": "silent" },
 };
 
-/** Write esbuild output files to disk (browser ESM build doesn't support write:true). */
-async function writeOutputFiles(
-  result: { outputFiles?: { path: string; contents: Uint8Array }[] },
-): Promise<void> {
-  if (!result.outputFiles) return;
-  for (const file of result.outputFiles) {
-    await Deno.writeFile(file.path, file.contents);
-  }
-}
-
-export function clientBuildOptions(
-  clientEntry: string,
-  outfile: string,
-): BuildOptions {
-  return {
-    ...BASE,
-    plugins: [workletTextPlugin, denoPlugin({ configPath: baseConfigPath })],
-    entryPoints: [clientEntry],
-    outfile,
-    jsx: "automatic",
-    jsxImportSource: "preact",
-  };
-}
-
-async function hasExternalImports(dir: string): Promise<boolean> {
-  const denoJsonPath = join(dir, "deno.json");
-  if (!await exists(denoJsonPath)) return false;
-  try {
-    const raw = JSON.parse(await Deno.readTextFile(denoJsonPath));
-    return raw.imports && Object.keys(raw.imports).length > 0;
-  } catch {
-    return false;
-  }
-}
-
-async function precomputeSchemas(agent: AgentEntry) {
-  if (await hasExternalImports(agent.dir)) return null;
-
-  const { agentToolsToSchemas } = await import("../sdk/types.ts");
-  const { defineAgent } = await import("../sdk/define_agent.ts");
-  const { fetchJSON } = await import("../sdk/fetch_json.ts");
-  const { z } = await import("zod");
-  Object.assign(globalThis, { defineAgent, fetchJSON, z });
-
-  const source = await Deno.readTextFile(resolve(agent.entryPoint));
-  const js = await stripTypes(source);
-  const tmpPath = join(
-    dirname(resolve(agent.entryPoint)),
-    `.aai-schemas-${Date.now()}.js`,
-  );
-  try {
-    await Deno.writeTextFile(tmpPath, js);
-    const mod = await import(toFileUrl(tmpPath).href);
-    return agentToolsToSchemas(mod.default.tools);
-  } finally {
-    await Deno.remove(tmpPath).catch(() => {});
-  }
-}
-
 function jsBytes(metafile: { outputs: Record<string, { bytes: number }> }) {
   for (const [file, info] of Object.entries(metafile.outputs)) {
     if (file.endsWith(".js")) return info.bytes;
@@ -232,63 +90,83 @@ function jsBytes(metafile: { outputs: Record<string, { bytes: number }> }) {
   return 0;
 }
 
-export interface BundleResult {
+function getOutputText(
+  result: { outputFiles?: { path: string; text: string }[] },
+): string {
+  return result.outputFiles?.[0]?.text ?? "";
+}
+
+export async function importTempModule(
+  sourcePath: string,
+  opts?: { rewriteSdkImports?: boolean },
+): Promise<Record<string, unknown>> {
+  const absPath = resolve(sourcePath);
+  const dir = dirname(absPath);
+  const source = await Deno.readTextFile(absPath);
+  let js = await stripTypes(source);
+  if (opts?.rewriteSdkImports) {
+    const sdkPath = toFileUrl(resolve(AAI_ROOT, "sdk/mod.ts")).href;
+    js = js.replace(
+      /from\s*["']@aai\/sdk["']/g,
+      `from "${sdkPath}"`,
+    );
+  }
+  js = js.replace(
+    /from\s*["'](\.\.?\/[^"']+)["']/g,
+    (_, rel: string) => `from "${toFileUrl(resolve(dir, rel)).href}"`,
+  );
+  const dataUrl = `data:application/javascript;charset=utf-8,${
+    encodeURIComponent(js)
+  }`;
+  return await import(dataUrl);
+}
+
+export type BundleOutput = {
+  worker: string;
+  client: string;
+  manifest: string;
   workerBytes: number;
   clientBytes: number;
-}
+};
 
 export async function bundleAgent(
   agent: AgentEntry,
-  outDir: string,
   opts?: { skipClient?: boolean },
-): Promise<BundleResult> {
+): Promise<BundleOutput> {
   await ensureInit();
-  await Deno.mkdir(outDir, { recursive: true });
-
-  const schemas = await precomputeSchemas(agent);
-  const agentPlugin = await agentImportsPlugin(agent.dir);
 
   const agentAbsolute = resolve(agent.entryPoint);
-  const workerEntryAbsolute = resolve(AAI_ROOT, "sdk/_worker_entry.ts");
-  const agentModAbsolute = resolve(AAI_ROOT, "sdk/define_agent.ts");
-  const fetchJsonAbsolute = resolve(AAI_ROOT, "sdk/fetch_json.ts");
+  const workerEntryAbsolute = resolve(AAI_ROOT, "core/_worker_entry.ts");
 
-  const workerShimPath = resolve(outDir, "_worker_shim.ts");
-  await Deno.writeTextFile(
-    workerShimPath,
-    `import { defineAgent } from "${agentModAbsolute}";\n` +
-      `import { fetchJSON } from "${fetchJsonAbsolute}";\n` +
-      `import { z } from "zod";\n` +
-      `Object.assign(globalThis, { defineAgent, fetchJSON, z });\n`,
-  );
-
-  const clientShimPath = resolve(outDir, "_client_shim.ts");
-  await Deno.writeTextFile(
-    clientShimPath,
-    `import { mount, useSession, css, keyframes, styled, darkTheme, defaultTheme, applyTheme, App, ChatView, ErrorBanner, MessageBubble, StateIndicator, Transcript, SessionProvider, createSessionControls, createVoiceSession } from "@aai/ui";\n` +
-      `import { useEffect, useRef, useState, useCallback, useMemo } from "preact/hooks";\n` +
-      `Object.assign(globalThis, { mount, useSession, css, keyframes, styled, darkTheme, defaultTheme, applyTheme, App, ChatView, ErrorBanner, MessageBubble, StateIndicator, Transcript, SessionProvider, createSessionControls, createVoiceSession, useEffect, useRef, useState, useCallback, useMemo });\n`,
-  );
-
-  const plugins = [
-    ...(agentPlugin ? [agentPlugin] : []),
-    denoPlugin({ configPath: baseConfigPath }),
-  ];
+  // Agent's deno.json resolves agent-specific deps (e.g. npm: imports).
+  // Framework's deno.json resolves internal deps (zod, @aai/sdk internals).
+  const agentConfigPath = join(agent.dir, "deno.json");
+  let hasAgentConfig = false;
+  try {
+    await Deno.stat(agentConfigPath);
+    hasAgentConfig = true;
+  } catch { /* no agent deno.json */ }
+  const workerPlugins = hasAgentConfig
+    ? [
+      denoPlugin({ configPath: agentConfigPath }),
+      denoPlugin({ configPath: baseConfigPath }),
+    ]
+    : [denoPlugin({ configPath: baseConfigPath })];
+  const clientPlugins = [denoPlugin({ configPath: baseConfigPath })];
 
   const workerResult = await buildWithCleanErrors({
     ...BASE,
-    plugins,
+    plugins: workerPlugins,
+
     stdin: {
       contents: `import agent from "${agentAbsolute}";\n` +
         `import { startWorker } from "${workerEntryAbsolute}";\n` +
         `const env: Record<string, string> = ${JSON.stringify(agent.env)};\n` +
-        `const schemas = ${JSON.stringify(schemas)};\n` +
-        `startWorker(agent, env, schemas);\n`,
+        `startWorker(agent, env);\n`,
       loader: "ts",
       resolveDir: AAI_ROOT,
     },
-    inject: [workerShimPath],
-    outfile: `${outDir}/worker.js`,
+    outfile: "worker.js",
     metafile: true,
     loader: {
       ".json": "json",
@@ -298,53 +176,49 @@ export async function bundleAgent(
       ".html": "text",
     },
   });
-  await writeOutputFiles(workerResult);
 
+  let client = "";
   let clientBytes = 0;
   if (!opts?.skipClient) {
-    // If the user's custom client.tsx exports a default component but doesn't
-    // call mount(), generate a wrapper entry that auto-mounts it for them.
-    let effectiveClientEntry = agent.clientEntry;
-    const clientShimEntryPath = resolve(outDir, "_client_entry.tsx");
-    if (agent.clientEntry.startsWith(agent.dir)) {
-      const clientSrc = await Deno.readTextFile(agent.clientEntry);
-      const hasMount = /\bmount\s*\(/.test(clientSrc);
-      const hasDefaultExport = /export\s+default\b/.test(clientSrc);
-      if (!hasMount && hasDefaultExport) {
-        await Deno.writeTextFile(
-          clientShimEntryPath,
-          `import App from "${resolve(agent.clientEntry)}";\n` +
-            `mount(App, { platformUrl: new URL(".", globalThis.location.href).href.replace(/\\/$/, "") });\n`,
-        );
-        effectiveClientEntry = clientShimEntryPath;
-      }
-    }
+    const clientEntry = agent.clientEntry.startsWith(agent.dir)
+      ? `import { mount } from "@aai/ui";\n` +
+        `import App from "${resolve(agent.clientEntry)}";\n` +
+        `mount(App, { platformUrl: new URL(".", globalThis.location.href).href.replace(/\\/$/, "") });\n`
+      : `import "${resolve(agent.clientEntry)}";\n`;
 
     const clientResult = await buildWithCleanErrors({
-      ...clientBuildOptions(effectiveClientEntry, `${outDir}/client.js`),
-      inject: [clientShimPath],
+      ...BASE,
+      plugins: clientPlugins,
+
+      stdin: {
+        contents: clientEntry,
+        loader: "tsx",
+        resolveDir: AAI_ROOT,
+      },
+      outfile: "client.js",
+      jsx: "automatic",
+      jsxImportSource: "preact",
       metafile: true,
     });
-    await writeOutputFiles(clientResult);
+    client = getOutputText(clientResult);
     clientBytes = jsBytes(clientResult.metafile!);
-
-    await Deno.remove(clientShimEntryPath).catch(() => {});
   }
 
-  // Clean up temp shims
-  await Deno.remove(workerShimPath).catch(() => {});
-  await Deno.remove(clientShimPath).catch(() => {});
-
-  await Deno.writeTextFile(
-    `${outDir}/manifest.json`,
-    JSON.stringify(
-      { slug: agent.slug, env: agent.env, transport: agent.transport },
-      null,
-      2,
-    ) + "\n",
+  const manifest = JSON.stringify(
+    {
+      env: agent.env,
+      transport: agent.transport,
+      config: agent.config,
+      toolSchemas: agent.toolSchemas,
+    },
+    null,
+    2,
   );
 
   return {
+    worker: getOutputText(workerResult),
+    client,
+    manifest,
     workerBytes: jsBytes(workerResult.metafile!),
     clientBytes,
   };

@@ -1,30 +1,24 @@
 import { expect } from "@std/expect";
 import { join } from "@std/path";
-import { exists } from "@std/fs/exists";
 import { runBuild } from "./build.ts";
 
 Deno.test(
   { name: "runBuild", sanitizeOps: false, sanitizeResources: false },
   async (t) => {
     await t.step("validates and bundles agent from agentDir", async () => {
-      const tmpOut = await Deno.makeTempDir({ prefix: "aai-build-test-" });
       const agentDir = join(
         new URL("../templates/simple", import.meta.url).pathname,
       );
 
-      try {
-        await runBuild({ outDir: tmpOut, agentDir });
+      const result = await runBuild({ agentDir });
 
-        // The slug is derived from the agent name in defineAgent()
-        const slug = "simple-assistant";
-        const outDir = join(tmpOut, slug);
+      expect(result.bundle.worker.length).toBeGreaterThan(0);
+      expect(result.bundle.client.length).toBeGreaterThan(0);
+      expect(result.bundle.manifest.length).toBeGreaterThan(0);
 
-        expect(await exists(join(outDir, "worker.js"))).toBe(true);
-        expect(await exists(join(outDir, "client.js"))).toBe(true);
-        expect(await exists(join(outDir, "manifest.json"))).toBe(true);
-      } finally {
-        await Deno.remove(tmpOut, { recursive: true });
-      }
+      const manifest = JSON.parse(result.bundle.manifest);
+      expect(manifest.config.name).toBe("Simple Assistant");
+      expect(result.agent.slug).toBe("simple");
     });
   },
 );

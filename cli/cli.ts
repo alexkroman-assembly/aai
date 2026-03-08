@@ -1,47 +1,41 @@
-import { parseArgs } from "@std/cli/parse-args";
-import { exists } from "@std/fs/exists";
 import { bold, cyan, dim, green } from "@std/fmt/colors";
 import { dirname, fromFileUrl, join } from "@std/path";
 import { error } from "./_output.ts";
 import { promptUpgradeIfAvailable } from "./_update.ts";
 
-const denoConfig = await import("../deno.json", { with: { type: "json" } });
+const denoConfig = await import("./deno.json", { with: { type: "json" } });
 const VERSION: string = denoConfig.default.version;
 
-function printUsage(): void {
-  const dryRun = cyan("-n, --dry-run");
+async function printUsage(): Promise<void> {
+  const cliDir = dirname(fromFileUrl(import.meta.url));
+  const templatesDir = join(cliDir, "..", "templates");
+  const { listTemplates } = await import("./new.ts");
+  const templates = await listTemplates(templatesDir);
+  const templateList = templates.map((t) => `    ${t}`).join("\n");
   console.log(
     `${green(bold("aai"))} ${dim(VERSION)}
 Voice agent development kit
 
-${bold("USAGE:")}
-  ${cyan("aai")}              Run dev server (scaffolds new agent if needed)
+${bold("COMMANDS:")}
+  ${cyan("aai new")}            Scaffold a new agent project
+  ${cyan("aai dev")}            Run local dev server with file watching
+  ${cyan("aai deploy")}         Bundle and deploy to production
+
+${bold("TEMPLATES:")}
+  Use with ${cyan("aai new -t <template>")}:
+${templateList}
 
 ${bold("OPTIONS:")}
-  ${cyan("-h, --help")}       Show this help message
-  ${cyan("-V, --version")}    Show version number
-  ${cyan("--no-watch")}       Disable file watching (watch is on by default)
-  ${cyan("-y, --yes")}        Skip confirmation prompts (for automation)
-  ${cyan("-t, --template")}   Template to use for new agents (default: simple)
-  ${dryRun}    Type-check, validate, and bundle without deploying
+  ${cyan("-h, --help")}         Show this help message
+  ${cyan("-V, --version")}      Show version number
+
+Run ${cyan("aai <command> --help")} for command-specific options.
 `,
   );
 }
 
 export async function main(args: string[]): Promise<number> {
-  const flags = parseArgs(args, {
-    string: ["url", "template"],
-    alias: {
-      u: "url",
-      h: "help",
-      V: "version",
-      y: "yes",
-      t: "template",
-      n: "dry-run",
-    },
-    boolean: ["help", "version", "watch", "yes", "dry-run"],
-    default: { watch: true },
-  });
+  const command = args[0];
 
   // Skip update check when running via `deno run` (aai-dev) — only check for compiled binary
   const isCompiled = !Deno.execPath().endsWith("deno");
@@ -49,80 +43,38 @@ export async function main(args: string[]): Promise<number> {
     await promptUpgradeIfAvailable(VERSION);
   }
 
-  if (flags.help) {
-    printUsage();
+  // Top-level flags (no subcommand)
+  if (!command || command === "--help" || command === "-h") {
+    await printUsage();
     return 0;
   }
 
-  if (flags.version) {
+  if (command === "--version" || command === "-V") {
     console.log(VERSION);
     return 0;
   }
 
-  const { getApiKey } = await import("./_discover.ts");
-  const cwd = Deno.env.get("INIT_CWD") || Deno.cwd();
-  const serverUrl = flags.url || "https://aai-agent.fly.dev";
+  const subArgs = args.slice(1);
 
-  if (flags["dry-run"]) {
-    if (!Deno.env.get("ASSEMBLYAI_API_KEY")) {
-      Deno.env.set("ASSEMBLYAI_API_KEY", "dry-run");
+  switch (command) {
+    case "new": {
+      const { runNewCommand } = await import("./cmd_new.ts");
+      return await runNewCommand(subArgs);
     }
-  } else {
-    await getApiKey();
+    case "dev": {
+      const { runDevCommand } = await import("./cmd_dev.ts");
+      return await runDevCommand(subArgs);
+    }
+    case "deploy": {
+      const { runDeployCommand } = await import("./cmd_deploy.ts");
+      return await runDeployCommand(subArgs);
+    }
+    default: {
+      error(`unknown command: ${command}`);
+      await printUsage();
+      return 1;
+    }
   }
-
-  let isNewAgent = false;
-  if (!await exists(join(cwd, "agent.ts"))) {
-    isNewAgent = true;
-    if (!flags.yes) {
-      console.log(`\n${green(bold("aai"))} ${dim(VERSION)}`);
-      console.log("Voice agent development kit\n");
-
-      const answer = prompt(`Set up a new agent in "${cwd}"? (Y/n)`);
-      if (answer === null) return 0;
-      if (answer !== "" && answer.toLowerCase() !== "y") return 0;
-    }
-
-    const cliDir = dirname(fromFileUrl(import.meta.url));
-    const templatesDir = join(cliDir, "..", "templates");
-    const { generateSlug, runNew } = await import("./new.ts");
-
-    const template = flags.template || "simple";
-    await runNew({
-      slug: generateSlug(),
-      targetDir: cwd,
-      template,
-      templatesDir,
-    });
-
-    const templates: string[] = [];
-    for await (const entry of Deno.readDir(templatesDir)) {
-      if (entry.isDirectory) templates.push(entry.name);
-    }
-    templates.sort();
-
-    console.log(`\n${bold("Templates:")}`);
-    for (const t of templates) {
-      const marker = t === template ? green("●") : dim("○");
-      console.log(`  ${marker} ${t === template ? bold(t) : t}`);
-    }
-    console.log(
-      dim(
-        `\n  Re-run with --template <name> to start from a different template\n`,
-      ),
-    );
-  }
-
-  const { runDev } = await import("./dev.ts");
-  await runDev({
-    agentDir: cwd,
-    serverUrl,
-    watch: flags["dry-run"] ? false : flags.watch,
-    openBrowser: isNewAgent,
-    dryRun: flags["dry-run"],
-  });
-
-  return 0;
 }
 
 if (import.meta.main) {

@@ -1,10 +1,21 @@
 import { batch, type Signal, signal } from "@preact/signals";
-import {
-  DEFAULT_STT_SAMPLE_RATE,
-  DEFAULT_TTS_SAMPLE_RATE,
-  type ErrorMessage,
-  type ServerMessage,
-} from "@aai/sdk/protocol";
+// Inlined from core/_protocol.ts to avoid dependency on unpublished @aai/core.
+const DEFAULT_STT_SAMPLE_RATE = 16_000;
+const DEFAULT_TTS_SAMPLE_RATE = 24_000;
+
+type ErrorMessage = { type: "error"; message: string; details?: string[] };
+
+type ServerMessage =
+  | { type: "ready"; sample_rate: number; tts_sample_rate: number }
+  | { type: "partial_transcript"; text: string }
+  | { type: "final_transcript"; text: string; turn_order?: number }
+  | { type: "turn"; text: string; turn_order?: number }
+  | { type: "chat"; text: string }
+  | { type: "tts_done" }
+  | { type: "cancelled" }
+  | { type: "reset" }
+  | ErrorMessage
+  | { type: "pong" };
 
 import {
   type AgentState,
@@ -19,12 +30,12 @@ import {
 
 import type { VoiceIO } from "./audio.ts";
 
-export interface Reconnect {
+export type Reconnect = {
   readonly canRetry: boolean;
   schedule(cb: () => void): boolean;
   cancel(): void;
   reset(): void;
-}
+};
 
 export function createReconnect(
   maxAttempts = MAX_RECONNECT_ATTEMPTS,
@@ -72,7 +83,7 @@ export function parseServerMessage(data: string): ServerMessage | null {
   }
 }
 
-export interface VoiceSession {
+export type VoiceSession = {
   readonly state: Signal<AgentState>;
   readonly messages: Signal<Message[]>;
   readonly transcript: Signal<string>;
@@ -84,7 +95,7 @@ export interface VoiceSession {
   reset(): void;
   disconnect(): void;
   [Symbol.dispose](): void;
-}
+};
 
 export function createVoiceSession(options: SessionOptions): VoiceSession {
   const state = signal<AgentState>("connecting");
@@ -95,7 +106,6 @@ export function createVoiceSession(options: SessionOptions): VoiceSession {
 
   let ws: WebSocket | null = null;
   let voiceIO: VoiceIO | null = null;
-  let streamingMessage = false;
   const reconnector = createReconnect();
   let connectionController: AbortController | null = null;
   let hasConnected = false;
@@ -199,7 +209,9 @@ export function createVoiceSession(options: SessionOptions): VoiceSession {
       batch(() => {
         error.value = {
           code: "audio",
-          message: `Microphone access failed: ${(err as Error).message}`,
+          message: `Microphone access failed: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
         };
         state.value = "error";
       });
@@ -247,39 +259,7 @@ export function createVoiceSession(options: SessionOptions): VoiceSession {
           ];
           state.value = "speaking";
           break;
-        case "chat_delta": {
-          const msgs = messages.value;
-          const last = msgs[msgs.length - 1];
-          if (last && last.role === "assistant" && streamingMessage) {
-            messages.value = [
-              ...msgs.slice(0, -1),
-              { role: "assistant", text: last.text + msg.text },
-            ];
-          } else {
-            streamingMessage = true;
-            messages.value = [
-              ...msgs,
-              { role: "assistant", text: msg.text },
-            ];
-          }
-          state.value = "speaking";
-          break;
-        }
-        case "chat_done":
-          streamingMessage = false;
-          if (msg.text) {
-            const msgs = messages.value;
-            const last = msgs[msgs.length - 1];
-            if (last && last.role === "assistant") {
-              messages.value = [
-                ...msgs.slice(0, -1),
-                { role: "assistant", text: msg.text },
-              ];
-            }
-          }
-          break;
         case "tts_done":
-          streamingMessage = false;
           voiceIO?.done();
           state.value = "listening";
           break;
@@ -295,7 +275,7 @@ export function createVoiceSession(options: SessionOptions): VoiceSession {
           pongReceived = true;
           break;
         case "error": {
-          const details = (msg as ErrorMessage).details;
+          const details = msg.details;
           const fullMessage = details?.length
             ? `${msg.message}: ${details.join(", ")}`
             : msg.message;

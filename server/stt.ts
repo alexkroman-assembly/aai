@@ -1,41 +1,22 @@
 import { deadline } from "@std/async/deadline";
-import { getLogger } from "./logger.ts";
 import { type STTConfig, SttMessageSchema } from "./types.ts";
-
-/** Deno supports headers in WebSocket constructor at runtime. */
-function createWebSocket(
-  url: string,
-  headers?: Record<string, string>,
-): WebSocket {
-  // @ts-expect-error Deno runtime supports { headers } but types say string | string[]
-  return new WebSocket(url, headers ? { headers } : undefined);
-}
-
-function safeParseJSON(data: string): unknown {
-  try {
-    return JSON.parse(data);
-  } catch {
-    return null;
-  }
-}
+import { createWebSocketWithHeaders } from "./_deno_ws.ts";
 
 const STT_CONNECTION_TIMEOUT = 10_000;
-const log = getLogger("stt");
 
-export interface SttEvents {
-  onSpeechStarted: () => void;
+export type SttEvents = {
   onTranscript: (text: string, isFinal: boolean, turnOrder?: number) => void;
   onTurn: (text: string, turnOrder?: number) => void;
   onTermination: (audioDuration: number, sessionDuration: number) => void;
   onError: (err: Error) => void;
   onClose: () => void;
-}
+};
 
-export interface SttHandle {
+export type SttHandle = {
   send: (audio: Uint8Array) => void;
   clear: () => void;
   close: () => void;
-}
+};
 
 export async function connectStt(
   apiKey: string,
@@ -57,11 +38,13 @@ export async function connectStt(
   }
 
   const url = `${config.wssBase}?${params}`;
-  log.info("Connecting to STT", {
+  console.info("Connecting to STT", {
     url: config.wssBase,
     params: Object.fromEntries(params),
   });
-  const ws = createWebSocket(url, { Authorization: apiKey });
+  const ws = createWebSocketWithHeaders(url, {
+    Authorization: apiKey,
+  });
 
   const ac = new AbortController();
   const { signal } = ac;
@@ -70,13 +53,13 @@ export async function connectStt(
     const handle = await deadline(
       new Promise<SttHandle>((resolve, reject) => {
         ws.addEventListener("open", () => {
-          log.info("STT WebSocket connected");
+          console.info("STT WebSocket connected");
           resolve({
             send(audio: Uint8Array) {
               if (ws.readyState === WebSocket.OPEN) {
                 ws.send(audio);
               } else {
-                log.warn("STT send skipped, ws not open", {
+                console.warn("STT send skipped, ws not open", {
                   wsState: ws.readyState,
                 });
               }
@@ -95,31 +78,24 @@ export async function connectStt(
         let msgCount = 0;
         ws.addEventListener("message", (event: MessageEvent) => {
           if (typeof event.data !== "string") {
-            log.debug("STT non-string message", {
+            console.debug("STT non-string message", {
               dataType: typeof event.data,
             });
             return;
           }
-          const parsed = safeParseJSON(event.data);
-          if (parsed === null) {
-            log.warn("Failed to parse STT message", {
-              raw: (event.data as string).slice(0, 200),
-            });
+          let json: unknown;
+          try {
+            json = JSON.parse(event.data);
+          } catch {
             return;
           }
 
-          const result = SttMessageSchema.safeParse(parsed);
-          if (!result.success) {
-            log.warn("Invalid STT message, skipping", {
-              error: result.error.message,
-              raw: JSON.stringify(parsed).slice(0, 200),
-            });
-            return;
-          }
+          const result = SttMessageSchema.safeParse(json);
+          if (!result.success) return;
 
           const msg = result.data;
           msgCount++;
-          log.info("STT message", {
+          console.info("STT message", {
             msgCount,
             type: msg.type,
             transcript: msg.transcript?.slice(0, 100),
@@ -128,9 +104,7 @@ export async function connectStt(
             endOfTurn: msg.end_of_turn,
             turnIsFormatted: msg.turn_is_formatted,
           });
-          if (msg.type === "SpeechStarted") {
-            events.onSpeechStarted();
-          } else if (msg.type === "Termination") {
+          if (msg.type === "Termination") {
             events.onTermination(
               msg.audio_duration_seconds ?? 0,
               msg.session_duration_seconds ?? 0,
@@ -150,22 +124,24 @@ export async function connectStt(
 
         ws.addEventListener("error", (event: Event) => {
           ac.abort();
-          const err = event instanceof ErrorEvent
-            ? new Error(event.message)
-            : new Error("WebSocket error");
+          const detail = event instanceof ErrorEvent ? event.message : "";
+          const msg = apiKey
+            ? `STT connection failed${detail ? `: ${detail}` : ""}`
+            : "STT connection failed — ASSEMBLYAI_API_KEY is not set";
+          const err = new Error(msg);
           events.onError(err);
           reject(err);
         });
 
         ws.addEventListener("close", (event: CloseEvent) => {
-          log.info("STT WebSocket closed", {
+          console.info("STT WebSocket closed", {
             code: event.code,
             reason: event.reason ?? "",
             msgCount,
           });
           ac.abort();
           if (event.code !== 1000 && event.code !== 1005) {
-            log.error("WebSocket closed unexpectedly", {
+            console.error("WebSocket closed unexpectedly", {
               code: event.code,
               reason: event.reason ?? "",
             });

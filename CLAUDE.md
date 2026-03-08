@@ -16,7 +16,7 @@ Twilio.
 deno task setup          # Configure git hooks (run after clone)
 deno task check          # Full CI: type-check + lint + fmt check + tests
 deno task test           # Run all tests
-deno test server/session_test.ts  # Run a single test file (needs --allow-all --unstable-worker-options for most)
+deno test server/session_test.ts  # Single test file (needs --allow-all)
 deno task dev            # Run CLI dev server locally
 deno task serve          # Run the orchestrator server directly
 deno lint                # Lint only
@@ -31,7 +31,7 @@ by git hooks.
 
 ### Three Workspaces
 
-The `deno.json` workspace has three packages: `server/`, `ui/`, `cli/`.
+The `deno.json` workspace has five packages: `sdk/`, `core/`, `server/`, `ui/`, `cli/`.
 
 **`cli/`** — The `aai` CLI tool. Entry point: `cli/cli.ts`.
 
@@ -52,8 +52,8 @@ The `deno.json` workspace has three packages: `server/`, `ui/`, `cli/`.
   landing page
 - `worker_pool.ts` → spawns agent code in sandboxed Deno Workers with restricted
   permissions (net only); manages agent lifecycle with idle eviction
-- `worker_entry.ts` → runs inside the Worker; exposes `getConfig` and
-  `executeTool` via RPC
+- `worker_entry.ts` → runs inside the Worker; exposes `executeTool` and
+  `invokeHook` via RPC
 - `session.ts` → per-connection session: wires STT → turn handler → TTS, manages
   interruptions
 - `turn_handler.ts` → agentic loop: sends messages to LLM, executes tool calls
@@ -102,7 +102,8 @@ surface (`sdk/types.ts`), update `cli/claude.md` to match.
 - Test files are co-located: `foo.ts` → `foo_test.ts`
 - The CLI should only open the browser when scaffolding a new agent, not when
   running dev on an existing agent
-- `sdk/` contains the stable agent SDK: types, defineAgent, worker entry,
-  protocol, and JSON schemas. cli/, server/, and ui/ all depend on sdk/ but
-  never on each other
+- `sdk/` is the public agent SDK (published to jsr as `@aai/sdk`): types,
+  defineAgent, fetchJSON. `core/` contains internal plumbing: worker entry,
+  protocol, RPC, and JSON schemas. cli/, server/, and ui/ depend on sdk/ and
+  core/ but never on each other
 - `templates/` contains agent scaffolding templates (simple, etc.)

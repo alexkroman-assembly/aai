@@ -12,18 +12,18 @@ export type AgentState =
   | "speaking"
   | "error";
 
-export interface Message {
+export type Message = {
   role: "user" | "assistant";
   text: string;
-}
+};
 
 export type SessionErrorCode = "connection" | "audio" | "protocol";
 
-export interface SessionError {
+export type SessionError = {
   readonly code: SessionErrorCode;
   readonly message: string;
-}
+};
 
-export interface SessionOptions {
+export type SessionOptions = {
   platformUrl: string;
-}
+};

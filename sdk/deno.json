@@ -1,14 +1,17 @@
 {
   "name": "@aai/sdk",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "exports": {
+    ".": "./mod.ts",
     "./types": "./types.ts",
     "./define-agent": "./define_agent.ts",
-    "./fetch-json": "./fetch_json.ts",
-    "./worker-entry": "./_worker_entry.ts",
-    "./tool-executor": "./_tool_executor.ts",
-    "./schema": "./_schema.ts",
-    "./protocol": "./_protocol.ts",
-    "./rpc": "./_rpc.ts"
-  }
+    "./fetch-json": "./fetch_json.ts"
+  },
+  "imports": {
+    "zod": "jsr:@zod/zod@^4.3.6"
+  },
+  "publish": {
+    "exclude": ["*_test.ts"]
+  },
+  "lint": {}
 }

@@ -17,18 +17,18 @@ function BodyStyle({ theme }: { theme: Theme }) {
   );
 }
 
-export interface MountOptions {
+export type MountOptions = {
   theme?: Partial<Theme>;
   target?: string | HTMLElement;
   platformUrl?: string;
-}
+};
 
-export interface MountHandle {
+export type MountHandle = {
   session: VoiceSession;
   signals: SessionSignals;
   dispose(): void;
   [Symbol.dispose](): void;
-}
+};
 
 let gooberReady = false;
 

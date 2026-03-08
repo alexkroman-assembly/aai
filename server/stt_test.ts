@@ -1,8 +1,22 @@
 import { expect } from "@std/expect";
+import { assertSpyCalls, spy } from "@std/testing/mock";
 import { connectStt } from "./stt.ts";
 import { DEFAULT_STT_CONFIG } from "./types.ts";
 import { installMockWebSocket, type MockWebSocket } from "./_mock_ws.ts";
-import { createMockSttEvents } from "./_test_utils.ts";
+
+function createMockSttEvents() {
+  return {
+    onTranscript: spy(
+      (_text: string, _isFinal: boolean, _turnOrder?: number) => {},
+    ),
+    onTurn: spy((_text: string, _turnOrder?: number) => {}),
+    onTermination: spy(
+      (_audioDuration: number, _sessionDuration: number) => {},
+    ),
+    onError: spy((_err: Error) => {}),
+    onClose: spy(() => {}),
+  };
+}
 
 function sendMsg(ws: MockWebSocket, data: Record<string, unknown>) {
   ws.dispatchEvent(
@@ -36,7 +50,7 @@ Deno.test("connectStt", async (t) => {
     const events = createMockSttEvents();
     const handle = await connectStt("test-key", DEFAULT_STT_CONFIG, events);
     handle.close();
-    expect(events.closed).toBe(true);
+    assertSpyCalls(events.onClose, 1);
   });
 
   await t.step("dispatches Transcript messages", async () => {
@@ -48,9 +62,17 @@ Deno.test("connectStt", async (t) => {
     sendMsg(ws, { type: "Transcript", transcript: "hello", is_final: false });
     sendMsg(ws, { type: "Transcript", transcript: "world", is_final: true });
 
-    expect(events.transcripts).toHaveLength(2);
-    expect(events.transcripts[0]).toEqual({ text: "hello", isFinal: false });
-    expect(events.transcripts[1]).toEqual({ text: "world", isFinal: true });
+    assertSpyCalls(events.onTranscript, 2);
+    expect(events.onTranscript.calls[0].args).toEqual([
+      "hello",
+      false,
+      undefined,
+    ]);
+    expect(events.onTranscript.calls[1].args).toEqual([
+      "world",
+      true,
+      undefined,
+    ]);
   });
 
   await t.step("dispatches formatted Turn as onTurn", async () => {
@@ -64,8 +86,10 @@ Deno.test("connectStt", async (t) => {
       turn_is_formatted: true,
     });
 
-    expect(events.turns).toEqual([
-      { text: "What is the weather?", turnOrder: undefined },
+    assertSpyCalls(events.onTurn, 1);
+    expect(events.onTurn.calls[0].args).toEqual([
+      "What is the weather?",
+      undefined,
     ]);
   });
 
@@ -80,8 +104,9 @@ Deno.test("connectStt", async (t) => {
       turn_is_formatted: false,
     });
 
-    expect(events.turns).toHaveLength(0);
-    expect(events.transcripts[0].text).toBe("unformatted text");
+    assertSpyCalls(events.onTurn, 0);
+    assertSpyCalls(events.onTranscript, 1);
+    expect(events.onTranscript.calls[0].args[0]).toBe("unformatted text");
   });
 
   await t.step("skips Turn with empty transcript", async () => {
@@ -95,8 +120,8 @@ Deno.test("connectStt", async (t) => {
       turn_is_formatted: true,
     });
 
-    expect(events.turns).toHaveLength(0);
-    expect(events.transcripts).toHaveLength(0);
+    assertSpyCalls(events.onTurn, 0);
+    assertSpyCalls(events.onTranscript, 0);
   });
 
   await t.step("skips invalid and non-string messages", async () => {
@@ -111,8 +136,8 @@ Deno.test("connectStt", async (t) => {
     );
     sendMsg(ws, { type: "UnknownType", data: 123 });
 
-    expect(events.transcripts).toHaveLength(0);
-    expect(events.turns).toHaveLength(0);
+    assertSpyCalls(events.onTranscript, 0);
+    assertSpyCalls(events.onTurn, 0);
   });
 
   await t.step("fires onError on WebSocket error", async () => {
@@ -120,7 +145,7 @@ Deno.test("connectStt", async (t) => {
     const events = createMockSttEvents();
     await connectStt("test-key", DEFAULT_STT_CONFIG, events);
     mockWs.created[0].dispatchEvent(new Event("error"));
-    expect(events.errors).toHaveLength(1);
+    assertSpyCalls(events.onError, 1);
   });
 
   await t.step("fires onClose on unexpected WebSocket close", async () => {
@@ -128,8 +153,8 @@ Deno.test("connectStt", async (t) => {
     const events = createMockSttEvents();
     await connectStt("test-key", DEFAULT_STT_CONFIG, events);
     mockWs.created[0].dispatchEvent(new CloseEvent("close", { code: 1006 }));
-    expect(events.closed).toBe(true);
-    expect(events.errors).toHaveLength(1);
+    assertSpyCalls(events.onClose, 1);
+    assertSpyCalls(events.onError, 1);
   });
 
   await t.step("dispatches Termination event with durations", async () => {
@@ -143,9 +168,8 @@ Deno.test("connectStt", async (t) => {
       session_duration_seconds: 60.0,
     });
 
-    expect(events.terminations).toEqual([
-      { audioDuration: 12.5, sessionDuration: 60.0 },
-    ]);
+    assertSpyCalls(events.onTermination, 1);
+    expect(events.onTermination.calls[0].args).toEqual([12.5, 60.0]);
   });
 
   await t.step("passes turnOrder on formatted Turn", async () => {
@@ -160,7 +184,8 @@ Deno.test("connectStt", async (t) => {
       turn_order: 3,
     });
 
-    expect(events.turns).toEqual([{ text: "Hello", turnOrder: 3 }]);
+    assertSpyCalls(events.onTurn, 1);
+    expect(events.onTurn.calls[0].args).toEqual(["Hello", 3]);
   });
 
   await t.step(
@@ -177,11 +202,12 @@ Deno.test("connectStt", async (t) => {
         turn_order: 2,
       });
 
-      expect(events.transcripts[0]).toEqual({
-        text: "partial",
-        isFinal: false,
-        turnOrder: 2,
-      });
+      assertSpyCalls(events.onTranscript, 1);
+      expect(events.onTranscript.calls[0].args).toEqual([
+        "partial",
+        false,
+        2,
+      ]);
     },
   );
 

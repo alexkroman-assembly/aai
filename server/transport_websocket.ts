@@ -1,149 +1,115 @@
-import { loadPlatformConfig } from "./config.ts";
-import { getLogger } from "./logger.ts";
 import { renderAgentPage } from "./html.ts";
 import { handleSessionWebSocket } from "./ws_handler.ts";
 import { createSession, type Session } from "./session.ts";
 import {
   type AgentSlot,
-  createRpcToolExecutor,
-  ensureAgent,
+  createToolExecutor,
   registerSlot,
   trackSessionClose,
   trackSessionOpen,
 } from "./worker_pool.ts";
-import type { BundleStore } from "./bundle_store_tigris.ts";
-
-const log = getLogger("websocket");
+import { loadPlatformConfig } from "./config.ts";
+import { getBuiltinToolSchemas } from "./builtin_tools.ts";
+import type { ServerContext } from "./types.ts";
 
 async function discoverSlot(
   slug: string,
-  slots: Map<string, AgentSlot>,
-  store: BundleStore,
+  ctx: ServerContext,
 ): Promise<AgentSlot | null> {
-  const existing = slots.get(slug);
+  const existing = ctx.slots.get(slug);
   if (existing) return existing;
 
-  const manifest = await store.getManifest(slug);
+  const manifest = await ctx.store.getManifest(slug);
   if (!manifest) return null;
 
-  if (registerSlot(slots, manifest)) {
-    log.info("Lazy-discovered agent from store", { slug });
+  if (registerSlot(ctx.slots, manifest)) {
+    console.info("Lazy-discovered agent from store", { slug });
   }
-  return slots.get(slug) ?? null;
-}
-
-export interface WebSocketContext {
-  slots: Map<string, AgentSlot>;
-  sessions: Map<string, Session>;
-  store: BundleStore;
+  return ctx.slots.get(slug) ?? null;
 }
 
 async function resolveSlot(
   slug: string,
-  ctx: WebSocketContext,
+  ctx: ServerContext,
 ): Promise<AgentSlot | null> {
-  const slot = await discoverSlot(slug, ctx.slots, ctx.store);
+  const slot = await discoverSlot(slug, ctx);
   if (!slot?.transport.includes("websocket")) return null;
   return slot;
 }
 
 export async function handleAgentHealth(
-  req: Request,
+  _req: Request,
   slug: string,
-  ctx: WebSocketContext,
+  ctx: ServerContext,
 ): Promise<Response> {
-  void req;
   const slot = await resolveSlot(slug, ctx);
   if (!slot) {
     return Response.json({ error: "Not found", slug }, { status: 404 });
   }
-  try {
-    const info = await ensureAgent(slot, (s) => ctx.store.getFile(s, "worker"));
-    return Response.json({ status: "ok", slug, name: info.name });
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return Response.json({ status: "error", slug, error: msg }, {
-      status: 500,
-    });
-  }
+  return Response.json({ status: "ok", slug, name: slot.name ?? slug });
 }
 
 export async function handleAgentPage(
-  req: Request,
+  _req: Request,
   slug: string,
-  ctx: WebSocketContext,
+  ctx: ServerContext,
 ): Promise<Response> {
-  void req;
   const slot = await resolveSlot(slug, ctx);
   if (!slot) return Response.json({ error: "Not found" }, { status: 404 });
-
-  let info;
-  try {
-    info = await ensureAgent(slot, (s) => ctx.store.getFile(s, "worker"));
-  } catch (err: unknown) {
-    log.error("Failed to initialize agent", { slug, err });
-    return Response.json(
-      { error: "Agent failed to initialize" },
-      { status: 500 },
-    );
-  }
-  return new Response(renderAgentPage(info.name, `/${slug}`), {
-    headers: { "Content-Type": "text/html; charset=utf-8" },
+  const name = slot.name ?? slug;
+  return new Response(renderAgentPage(name, `/${slug}`), {
+    headers: { "Content-Type": "text/html; charset=UTF-8" },
   });
 }
 
 export async function handleAgentRedirect(
-  req: Request,
+  _req: Request,
   slug: string,
-  ctx: WebSocketContext,
+  ctx: ServerContext,
 ): Promise<Response> {
-  void req;
   const slot = await resolveSlot(slug, ctx);
   if (!slot) return Response.json({ error: "Not found" }, { status: 404 });
-  return Response.redirect(new URL(`/${slug}/`, req.url).href, 301);
+  return new Response(null, {
+    status: 301,
+    headers: { Location: `/${slug}/` },
+  });
 }
 
 export async function handleWebSocket(
   req: Request,
   slug: string,
-  ctx: WebSocketContext,
+  ctx: ServerContext,
 ): Promise<Response> {
   const slot = await resolveSlot(slug, ctx);
   if (!slot) return Response.json({ error: "Not found" }, { status: 404 });
+
   if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") {
-    return Response.json(
-      { error: "Expected WebSocket upgrade" },
-      { status: 400 },
-    );
+    return Response.json({ error: "Expected WebSocket upgrade" }, {
+      status: 400,
+    });
   }
 
-  let info;
-  try {
-    info = await ensureAgent(slot);
-  } catch (err: unknown) {
-    log.error("Failed to initialize agent for session", { slug, err });
-    return Response.json(
-      { error: "Agent failed to initialize" },
-      { status: 500 },
-    );
-  }
+  const config = slot.config!;
+  const builtinTools = getBuiltinToolSchemas(config.builtinTools ?? []);
+  const toolSchemas = [...(slot.toolSchemas ?? []), ...builtinTools];
+  const { executeTool, getWorkerApi } = createToolExecutor(slot, ctx.store);
 
   const resume = new URL(req.url).searchParams.has("resume");
   const { socket, response } = Deno.upgradeWebSocket(req);
-  handleSessionWebSocket(socket, ctx.sessions, {
+  handleSessionWebSocket(socket, ctx.sessions as Map<string, Session>, {
     createSession: (sessionId, ws) =>
       createSession({
         id: sessionId,
         transport: ws,
-        agentConfig: info.config,
-        toolSchemas: info.toolSchemas,
+        agentConfig: config,
+        toolSchemas,
         platformConfig: loadPlatformConfig(slot.env),
-        executeTool: createRpcToolExecutor(info.workerApi),
-        workerApi: info.workerApi,
+        executeTool,
+        getWorkerApi,
         env: slot.env,
         skipGreeting: resume,
       }),
-    logContext: { slug: info.slug },
+    logContext: { slug },
     onOpen: () => trackSessionOpen(slot),
     onClose: () => trackSessionClose(slot),
   });
@@ -151,12 +117,11 @@ export async function handleWebSocket(
 }
 
 export async function handleStaticFile(
-  req: Request,
+  _req: Request,
   slug: string,
   file: string,
-  ctx: WebSocketContext,
+  ctx: ServerContext,
 ): Promise<Response> {
-  void req;
   const slot = await resolveSlot(slug, ctx);
   if (!slot) return Response.json({ error: "Not found" }, { status: 404 });
 

@@ -1,0 +1,11 @@
+{
+  "name": "@aai/core",
+  "version": "0.1.0",
+  "exports": {
+    "./worker-entry": "./_worker_entry.ts",
+    "./protocol": "./_protocol.ts",
+    "./rpc": "./_rpc.ts",
+    "./deno-worker": "./_deno_worker.ts"
+  },
+  "lint": {}
+}

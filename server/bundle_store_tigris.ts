@@ -6,11 +6,11 @@ import {
   S3Client,
 } from "@aws-sdk/client-s3";
 import type { AgentMetadata } from "./worker_pool.ts";
-import { AgentMetadataSchema } from "../sdk/_rpc_schema.ts";
+import { AgentMetadataSchema } from "../core/_rpc_schema.ts";
 
 export type FileKey = "worker" | "client" | "client_map";
 
-export interface BundleStore {
+export type BundleStore = {
   putAgent(bundle: {
     slug: string;
     env: Record<string, string>;
@@ -19,18 +19,33 @@ export interface BundleStore {
     client: string;
     client_map?: string;
     owner_hash?: string;
+    config?: {
+      name?: string;
+      instructions: string;
+      greeting: string;
+      voice: string;
+      prompt?: string;
+      builtinTools?: string[];
+    };
+    toolSchemas?: {
+      name: string;
+      description: string;
+      parameters: Record<string, unknown>;
+    }[];
   }): Promise<void>;
   getManifest(slug: string): Promise<AgentMetadata | null>;
   getFile(slug: string, file: FileKey): Promise<string | null>;
   deleteAgent(slug: string): Promise<void>;
+  getNamespaceOwner(namespace: string): Promise<string | null>;
+  putNamespaceOwner(namespace: string, ownerHash: string): Promise<void>;
   close(): void;
   [Symbol.dispose](): void;
-}
+};
 
-interface CacheEntry {
+type CacheEntry = {
   data: string;
   etag: string;
-}
+};
 
 const FILE_NAMES: Record<FileKey, string> = {
   worker: "worker.js",
@@ -148,11 +163,13 @@ export function createBundleStore(
     async putAgent(bundle) {
       await deleteAgent(bundle.slug);
 
-      const manifest: AgentMetadata = {
+      const manifest = {
         slug: bundle.slug,
         env: bundle.env,
         transport: bundle.transport,
         ...(bundle.owner_hash ? { owner_hash: bundle.owner_hash } : {}),
+        ...(bundle.config ? { config: bundle.config } : {}),
+        ...(bundle.toolSchemas ? { toolSchemas: bundle.toolSchemas } : {}),
       };
       await put(
         objectKey(bundle.slug, "manifest.json"),
@@ -196,6 +213,28 @@ export function createBundleStore(
 
     deleteAgent,
 
+    async getNamespaceOwner(namespace: string): Promise<string | null> {
+      const data = await get(`namespaces/${namespace}/owner.json`);
+      if (!data) return null;
+      try {
+        const parsed = JSON.parse(data);
+        return parsed.owner_hash ?? null;
+      } catch {
+        return null;
+      }
+    },
+
+    async putNamespaceOwner(
+      namespace: string,
+      ownerHash: string,
+    ): Promise<void> {
+      await put(
+        `namespaces/${namespace}/owner.json`,
+        JSON.stringify({ owner_hash: ownerHash }),
+        "application/json",
+      );
+    },
+
     close() {
       // S3 client has no close
     },
@@ -206,7 +245,6 @@ export function createBundleStore(
   };
 }
 
-/** In-memory S3-compatible client for local development. */
 export function createMemoryS3Client(): S3Client {
   const store = new Map<string, { body: string; etag: string }>();
 

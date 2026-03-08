@@ -24,13 +24,3 @@ export function resample(
   }
   return out;
 }
-
-/** Convert Float32 PCM samples to Int16 PCM (clamped). */
-export function float32ToInt16(input: Float32Array): Int16Array {
-  const out = new Int16Array(input.length);
-  for (let i = 0; i < input.length; i++) {
-    const s = input[i] * 32768;
-    out[i] = s > 32767 ? 32767 : s < -32768 ? -32768 : s;
-  }
-  return out;
-}

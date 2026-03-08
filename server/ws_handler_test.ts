@@ -50,126 +50,104 @@ function setup(overrides?: { onOpen?: () => void; onClose?: () => void }) {
   return { ws, sessions, spy };
 }
 
-Deno.test("handleSessionWebSocket", async (t) => {
-  await t.step("creates and starts session on open", async () => {
-    const { ws, sessions, spy } = setup();
-    ws.open();
-    await flush();
+Deno.test("creates and starts session on open", async () => {
+  const { ws, sessions, spy } = setup();
+  ws.open();
+  await flush();
+  expect(sessions.size).toBe(1);
+  expect(spy.calls).toContain("start");
+});
 
-    expect(sessions.size).toBe(1);
-    expect(spy.calls).toContain("start");
-  });
-
-  await t.step("calls onOpen/onClose callbacks", async () => {
-    let openCalled = false;
-    let closeCalled = false;
-    const { ws } = setup({
-      onOpen: () => {
-        openCalled = true;
-      },
-      onClose: () => {
-        closeCalled = true;
-      },
-    });
-
-    ws.open();
-    await flush();
-    expect(openCalled).toBe(true);
-
-    ws.disconnect();
-    await flush();
-    expect(closeCalled).toBe(true);
-  });
-
-  await t.step("responds to ping with pong before session is ready", () => {
-    const { ws } = setup();
-    // Send before open — session not ready
-    ws.msg(JSON.stringify({ type: "ping" }));
-    expect(ws.sentJson().some((m) => m.type === "pong")).toBe(true);
-  });
-
-  await t.step(
-    "responds to ping with pong after session is ready",
-    async () => {
-      const { ws } = setup();
-      ws.open();
-      await flush();
-
-      ws.sent.length = 0;
-      ws.msg(JSON.stringify({ type: "ping" }));
-      await flush();
-      expect(ws.sentJson().some((m) => m.type === "pong")).toBe(true);
+Deno.test("calls onOpen/onClose callbacks", async () => {
+  let openCalled = false;
+  let closeCalled = false;
+  const { ws } = setup({
+    onOpen: () => {
+      openCalled = true;
     },
-  );
-
-  await t.step(
-    "queues control messages sent before open and replays them",
-    async () => {
-      const { ws, spy } = setup();
-      ws.msg(JSON.stringify({ type: "audio_ready" }));
-      ws.open();
-      await flush();
-      await flush();
-
-      expect(spy.calls).toContain("start");
-      expect(spy.calls).toContain("onAudioReady");
+    onClose: () => {
+      closeCalled = true;
     },
-  );
-
-  await t.step("dispatches audio_ready, cancel, reset to session", async () => {
-    const { ws, spy } = setup();
-    ws.open();
-    await flush();
-    await flush();
-
-    ws.msg(JSON.stringify({ type: "audio_ready" }));
-    ws.msg(JSON.stringify({ type: "cancel" }));
-    ws.msg(JSON.stringify({ type: "reset" }));
-    await flush();
-
-    expect(spy.calls).toContain("onAudioReady");
-    expect(spy.calls).toContain("onCancel");
-    expect(spy.calls).toContain("onReset");
   });
+  ws.open();
+  await flush();
+  expect(openCalled).toBe(true);
+  ws.disconnect();
+  await flush();
+  expect(closeCalled).toBe(true);
+});
 
-  await t.step("dispatches binary audio to session.onAudio", async () => {
-    const { ws, spy } = setup();
-    ws.open();
-    await flush();
+Deno.test("responds to ping with pong before session is ready", () => {
+  const { ws } = setup();
+  ws.msg(JSON.stringify({ type: "ping" }));
+  expect(ws.sentJson().some((m) => m.type === "pong")).toBe(true);
+});
 
-    ws.msg(new ArrayBuffer(16));
-    expect(spy.calls).toContain("onAudio");
-  });
+Deno.test("responds to ping with pong after session is ready", async () => {
+  const { ws } = setup();
+  ws.open();
+  await flush();
+  ws.sent.length = 0;
+  ws.msg(JSON.stringify({ type: "ping" }));
+  await flush();
+  expect(ws.sentJson().some((m) => m.type === "pong")).toBe(true);
+});
 
-  await t.step("ignores invalid JSON and unknown control types", async () => {
-    const { ws, spy } = setup();
-    ws.open();
-    await flush();
+Deno.test("queues control messages before open and replays them", async () => {
+  const { ws, spy } = setup();
+  ws.msg(JSON.stringify({ type: "audio_ready" }));
+  ws.open();
+  await flush();
+  await flush();
+  expect(spy.calls).toContain("start");
+  expect(spy.calls).toContain("onAudioReady");
+});
 
-    const callsBefore = spy.calls.length;
-    ws.msg("not json");
-    ws.msg(JSON.stringify({ type: "bogus" }));
-    await flush();
+Deno.test("dispatches audio_ready, cancel, reset to session", async () => {
+  const { ws, spy } = setup();
+  ws.open();
+  await flush();
+  await flush();
+  ws.msg(JSON.stringify({ type: "audio_ready" }));
+  ws.msg(JSON.stringify({ type: "cancel" }));
+  ws.msg(JSON.stringify({ type: "reset" }));
+  await flush();
+  expect(spy.calls).toContain("onAudioReady");
+  expect(spy.calls).toContain("onCancel");
+  expect(spy.calls).toContain("onReset");
+});
 
-    // No new session method calls
-    expect(spy.calls.length).toBe(callsBefore);
-  });
+Deno.test("dispatches binary audio to session.onAudio", async () => {
+  const { ws, spy } = setup();
+  ws.open();
+  await flush();
+  ws.msg(new ArrayBuffer(16));
+  expect(spy.calls).toContain("onAudio");
+});
 
-  await t.step("stops session and removes from map on close", async () => {
-    const { ws, sessions, spy } = setup();
-    ws.open();
-    await flush();
-    expect(sessions.size).toBe(1);
+Deno.test("ignores invalid JSON and unknown control types", async () => {
+  const { ws, spy } = setup();
+  ws.open();
+  await flush();
+  const callsBefore = spy.calls.length;
+  ws.msg("not json");
+  ws.msg(JSON.stringify({ type: "bogus" }));
+  await flush();
+  expect(spy.calls.length).toBe(callsBefore);
+});
 
-    ws.disconnect();
-    await flush();
-    expect(spy.calls).toContain("stop");
-    expect(sessions.size).toBe(0);
-  });
+Deno.test("stops session and removes from map on close", async () => {
+  const { ws, sessions, spy } = setup();
+  ws.open();
+  await flush();
+  expect(sessions.size).toBe(1);
+  ws.disconnect();
+  await flush();
+  expect(spy.calls).toContain("stop");
+  expect(sessions.size).toBe(0);
+});
 
-  await t.step("handles ws error without crashing", () => {
-    const { ws } = setup();
-    ws.error();
-    // No throw
-  });
+Deno.test("handles ws error without crashing", () => {
+  const { ws } = setup();
+  ws.error();
 });

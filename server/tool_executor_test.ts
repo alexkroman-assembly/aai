@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { expect } from "@std/expect";
-import { executeToolCall } from "../sdk/_tool_executor.ts";
+import { executeToolCall } from "../core/_worker_entry.ts";
 import type { ToolDef } from "../sdk/types.ts";
 
 function makeTool(

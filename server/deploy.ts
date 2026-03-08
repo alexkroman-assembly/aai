@@ -1,29 +1,28 @@
+import { encodeHex } from "@std/encoding/hex";
 import { loadPlatformConfig } from "./config.ts";
-import { getLogger } from "./logger.ts";
 import type { AgentSlot } from "./worker_pool.ts";
 import type { BundleStore } from "./bundle_store_tigris.ts";
-import { DeployBodySchema } from "../sdk/_schema.ts";
+import { DeployBodySchema, normalizeTransport } from "../sdk/_schema.ts";
 
 export async function hashApiKey(apiKey: string): Promise<string> {
   const data = new TextEncoder().encode(apiKey);
   const hashBuffer = await crypto.subtle.digest("SHA-256", data);
-  return Array.from(new Uint8Array(hashBuffer))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
+  return encodeHex(new Uint8Array(hashBuffer));
 }
-
-const log = getLogger("deploy");
 
 export async function handleDeploy(
   req: Request,
+  params: Record<string, string>,
   ctx: { slots: Map<string, AgentSlot>; store: BundleStore },
 ): Promise<Response> {
   const { slots, store } = ctx;
+  const namespace = params.namespace;
+  const slug = params.slug;
 
   const authHeader = req.headers.get("Authorization");
   if (!authHeader?.startsWith("Bearer ")) {
     return Response.json(
-      { error: "Missing Authorization header (Bearer <ASSEMBLYAI_API_KEY>)" },
+      { error: "Missing Authorization header (Bearer <API_KEY>)" },
       { status: 400 },
     );
   }
@@ -50,57 +49,64 @@ export async function handleDeploy(
     loadPlatformConfig(body.env);
   } catch (err: unknown) {
     return Response.json(
-      { error: `Invalid platform config: ${(err as Error).message}` },
+      {
+        error: `Invalid platform config: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      },
       { status: 400 },
     );
   }
 
-  // Check slug ownership
-  const existingManifest = await store.getManifest(body.slug);
-  if (
-    existingManifest?.owner_hash && existingManifest.owner_hash !== ownerHash
-  ) {
+  const nsOwner = await store.getNamespaceOwner(namespace);
+  if (nsOwner && nsOwner !== ownerHash) {
     return Response.json(
-      {
-        error:
-          'Slug already taken by another owner. Change the "slug" field in defineAgent() to use a different slug.',
-      },
+      { error: `Namespace "${namespace}" is owned by another user.` },
       { status: 403 },
     );
   }
+  if (!nsOwner) {
+    await store.putNamespaceOwner(namespace, ownerHash);
+  }
 
-  const existing = slots.get(body.slug);
-  if (existing?.live) {
-    log.info("Replacing existing deploy", { slug: body.slug });
-    existing.live.worker.terminate();
-    existing.live = undefined;
+  const compositeSlug = `${namespace}/${slug}`;
+
+  const existing = slots.get(compositeSlug);
+  if (existing?.worker) {
+    console.info("Replacing existing deploy", { slug: compositeSlug });
+    existing.worker.handle.terminate();
+    existing.worker = undefined;
     existing.initializing = undefined;
   }
 
-  const transport: ("websocket" | "twilio")[] = body.transport === undefined
-    ? ["websocket"]
-    : typeof body.transport === "string"
-    ? [body.transport]
-    : body.transport;
+  const transport = normalizeTransport(body.transport);
 
   await store.putAgent({
-    slug: body.slug,
+    slug: compositeSlug,
     env: body.env,
     transport,
     worker: body.worker,
     client: body.client,
     owner_hash: ownerHash,
+    config: body.config,
+    toolSchemas: body.toolSchemas,
   });
 
   const slot: AgentSlot = {
-    slug: body.slug,
+    slug: compositeSlug,
     env: body.env,
     transport,
+    config: body.config,
+    name: body.config?.name,
+    toolSchemas: body.toolSchemas,
     activeSessions: 0,
   };
-  slots.set(body.slug, slot);
+  slots.set(compositeSlug, slot);
 
-  log.info("Deploy received", { slug: body.slug, transport });
+  console.info("Deploy received", { slug: compositeSlug, transport });
 
-  return Response.json({ ok: true, message: `Deployed ${body.slug}` });
+  return Response.json({
+    ok: true,
+    message: `Deployed ${compositeSlug}`,
+  });
 }

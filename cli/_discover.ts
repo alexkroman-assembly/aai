@@ -1,15 +1,17 @@
 import { parse as parseDotenv } from "@std/dotenv/parse";
 import { exists } from "@std/fs/exists";
-import { dirname, fromFileUrl, join, resolve } from "@std/path";
-import { toFileUrl } from "@std/path/to-file-url";
+import { basename, join, resolve } from "@std/path";
+function slugify(str: string): string {
+  return str.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
 import { step } from "./_output.ts";
-import { stripTypes } from "./_bundler.ts";
-import type { AgentDef } from "../sdk/types.ts";
-
-/** Root of the aai framework (parent of cli/). */
-const AAI_ROOT = resolve(dirname(fromFileUrl(import.meta.url)), "..");
-
-// -- API key config -----------------------------------------------------------
+import { AAI_ROOT, importTempModule } from "./_bundler.ts";
+import {
+  type AgentConfig,
+  type AgentDef,
+  agentToolsToSchemas,
+  type ToolSchema,
+} from "../sdk/types.ts";
 
 const CONFIG_DIR = join(
   Deno.env.get("HOME") ?? Deno.env.get("USERPROFILE") ?? ".",
@@ -18,9 +20,19 @@ const CONFIG_DIR = join(
 );
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
 
-interface CliConfig {
+type AgentLink = {
+  namespace: string;
+  slug: string;
+  apiKey: string;
+};
+
+type CliConfig = {
   assemblyai_api_key?: string;
-}
+  rime_api_key?: string;
+  brave_api_key?: string;
+  namespace?: string;
+  agents?: Record<string, AgentLink>;
+};
 
 async function readConfig(): Promise<CliConfig> {
   try {
@@ -38,13 +50,12 @@ async function writeConfig(config: CliConfig): Promise<void> {
   );
 }
 
-/** Get the stored API key, prompting the user if not set. */
 export async function getApiKey(): Promise<string> {
-  const envKey = Deno.env.get("ASSEMBLYAI_API_KEY");
-  if (envKey) return envKey;
-
   const config = await readConfig();
-  if (config.assemblyai_api_key) return config.assemblyai_api_key;
+  if (config.assemblyai_api_key) {
+    Deno.env.set("ASSEMBLYAI_API_KEY", config.assemblyai_api_key);
+    return config.assemblyai_api_key;
+  }
 
   step("Setup", "AssemblyAI API key required for speech-to-text");
   console.log("Get one at https://www.assemblyai.com/dashboard/signup\n");
@@ -54,83 +65,153 @@ export async function getApiKey(): Promise<string> {
   }
 
   config.assemblyai_api_key = key;
+  Deno.env.set("ASSEMBLYAI_API_KEY", key);
   await writeConfig(config);
   step("Saved", CONFIG_FILE);
   return key;
 }
 
-// -- Agent discovery ----------------------------------------------------------
+export async function getNamespace(): Promise<string> {
+  const config = await readConfig();
+  if (config.namespace) return config.namespace;
 
-export interface AgentEntry {
+  console.log(
+    "\nChoose a namespace for your agents.\n" +
+      "Agents deploy to https://aai-agent.fly.dev/<namespace>/\n",
+  );
+
+  const ns = prompt("Namespace:")?.trim();
+  if (!ns) {
+    throw new Error("Namespace is required");
+  }
+
+  const slug = slugify(ns);
+  if (!slug) {
+    throw new Error("Invalid namespace — must contain alphanumeric characters");
+  }
+
+  config.namespace = slug;
+  await writeConfig(config);
+  step("Saved", `namespace: ${slug}`);
+  return slug;
+}
+
+export async function saveNamespace(namespace: string): Promise<void> {
+  const config = await readConfig();
+  config.namespace = namespace;
+  await writeConfig(config);
+  step("Saved", `namespace: ${namespace}`);
+}
+
+export function slugFromDir(dir: string): string {
+  const dirName = basename(resolve(dir));
+  const slug = slugify(dirName);
+  return slug || "agent";
+}
+
+export function incrementName(name: string): string {
+  const match = name.match(/^(.+)-(\d+)$/);
+  if (match) {
+    return `${match[1]}-${Number(match[2]) + 1}`;
+  }
+  return `${name}-1`;
+}
+
+export async function resolveSlug(
+  dir: string,
+  namespace: string,
+  baseSlug: string,
+): Promise<string> {
+  const config = await readConfig();
+  const agents = config.agents ?? {};
+  const resolvedDir = resolve(dir);
+
+  const existing = agents[resolvedDir];
+  if (existing && existing.namespace === namespace) {
+    return existing.slug;
+  }
+
+  let slug = baseSlug;
+  for (let i = 0; i < 100; i++) {
+    const taken = Object.entries(agents).some(
+      ([agentDir, link]) =>
+        agentDir !== resolvedDir &&
+        link.namespace === namespace &&
+        link.slug === slug,
+    );
+    if (!taken) return slug;
+    slug = incrementName(slug);
+  }
+
+  return slug;
+}
+
+export async function saveAgentLink(
+  dir: string,
+  link: AgentLink,
+): Promise<void> {
+  const config = await readConfig();
+  if (!config.agents) config.agents = {};
+  config.agents[resolve(dir)] = link;
+  await writeConfig(config);
+}
+
+export type AgentEntry = {
   slug: string;
   dir: string;
   entryPoint: string;
   env: Record<string, string>;
   clientEntry: string;
   transport: ("websocket" | "twilio")[];
-}
+  config?: AgentConfig;
+  toolSchemas?: ToolSchema[];
+};
 
-/** Check if the agent has external imports in its deno.json. */
-async function hasExternalImports(dir: string): Promise<boolean> {
-  const denoJsonPath = join(dir, "deno.json");
-  if (!await exists(denoJsonPath)) return false;
+export const DEFAULT_SERVER = "https://aai-agent.fly.dev";
+
+const WORKSPACE_IMPORTS = new Set(["@aai/sdk", "@aai/ui", "zod"]);
+
+export async function hasExternalImports(dir: string): Promise<boolean> {
   try {
-    const raw = JSON.parse(await Deno.readTextFile(denoJsonPath));
-    return raw.imports && Object.keys(raw.imports).length > 0;
-  } catch {
-    return false;
-  }
+    const raw = JSON.parse(
+      await Deno.readTextFile(join(dir, "deno.json")),
+    );
+    const imports = raw.imports ?? {};
+    if (Object.keys(imports).some((k) => !WORKSPACE_IMPORTS.has(k))) {
+      return true;
+    }
+  } catch { /* no deno.json */ }
+
+  try {
+    const raw = JSON.parse(
+      await Deno.readTextFile(join(dir, "package.json")),
+    );
+    const deps = raw.dependencies ?? {};
+    if (Object.keys(deps).length > 0) return true;
+  } catch { /* no package.json */ }
+
+  return false;
 }
 
-/** Import agent.ts and return the AgentDef, or null if external imports prevent it. */
 async function importAgentDef(dir: string): Promise<AgentDef | null> {
   if (await hasExternalImports(dir)) return null;
-
-  const entryPoint = join(dir, "agent.ts");
-  const saved = {
-    defineAgent: (globalThis as Record<string, unknown>).defineAgent,
-    fetchJSON: (globalThis as Record<string, unknown>).fetchJSON,
-    z: (globalThis as Record<string, unknown>).z,
-  };
-
-  const tmpPath = join(dir, `.aai-discover-${Date.now()}.js`);
-  try {
-    const { defineAgent } = await import("../sdk/define_agent.ts");
-    const { fetchJSON } = await import("../sdk/fetch_json.ts");
-    const { z } = await import("zod");
-    Object.assign(globalThis, { defineAgent, fetchJSON, z });
-
-    const source = await Deno.readTextFile(resolve(entryPoint));
-    const js = await stripTypes(source);
-    await Deno.writeTextFile(tmpPath, js);
-    const mod = await import(toFileUrl(tmpPath).href);
-    return mod.default as AgentDef;
-  } finally {
-    await Deno.remove(tmpPath).catch(() => {});
-    for (const [k, v] of Object.entries(saved)) {
-      if (v === undefined) {
-        delete (globalThis as Record<string, unknown>)[k];
-      } else {
-        (globalThis as Record<string, unknown>)[k] = v;
-      }
-    }
-  }
+  const mod = await importTempModule(join(dir, "agent.ts"), {
+    rewriteSdkImports: true,
+  });
+  return mod.default as AgentDef;
 }
 
 export async function loadAgent(dir: string): Promise<AgentEntry | null> {
   const hasAgentTs = await exists(join(dir, "agent.ts"));
   if (!hasAgentTs) return null;
 
-  // Try to import agent.ts to read slug/env/transport from defineAgent()
   const def = await importAgentDef(dir);
 
-  // For agents with external imports, fall back to directory name for slug
-  const slug = def?.slug ?? dirname(resolve(dir)).split("/").pop() ??
-    "agent";
+  const slug = slugFromDir(dir);
   const declared: readonly string[] = def?.env ?? ["ASSEMBLYAI_API_KEY"];
-  const transport = def?.transport
-    ? [...def.transport] as ("websocket" | "twilio")[]
-    : ["websocket"] as ("websocket" | "twilio")[];
+  const transport: ("websocket" | "twilio")[] = def?.transport
+    ? [...def.transport]
+    : ["websocket"];
 
   const dotenvText = await Deno.readTextFile(join(dir, ".env")).catch(() => "");
   const dotenv = parseDotenv(dotenvText);
@@ -166,6 +247,21 @@ export async function loadAgent(dir: string): Promise<AgentEntry | null> {
     ? join(dir, "client.tsx")
     : resolve(AAI_ROOT, "ui/client.tsx");
 
+  const config: AgentConfig | undefined = def
+    ? {
+      name: def.name,
+      instructions: def.instructions,
+      greeting: def.greeting,
+      voice: def.voice,
+      prompt: def.prompt,
+      builtinTools: def.builtinTools ? [...def.builtinTools] : undefined,
+    }
+    : undefined;
+
+  const toolSchemas: ToolSchema[] | undefined = def
+    ? agentToolsToSchemas(def.tools)
+    : undefined;
+
   return {
     slug,
     dir,
@@ -173,5 +269,16 @@ export async function loadAgent(dir: string): Promise<AgentEntry | null> {
     env,
     clientEntry,
     transport,
+    config,
+    toolSchemas,
   };
+}
+
+export async function ensureClaudeMd(targetDir: string): Promise<void> {
+  const claudePath = join(targetDir, "CLAUDE.md");
+  if (!await exists(claudePath)) {
+    const srcClaude = join(AAI_ROOT, "cli", "claude.md");
+    await Deno.copyFile(srcClaude, claudePath);
+    step("Wrote", "CLAUDE.md — read this file for the aai agent API reference");
+  }
 }

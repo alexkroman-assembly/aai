@@ -1,55 +1,26 @@
-import { dirname, join, resolve } from "@std/path";
-import { toFileUrl } from "@std/path/to-file-url";
-import { exists } from "@std/fs/exists";
+import { hasExternalImports } from "./_discover.ts";
 import type { AgentEntry } from "./_discover.ts";
-import { stripTypes } from "./_bundler.ts";
+import { importTempModule } from "./_bundler.ts";
 import type { AgentDef, ToolContext, ToolDef } from "../sdk/types.ts";
 
-interface ValidationError {
+type ValidationError = {
   field: string;
   message: string;
-}
+};
 
-export interface ToolTestResult {
+export type ToolTestResult = {
   name: string;
   ok: boolean;
   error?: string;
   result?: unknown;
   skipped?: boolean;
-}
+};
 
-export interface ValidationResult {
+export type ValidationResult = {
   errors: ValidationError[];
-  name?: string;
-  voice?: string;
-  tools?: string[];
-  builtinTools?: string[];
   toolTests?: ToolTestResult[];
-}
+};
 
-/** Check if the agent has external imports in its deno.json. */
-async function hasExternalImports(dir: string): Promise<boolean> {
-  const denoJsonPath = join(dir, "deno.json");
-  if (!await exists(denoJsonPath)) return false;
-  try {
-    const raw = JSON.parse(await Deno.readTextFile(denoJsonPath));
-    return raw.imports && Object.keys(raw.imports).length > 0;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Validate an agent by dynamically importing agent.ts.
- * defineAgent() already validates fields -- we just check that
- * the module loads and produces a valid default export.
- *
- * Uses esbuild to strip types before importing because compiled
- * Deno binaries cannot dynamically import TypeScript files.
- *
- * Agents with external imports in deno.json skip validation here --
- * esbuild catches errors during bundling.
- */
 export async function validateAgent(
   agent: AgentEntry,
 ): Promise<ValidationResult> {
@@ -59,27 +30,9 @@ export async function validateAgent(
 
   const errors: ValidationError[] = [];
 
-  const saved = {
-    defineAgent: (globalThis as Record<string, unknown>).defineAgent,
-    fetchJSON: (globalThis as Record<string, unknown>).fetchJSON,
-    z: (globalThis as Record<string, unknown>).z,
-  };
-
   let mod: Record<string, unknown>;
-  const tmpPath = join(
-    dirname(resolve(agent.entryPoint)),
-    `.aai-validate-${Date.now()}.js`,
-  );
   try {
-    const { defineAgent } = await import("../sdk/define_agent.ts");
-    const { fetchJSON } = await import("../sdk/fetch_json.ts");
-    const { z } = await import("zod");
-    Object.assign(globalThis, { defineAgent, fetchJSON, z });
-
-    const source = await Deno.readTextFile(resolve(agent.entryPoint));
-    const js = await stripTypes(source);
-    await Deno.writeTextFile(tmpPath, js);
-    mod = await import(toFileUrl(tmpPath).href);
+    mod = await importTempModule(agent.entryPoint);
   } catch (cause) {
     errors.push({
       field: "agent.ts",
@@ -88,15 +41,6 @@ export async function validateAgent(
       }`,
     });
     return { errors };
-  } finally {
-    await Deno.remove(tmpPath).catch(() => {});
-    for (const [k, v] of Object.entries(saved)) {
-      if (v === undefined) {
-        delete (globalThis as Record<string, unknown>)[k];
-      } else {
-        (globalThis as Record<string, unknown>)[k] = v;
-      }
-    }
   }
 
   if (!mod.default) {
@@ -110,30 +54,18 @@ export async function validateAgent(
 
   const def = mod.default as Record<string, unknown>;
 
-  const name = typeof def.name === "string" ? def.name : undefined;
-  if (!name) {
+  if (typeof def.name !== "string" || !def.name) {
     errors.push({ field: "name", message: "must be a non-empty string" });
   }
-
-  const tools = def.tools && typeof def.tools === "object"
-    ? Object.keys(def.tools as Record<string, unknown>)
-    : [];
-
-  const voice = typeof def.voice === "string" ? def.voice : "luna";
-
-  const builtinTools = Array.isArray(def.builtinTools)
-    ? (def.builtinTools as string[])
-    : [];
 
   const toolTests = await testTools(
     def as unknown as AgentDef,
     agent,
   );
 
-  return { errors, name, voice, tools, builtinTools, toolTests };
+  return { errors, toolTests };
 }
 
-/** Test each custom tool by invoking execute() with minimal args. */
 async function testTools(
   def: AgentDef,
   agent: AgentEntry,
@@ -154,23 +86,15 @@ async function testOneTool(
   tool: ToolDef,
   ctx: ToolContext,
 ): Promise<ToolTestResult> {
-  // Check that description exists
   if (!tool.description) {
     return { name, ok: false, error: "missing description" };
   }
 
-  // Check that execute is a function
-  if (typeof tool.execute !== "function") {
-    return { name, ok: false, error: "execute is not a function" };
-  }
-
-  // If tool has required params, validate schema but skip execution
   if (tool.parameters) {
     const parseResult = tool.parameters.safeParse({});
     if (!parseResult.success) {
       return { name, ok: true, skipped: true };
     }
-    // Schema accepts empty object — we can test it
     try {
       const result = await tool.execute(parseResult.data, ctx);
       return { name, ok: true, result };
@@ -183,7 +107,6 @@ async function testOneTool(
     }
   }
 
-  // No params — call directly
   try {
     const result = await tool.execute({}, ctx);
     return { name, ok: true, result };

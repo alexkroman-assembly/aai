@@ -28,10 +28,10 @@ jobs:
             --unstable-worker-options \
             --include templates/ \
             --include sdk/ \
+            --include core/ \
             --include server/ \
             --include ui/ \
             --include cli/claude.md \
-            --include cli/types.template \
             --include cli/deno.json \
             --output dist/aai \
             cli/cli.ts

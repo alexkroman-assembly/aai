@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "preact"
+  },
+  "imports": {
+    "@aai/sdk": "jsr:@aai/sdk@^0.1.0",
+    "@aai/ui": "jsr:@aai/ui@^0.1.0",
+    "zod": "jsr:@zod/zod@^4.3.6",
+    "preact": "npm:preact@^10.28.4",
+    "preact/hooks": "npm:preact@^10.28.4/hooks"
+  }
+}

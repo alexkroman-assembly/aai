@@ -1,3 +1,5 @@
+import { defineAgent } from "@aai/sdk";
+
 export default defineAgent({
   name: "PhoneAgent",
   transport: ["websocket", "twilio"],

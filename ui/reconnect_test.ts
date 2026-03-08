@@ -1,4 +1,5 @@
 import { expect } from "@std/expect";
+import { assertSpyCalls, spy } from "@std/testing/mock";
 import { FakeTime } from "@std/testing/time";
 import { createReconnect } from "./session.ts";
 
@@ -7,8 +8,8 @@ Deno.test("canRetry true initially, false after max attempts", () => {
   try {
     const s = createReconnect(2);
     expect(s.canRetry).toBe(true);
-    s.schedule(() => {});
-    s.schedule(() => {});
+    s.schedule(spy());
+    s.schedule(spy());
     expect(s.canRetry).toBe(false);
   } finally {
     time.restore();
@@ -19,8 +20,8 @@ Deno.test("schedule returns true until exhausted", () => {
   const time = new FakeTime();
   try {
     const s = createReconnect(1);
-    expect(s.schedule(() => {})).toBe(true);
-    expect(s.schedule(() => {})).toBe(false);
+    expect(s.schedule(spy())).toBe(true);
+    expect(s.schedule(spy())).toBe(false);
   } finally {
     time.restore();
   }
@@ -30,13 +31,11 @@ Deno.test("schedule fires callback after delay", () => {
   const time = new FakeTime();
   try {
     const s = createReconnect(5, 16_000, 1_000);
-    let called = false;
-    s.schedule(() => {
-      called = true;
-    });
-    expect(called).toBe(false);
+    const cb = spy();
+    s.schedule(cb);
+    assertSpyCalls(cb, 0);
     time.tick(1_000);
-    expect(called).toBe(true);
+    assertSpyCalls(cb, 1);
   } finally {
     time.restore();
   }
@@ -46,37 +45,32 @@ Deno.test("exponential backoff capped at maxBackoff", () => {
   const time = new FakeTime();
   try {
     const s = createReconnect(5, 4_000, 1_000);
-    const calls: number[] = [];
 
     // 1st: 1000 * 2^0 = 1000ms
-    s.schedule(() => {
-      calls.push(1);
-    });
+    const cb1 = spy();
+    s.schedule(cb1);
     time.tick(1_000);
-    expect(calls).toEqual([1]);
+    assertSpyCalls(cb1, 1);
 
     // 2nd: 1000 * 2^1 = 2000ms
-    s.schedule(() => {
-      calls.push(2);
-    });
+    const cb2 = spy();
+    s.schedule(cb2);
     time.tick(2_000);
-    expect(calls).toEqual([1, 2]);
+    assertSpyCalls(cb2, 1);
 
     // 3rd: 1000 * 2^2 = 4000ms (hits cap)
-    s.schedule(() => {
-      calls.push(3);
-    });
+    const cb3 = spy();
+    s.schedule(cb3);
     time.tick(3_999);
-    expect(calls).toEqual([1, 2]);
+    assertSpyCalls(cb3, 0);
     time.tick(1);
-    expect(calls).toEqual([1, 2, 3]);
+    assertSpyCalls(cb3, 1);
 
     // 4th: capped at 4000ms
-    s.schedule(() => {
-      calls.push(4);
-    });
+    const cb4 = spy();
+    s.schedule(cb4);
     time.tick(4_000);
-    expect(calls).toEqual([1, 2, 3, 4]);
+    assertSpyCalls(cb4, 1);
   } finally {
     time.restore();
   }
@@ -86,13 +80,11 @@ Deno.test("cancel clears pending timer", () => {
   const time = new FakeTime();
   try {
     const s = createReconnect(5, 16_000, 1_000);
-    let called = false;
-    s.schedule(() => {
-      called = true;
-    });
+    const cb = spy();
+    s.schedule(cb);
     s.cancel();
     time.tick(10_000);
-    expect(called).toBe(false);
+    assertSpyCalls(cb, 0);
   } finally {
     time.restore();
   }
@@ -102,7 +94,7 @@ Deno.test("reset restores retry capacity", () => {
   const time = new FakeTime();
   try {
     const s = createReconnect(1);
-    s.schedule(() => {});
+    s.schedule(spy());
     expect(s.canRetry).toBe(false);
     s.reset();
     expect(s.canRetry).toBe(true);

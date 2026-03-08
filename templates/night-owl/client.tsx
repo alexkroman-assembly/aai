@@ -1,3 +1,13 @@
+import {
+  css,
+  ErrorBanner,
+  MessageBubble,
+  StateIndicator,
+  Transcript,
+  useSession,
+} from "@aai/ui";
+import { useEffect, useRef } from "preact/hooks";
+
 const hero = css`
   display: flex;
   flex-direction: column;
@@ -86,7 +96,7 @@ const chat = css`
   }
 `;
 
-function NightOwl() {
+export default function NightOwl() {
   const {
     state,
     messages,
@@ -158,8 +168,3 @@ function NightOwl() {
     </div>
   );
 }
-
-mount(NightOwl, {
-  theme: darkTheme,
-  platformUrl: new URL(".", globalThis.location.href).href.replace(/\/$/, ""),
-});

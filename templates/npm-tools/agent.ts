@@ -1,3 +1,5 @@
+import { defineAgent } from "@aai/sdk";
+import { z } from "zod";
 import { capitalize, sampleSize, shuffle, words } from "lodash-es";
 
 const WORD_LISTS: Record<string, string[]> = {

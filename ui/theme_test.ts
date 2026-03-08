@@ -1,18 +1,28 @@
 import { expect } from "@std/expect";
-import { darkTheme, defaultTheme, setThemeVars } from "./theme.ts";
+import { applyTheme, darkTheme, defaultTheme } from "./theme.ts";
 
 function mockElement(): { el: HTMLElement; props: Map<string, string> } {
   const props = new Map<string, string>();
-  const el = {
-    style: { setProperty: (k: string, v: string) => props.set(k, v) },
-  } as unknown as HTMLElement;
+  const style = new Proxy({} as Record<string, string>, {
+    set(target, prop, value) {
+      target[prop as string] = value;
+      return true;
+    },
+    get(target, prop) {
+      if (prop === "setProperty") {
+        return (k: string, v: string) => props.set(k, v);
+      }
+      return target[prop as string];
+    },
+  });
+  const el = { style } as unknown as HTMLElement;
   return { el, props };
 }
 
-Deno.test("setThemeVars", async (t) => {
+Deno.test("applyTheme", async (t) => {
   await t.step("sets CSS custom properties from theme", () => {
     const { el, props } = mockElement();
-    setThemeVars(el, defaultTheme);
+    applyTheme(el, defaultTheme);
 
     expect(props.get("--aai-bg")).toBe("#ffffff");
     expect(props.get("--aai-surface-light")).toBe("#e0e0e0");
@@ -25,7 +35,7 @@ Deno.test("setThemeVars", async (t) => {
 
   await t.step("applies dark theme", () => {
     const { el, props } = mockElement();
-    setThemeVars(el, darkTheme);
+    applyTheme(el, darkTheme);
 
     expect(props.get("--aai-bg")).toBe("#0f0e17");
     expect(props.get("--aai-primary")).toBe("#7f5af0");

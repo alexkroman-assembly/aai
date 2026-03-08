@@ -1,32 +1,51 @@
 import type { PlatformConfig } from "./config.ts";
-import { callLLM as defaultCallLLM, type CallLLMOptions } from "./llm.ts";
-import { getLogger } from "./logger.ts";
-import type { ExecuteTool } from "../sdk/_tool_executor.ts";
-import {
-  connectStt as defaultConnectStt,
-  type SttEvents,
-  type SttHandle,
-} from "./stt.ts";
+import { callLLM, type CallLLMOptions } from "./llm.ts";
+import type { ExecuteTool } from "../core/_worker_entry.ts";
+import { connectStt, type SttEvents, type SttHandle } from "./stt.ts";
 import { createTtsClient } from "./tts.ts";
-import { executeBuiltinTool as defaultExecuteBuiltinTool } from "./builtin_tools.ts";
+import { executeBuiltinTool } from "./builtin_tools.ts";
 import { executeTurn, type TurnCallLLMOptions } from "./turn_handler.ts";
-import type {
-  AgentConfig,
-  ChatMessage,
-  LLMResponse,
-  STTConfig,
-  ToolSchema,
-} from "./types.ts";
-import { DEFAULT_GREETING } from "../sdk/types.ts";
-import type { WorkerApi } from "../sdk/_worker_entry.ts";
+import type { ChatMessage, LLMResponse, STTConfig } from "./types.ts";
+import {
+  type AgentConfig,
+  DEFAULT_GREETING,
+  type ToolSchema,
+} from "../sdk/types.ts";
+import type { WorkerApi } from "../core/_worker_entry.ts";
 import { buildSystemPrompt } from "./system_prompt.ts";
 
-export interface SessionTransport {
+export type SessionTransport = {
   send(data: string | ArrayBuffer | Uint8Array): void;
   readonly readyState: number;
-}
+};
 
-export interface SessionOptions {
+export type TtsClient = {
+  synthesizeStream(
+    chunks: string | AsyncIterable<string>,
+    onAudio: (chunk: Uint8Array) => void,
+    signal?: AbortSignal,
+  ): Promise<void>;
+  close(): void;
+};
+
+export const _internals = {
+  connectStt: connectStt as (
+    apiKey: string,
+    config: STTConfig,
+    events: SttEvents,
+  ) => Promise<SttHandle>,
+  callLLM: callLLM as (opts: CallLLMOptions) => Promise<LLMResponse>,
+  createTtsClient: createTtsClient as (
+    config: Parameters<typeof createTtsClient>[0],
+  ) => TtsClient,
+  executeBuiltinTool: executeBuiltinTool as (
+    name: string,
+    args: Record<string, unknown>,
+    env?: Record<string, string | undefined>,
+  ) => Promise<string | null>,
+};
+
+export type SessionOptions = {
   id: string;
   transport: SessionTransport;
   agentConfig: AgentConfig;
@@ -34,29 +53,11 @@ export interface SessionOptions {
   platformConfig: PlatformConfig;
   executeTool: ExecuteTool;
   env?: Record<string, string | undefined>;
-  workerApi?: WorkerApi;
+  getWorkerApi?: () => Promise<WorkerApi>;
   skipGreeting?: boolean;
-  connectStt?(
-    apiKey: string,
-    config: STTConfig,
-    events: SttEvents,
-  ): Promise<SttHandle>;
-  callLLM?(opts: CallLLMOptions): Promise<LLMResponse>;
-  ttsClient?: {
-    synthesizeStream(
-      chunks: AsyncIterable<string>,
-      onAudio: (chunk: Uint8Array) => void,
-      signal?: AbortSignal,
-    ): Promise<void>;
-    close(): void;
-  };
-  executeBuiltinTool?(
-    name: string,
-    args: Record<string, unknown>,
-  ): Promise<string | null>;
-}
+};
 
-export interface Session {
+export type Session = {
   start(): Promise<void>;
   stop(): Promise<void>;
   onAudio(data: Uint8Array): void;
@@ -65,7 +66,7 @@ export interface Session {
   onReset(): void;
   onHistory(messages: { role: "user" | "assistant"; text: string }[]): void;
   waitForTurn(): Promise<void>;
-}
+};
 
 export function createSession(opts: SessionOptions): Session {
   const {
@@ -74,7 +75,22 @@ export function createSession(opts: SessionOptions): Session {
     toolSchemas,
     platformConfig,
     executeTool,
+    getWorkerApi,
   } = opts;
+
+  let cachedWorkerApi: WorkerApi | undefined;
+  async function invokeHook(
+    hook: string,
+    extra?: { text?: string; error?: string },
+  ): Promise<void> {
+    if (!getWorkerApi) return;
+    try {
+      cachedWorkerApi ??= await getWorkerApi();
+      await cachedWorkerApi.invokeHook(hook, id, extra, 5_000);
+    } catch (err: unknown) {
+      console.error(`${hook} hook failed`, { err });
+    }
+  }
 
   const agentConfig = opts.skipGreeting
     ? { ...opts.agentConfig, greeting: "" }
@@ -84,8 +100,6 @@ export function createSession(opts: SessionOptions): Session {
     ...opts.env,
     BRAVE_API_KEY: platformConfig.braveApiKey || opts.env?.BRAVE_API_KEY,
   };
-  const logger = getLogger(`session:${id.slice(0, 8)}`);
-
   const config: PlatformConfig = {
     ...platformConfig,
     sttConfig: {
@@ -98,12 +112,10 @@ export function createSession(opts: SessionOptions): Session {
     },
   };
 
-  const doConnectStt = opts.connectStt ?? defaultConnectStt;
-  const doCallLLM = opts.callLLM ?? defaultCallLLM;
-  const tts = opts.ttsClient ?? createTtsClient(config.ttsConfig);
-  const doExecuteBuiltinTool = opts.executeBuiltinTool ??
-    ((name: string, args: Record<string, unknown>) =>
-      defaultExecuteBuiltinTool(name, args, env));
+  const doConnectStt = _internals.connectStt;
+  const doCallLLM = _internals.callLLM;
+  const tts: TtsClient = _internals.createTtsClient(config.ttsConfig);
+  const doExecuteBuiltinTool = _internals.executeBuiltinTool;
 
   let stt: SttHandle | null = null;
   let turnAbort: AbortController | null = null;
@@ -129,28 +141,18 @@ export function createSession(opts: SessionOptions): Session {
     name: string,
     args: Record<string, unknown>,
   ): Promise<string> {
-    const builtin = await doExecuteBuiltinTool(name, args);
+    const builtin = await doExecuteBuiltinTool(name, args, env);
     return builtin ?? await executeTool(name, args, id);
   }
 
-  function trySendJson(data: Record<string, unknown>): void {
+  function trySend(data: string | Uint8Array): void {
     try {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify(data));
-      }
-    } catch (err: unknown) {
-      logger.error("trySendJson failed", { err });
-    }
+      if (ws.readyState === WebSocket.OPEN) ws.send(data);
+    } catch { /* ws closed between check and send */ }
   }
 
-  function trySendBytes(data: Uint8Array): void {
-    try {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(data);
-      }
-    } catch (err: unknown) {
-      logger.error("trySendBytes failed", { err });
-    }
+  function trySendJson(data: Record<string, unknown>): void {
+    trySend(JSON.stringify(data));
   }
 
   function cancelInflight(): void {
@@ -160,15 +162,8 @@ export function createSession(opts: SessionOptions): Session {
 
   async function doConnectSttWithEvents(): Promise<void> {
     const events: SttEvents = {
-      onSpeechStarted: () => {
-        if (turnAbort) {
-          logger.info("User started speaking — interrupting playback");
-          cancelInflight();
-          trySendJson({ type: "cancelled" });
-        }
-      },
       onTranscript: (text, isFinal, turnOrder) => {
-        logger.info("transcript", { text, isFinal, turnOrder });
+        console.info("transcript", { text, isFinal, turnOrder });
         if (isFinal) {
           trySendJson({
             type: "final_transcript",
@@ -180,7 +175,7 @@ export function createSession(opts: SessionOptions): Session {
         }
       },
       onTurn: (text, turnOrder) => {
-        logger.info("turn", { text, turnOrder });
+        console.info("turn", { text, turnOrder });
         const prev = turnPromise;
         const next = (prev ?? Promise.resolve())
           .catch(() => {})
@@ -191,22 +186,24 @@ export function createSession(opts: SessionOptions): Session {
         turnPromise = next;
       },
       onTermination: (audioDuration, sessionDuration) => {
-        logger.info("STT termination", { audioDuration, sessionDuration });
+        console.info("STT termination", { audioDuration, sessionDuration });
       },
       onError: (err) => {
-        logger.error("STT error", { err });
+        console.error("STT error:", err.message);
         trySendJson({
           type: "error",
-          message: "Speech recognition disconnected",
+          message: err.message,
         });
       },
       onClose: () => {
-        logger.info("STT closed");
+        console.info("STT closed");
         stt = null;
         if (!stopped) {
-          logger.info("Attempting STT reconnect");
-          doConnectSttWithEvents().catch((err) => {
-            logger.error("STT reconnect failed", { err });
+          console.info("Attempting STT reconnect");
+          doConnectSttWithEvents().catch((err: unknown) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error("STT reconnect failed:", msg);
+            trySendJson({ type: "error", message: msg });
           });
         }
       },
@@ -216,11 +213,8 @@ export function createSession(opts: SessionOptions): Session {
       stt = await doConnectStt(config.apiKey, config.sttConfig, events);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      logger.error("Failed to connect STT", { error: msg });
-      trySendJson({
-        type: "error",
-        message: "Failed to connect to speech recognition",
-      });
+      console.error("STT connect failed:", msg);
+      trySendJson({ type: "error", message: msg });
     }
   }
 
@@ -233,11 +227,7 @@ export function createSession(opts: SessionOptions): Session {
       ...(turnOrder !== undefined ? { turn_order: turnOrder } : {}),
     });
 
-    if (opts.workerApi) {
-      opts.workerApi.invokeHook("onTurn", id, { text }, 5_000).catch(
-        (err: unknown) => logger.error("onTurn hook failed", { err }),
-      );
-    }
+    invokeHook("onTurn", { text });
 
     const abort = new AbortController();
     turnAbort = abort;
@@ -249,17 +239,14 @@ export function createSession(opts: SessionOptions): Session {
         callLLM: boundCallLLM,
         executeTool: boundExecuteTool,
         signal: abort.signal,
-        logger,
       });
       if (abort.signal.aborted) return;
 
       if (result) {
         trySendJson({ type: "chat", text: result });
         await tts.synthesizeStream(
-          (async function* () {
-            yield result;
-          })(),
-          (chunk) => trySendBytes(chunk),
+          result,
+          (chunk) => trySend(chunk),
           abort.signal,
         );
         if (!abort.signal.aborted) trySendJson({ type: "tts_done" });
@@ -269,8 +256,8 @@ export function createSession(opts: SessionOptions): Session {
     } catch (err: unknown) {
       if (abort.signal.aborted) return;
       const msg = err instanceof Error ? err.message : String(err);
-      logger.error("Chat failed", { error: msg });
-      trySendJson({ type: "error", message: "Chat failed" });
+      console.error("Turn failed:", msg);
+      trySendJson({ type: "error", message: msg });
     } finally {
       if (turnAbort === abort) turnAbort = null;
     }
@@ -279,15 +266,17 @@ export function createSession(opts: SessionOptions): Session {
   function speakText(text: string): void {
     const abort = new AbortController();
     turnAbort = abort;
-    async function* oneShot() {
-      yield text;
-    }
     const p = tts
-      .synthesizeStream(oneShot(), (chunk) => trySendBytes(chunk), abort.signal)
+      .synthesizeStream(text, (chunk) => trySend(chunk), abort.signal)
       .then(() => {
         if (!abort.signal.aborted) trySendJson({ type: "tts_done" });
       })
-      .catch(() => {})
+      .catch((err: unknown) => {
+        if (abort.signal.aborted) return;
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("TTS failed:", msg);
+        trySendJson({ type: "error", message: msg });
+      })
       .finally(() => {
         if (turnAbort === abort) turnAbort = null;
         if (turnPromise === p) turnPromise = null;
@@ -300,13 +289,7 @@ export function createSession(opts: SessionOptions): Session {
       const greeting = agentConfig.greeting ?? DEFAULT_GREETING;
       if (greeting) pendingGreeting = greeting;
 
-      if (opts.workerApi) {
-        try {
-          await opts.workerApi.invokeHook("onConnect", id, undefined, 5_000);
-        } catch (err: unknown) {
-          logger.error("onConnect hook failed", { err });
-        }
-      }
+      invokeHook("onConnect");
 
       await doConnectSttWithEvents();
       trySendJson({
@@ -325,19 +308,13 @@ export function createSession(opts: SessionOptions): Session {
       stt?.close();
       tts.close();
 
-      if (opts.workerApi) {
-        try {
-          await opts.workerApi.invokeHook("onDisconnect", id, undefined, 5_000);
-        } catch (err: unknown) {
-          logger.error("onDisconnect hook failed", { err });
-        }
-      }
+      invokeHook("onDisconnect");
     },
 
     onAudio(data: Uint8Array): void {
       audioFrameCount++;
       if (audioFrameCount <= 3) {
-        logger.debug("audio frame", {
+        console.debug("audio frame", {
           frame: audioFrameCount,
           bytes: data.length,
         });
@@ -378,7 +355,7 @@ export function createSession(opts: SessionOptions): Session {
       for (const msg of incoming) {
         messages.push({ role: msg.role, content: msg.text });
       }
-      logger.info("Restored conversation history", {
+      console.info("Restored conversation history", {
         count: incoming.length,
       });
     },

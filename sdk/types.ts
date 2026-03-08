@@ -1,42 +1,27 @@
-// --- Agent types (stable SDK surface baked into deployed bundles) ---
-
 import { z } from "zod";
-import type { Transport } from "./_schema.ts";
+import type { BuiltinTool, ToolSchema, Transport } from "./_schema.ts";
+export type { AgentConfig, BuiltinTool, ToolSchema } from "./_schema.ts";
 
-export interface ToolContext {
+export type ToolContext = {
   sessionId: string;
   env: Record<string, string>;
   signal?: AbortSignal;
-}
+};
 
-export interface HookContext {
+export type HookContext = {
   sessionId: string;
   env: Record<string, string>;
-}
+};
 
-export interface ToolDef {
+export type ToolDef = {
   description: string;
   parameters?: z.ZodObject<z.ZodRawShape>;
   execute: (
     args: Record<string, unknown>,
     ctx: ToolContext,
   ) => Promise<unknown> | unknown;
-}
+};
 
-/** Built-in tools provided by the framework. */
-export type BuiltinTool =
-  | "web_search"
-  | "visit_webpage"
-  | "fetch_json"
-  | "run_code"
-  | "user_input"
-  | "final_answer";
-
-/**
- * Rime TTS voice ID. Popular voices listed for autocomplete;
- * any valid Rime speaker ID is accepted.
- * Full catalog: https://docs.rime.ai/api-reference/voices
- */
 export type Voice =
   | "luna"
   | "andromeda"
@@ -56,12 +41,10 @@ export type Voice =
   | "tauro"
   | "walnut"
   | "arcana"
-  // deno-lint-ignore ban-types
-  | (string & {});
+  | (string & Record<never, never>);
 
-export interface AgentOptions {
+export type AgentOptions = {
   name: string;
-  slug?: string;
   env?: string[];
   transport?: Transport | Transport[];
   instructions?: string;
@@ -74,7 +57,7 @@ export interface AgentOptions {
   onDisconnect?: (ctx: HookContext) => void | Promise<void>;
   onError?: (error: Error, ctx?: HookContext) => void;
   onTurn?: (text: string, ctx: HookContext) => void | Promise<void>;
-}
+};
 
 export const DEFAULT_INSTRUCTIONS: string = `\
 You are a helpful voice assistant. Your goal is to provide accurate, \
@@ -96,13 +79,6 @@ If you need to list items, say "First," "Next," and "Finally."
 export const DEFAULT_GREETING: string =
   "Hey there. I'm a voice assistant. What can I help you with?";
 
-/** JSON Schema representation of tool parameters, sent over the wire to the LLM. */
-export interface ToolSchema {
-  name: string;
-  description: string;
-  parameters: Record<string, unknown>;
-}
-
 const EMPTY_PARAMS = z.object({});
 
 export function agentToolsToSchemas(
@@ -115,20 +91,8 @@ export function agentToolsToSchemas(
   }));
 }
 
-/** Agent config passed from worker to server via RPC. */
-export interface AgentConfig {
-  readonly name?: string;
-  readonly instructions: string;
-  readonly greeting: string;
-  readonly voice: string;
-  readonly prompt?: string;
-  readonly builtinTools?: readonly BuiltinTool[];
-}
-
-/** Frozen agent definition returned by defineAgent(). */
-export interface AgentDef {
+export type AgentDef = {
   readonly name: string;
-  readonly slug: string;
   readonly env: readonly string[];
   readonly transport: readonly Transport[];
   readonly instructions: string;
@@ -141,4 +105,4 @@ export interface AgentDef {
   readonly onDisconnect?: AgentOptions["onDisconnect"];
   readonly onError?: AgentOptions["onError"];
   readonly onTurn?: AgentOptions["onTurn"];
-}
+};

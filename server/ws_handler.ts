@@ -1,23 +1,12 @@
-import { getLogger } from "./logger.ts";
-import { ClientMessageSchema } from "../sdk/_protocol.ts";
+import { ClientMessageSchema } from "../core/_protocol.ts";
 import type { Session } from "./session.ts";
 
-function safeParseJSON(data: string): unknown {
-  try {
-    return JSON.parse(data);
-  } catch {
-    return null;
-  }
-}
-
-const log = getLogger("ws");
-
-export interface WsSessionOptions {
+export type WsSessionOptions = {
   createSession: (sessionId: string, ws: WebSocket) => Session;
   logContext?: Record<string, string>;
   onOpen?: () => void;
   onClose?: () => void;
-}
+};
 
 export function handleSessionWebSocket(
   ws: WebSocket,
@@ -34,8 +23,12 @@ export function handleSessionWebSocket(
   let processingChain: Promise<void> = Promise.resolve();
 
   function processControlMessage(raw: string): void {
-    const json = safeParseJSON(raw);
-    if (json === null) return;
+    let json: unknown;
+    try {
+      json = JSON.parse(raw);
+    } catch {
+      return;
+    }
     const parsed = ClientMessageSchema.safeParse(json);
     if (!parsed.success) return;
 
@@ -56,7 +49,7 @@ export function handleSessionWebSocket(
     processingChain = processingChain
       .then(() => processControlMessage(raw))
       .catch((err) => {
-        log.error("Control message processing error", {
+        console.error("Control message processing error", {
           ...ctx,
           sid,
           error: err,
@@ -66,12 +59,12 @@ export function handleSessionWebSocket(
 
   ws.addEventListener("open", () => {
     opts.onOpen?.();
-    log.info("Session connected", { ...ctx, sid });
+    console.info("Session connected", { ...ctx, sid });
 
     session = opts.createSession(sessionId, ws);
     sessions.set(sessionId, session);
 
-    log.info("Session configured", { ...ctx, sid });
+    console.info("Session configured", { ...ctx, sid });
     void session.start();
 
     for (const msg of pendingMessages) {
@@ -88,7 +81,10 @@ export function handleSessionWebSocket(
 
     if (!ready) {
       if (!isBinary) {
-        const json = safeParseJSON(event.data as string);
+        let json: unknown;
+        try {
+          json = JSON.parse(event.data as string);
+        } catch { /* not JSON */ }
         if (
           json !== null && typeof json === "object" &&
           (json as Record<string, unknown>).type === "ping"
@@ -110,7 +106,7 @@ export function handleSessionWebSocket(
   });
 
   ws.addEventListener("close", async () => {
-    log.info("Session disconnected", { ...ctx, sid });
+    console.info("Session disconnected", { ...ctx, sid });
     if (session) {
       await session.stop();
       sessions.delete(sessionId);
@@ -120,6 +116,6 @@ export function handleSessionWebSocket(
 
   ws.addEventListener("error", (event) => {
     const msg = event instanceof ErrorEvent ? event.message : "WebSocket error";
-    log.error("WebSocket error", { ...ctx, sid, error: msg });
+    console.error("WebSocket error", { ...ctx, sid, error: msg });
   });
 }

@@ -1,3 +1,5 @@
+import { defineAgent } from "@aai/sdk";
+
 export default defineAgent({
   name: "Simple Assistant",
   builtinTools: ["web_search", "visit_webpage", "fetch_json", "run_code"],

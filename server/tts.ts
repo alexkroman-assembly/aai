@@ -1,38 +1,17 @@
-import { getLogger } from "./logger.ts";
+import { debounce } from "@std/async/debounce";
 import type { TTSConfig } from "./types.ts";
+import { createWebSocketWithHeaders } from "./_deno_ws.ts";
 
-/** Deno supports headers in WebSocket constructor at runtime. */
-function createWebSocket(
-  url: string,
-  headers?: Record<string, string>,
-): WebSocket {
-  // @ts-expect-error Deno runtime supports { headers } but types say string | string[]
-  return new WebSocket(url, headers ? { headers } : undefined);
-}
-
-function safeClose(ws: WebSocket): void {
-  try {
-    ws.close();
-  } catch {
-    // ignore
-  }
-}
-
-const log = getLogger("tts");
-
-/** Time (ms) after the last audio chunk before we consider synthesis complete. */
 const IDLE_MS = 300;
-/** Safety timeout (ms) if no audio arrives at all after a flush. */
 const NO_AUDIO_TIMEOUT_MS = 5000;
 
 export function createTtsClient(config: TTSConfig) {
   let ws: WebSocket | null = null;
   let disposed = false;
 
-  // Per-synthesis state
   let onAudioCb: ((chunk: Uint8Array) => void) | null = null;
   let completionResolve: (() => void) | null = null;
-  let idleTimer: ReturnType<typeof setTimeout> | null = null;
+  let safetyTimer: ReturnType<typeof setTimeout> | null = null;
   let chunkCount = 0;
   let totalBytes = 0;
 
@@ -43,16 +22,20 @@ export function createTtsClient(config: TTSConfig) {
       audioFormat: config.audioFormat,
       samplingRate: String(config.samplingRate),
     });
+    if (config.speedAlpha != null) {
+      params.set("speedAlpha", String(config.speedAlpha));
+    }
     return `${config.wssUrl}?${params}`;
   }
 
   function finishSynthesis(): void {
-    if (idleTimer) {
-      clearTimeout(idleTimer);
-      idleTimer = null;
+    idleFinish.clear();
+    if (safetyTimer) {
+      clearTimeout(safetyTimer);
+      safetyTimer = null;
     }
     if (completionResolve) {
-      log.info("TTS synthesis done", { chunkCount, totalBytes });
+      console.info("TTS synthesis done", { chunkCount, totalBytes });
       completionResolve();
       completionResolve = null;
     }
@@ -61,33 +44,39 @@ export function createTtsClient(config: TTSConfig) {
     totalBytes = 0;
   }
 
-  function resetIdleTimer(): void {
-    if (idleTimer) clearTimeout(idleTimer);
-    idleTimer = setTimeout(finishSynthesis, IDLE_MS);
-  }
+  const idleFinish = debounce(finishSynthesis, IDLE_MS);
 
   function handleMessage(event: MessageEvent): void {
     if (event.data instanceof ArrayBuffer && event.data.byteLength > 0) {
       chunkCount++;
       totalBytes += event.data.byteLength;
       onAudioCb?.(new Uint8Array(event.data));
-      resetIdleTimer();
+      if (safetyTimer) {
+        clearTimeout(safetyTimer);
+        safetyTimer = null;
+      }
+      idleFinish();
     }
   }
 
+  let lastError: string | null = null;
+
   function handleClose(event: CloseEvent): void {
     if (event.code !== 1000 && event.code !== 1005) {
-      log.error("TTS WebSocket closed unexpectedly", {
-        code: event.code,
-        reason: event.reason,
-      });
+      lastError = event.reason
+        ? `TTS connection closed: ${event.reason} (code ${event.code})`
+        : `TTS connection closed unexpectedly (code ${event.code})`;
+      console.error(lastError);
     }
     ws = null;
     finishSynthesis();
   }
 
   function handleError(): void {
-    log.error("TTS WebSocket error");
+    lastError = config.apiKey
+      ? "TTS WebSocket error — check RIME_API_KEY"
+      : "TTS WebSocket error — RIME_API_KEY is not set";
+    console.error(lastError);
     ws = null;
     finishSynthesis();
   }
@@ -97,11 +86,11 @@ export function createTtsClient(config: TTSConfig) {
       return Promise.resolve(ws);
     }
     if (ws) {
-      safeClose(ws);
+      ws.close();
       ws = null;
     }
 
-    const newWs = createWebSocket(buildUrl(), {
+    const newWs = createWebSocketWithHeaders(buildUrl(), {
       Authorization: `Bearer ${config.apiKey}`,
     });
     newWs.binaryType = "arraybuffer";
@@ -113,11 +102,12 @@ export function createTtsClient(config: TTSConfig) {
 
     return new Promise<WebSocket>((resolve, reject) => {
       newWs.addEventListener("open", () => {
-        log.info("TTS WebSocket connected");
+        lastError = null;
+        console.info("TTS WebSocket connected");
         resolve(newWs);
       }, { once: true });
       newWs.addEventListener("error", () => {
-        reject(new Error("TTS WebSocket connection failed"));
+        reject(new Error(lastError ?? "TTS WebSocket connection failed"));
       }, { once: true });
     });
   }
@@ -127,17 +117,17 @@ export function createTtsClient(config: TTSConfig) {
       completionResolve = resolve;
 
       // Safety timeout in case no audio ever arrives
-      idleTimer = setTimeout(finishSynthesis, NO_AUDIO_TIMEOUT_MS);
+      safetyTimer = setTimeout(finishSynthesis, NO_AUDIO_TIMEOUT_MS);
 
       if (signal) {
         signal.addEventListener("abort", () => {
-          log.info("TTS aborted", { chunkCount, totalBytes });
+          console.info("TTS aborted", { chunkCount, totalBytes });
           // Close the WS so the next synthesis gets a fresh connection.
           // Sending <CLEAR> on the old socket isn't reliable — the server
           // may still have audio in flight that arrives after we start the
           // next synthesis, corrupting playback.
           if (ws) {
-            safeClose(ws);
+            ws.close();
             ws = null;
           }
           finishSynthesis();
@@ -148,21 +138,25 @@ export function createTtsClient(config: TTSConfig) {
 
   return {
     async synthesizeStream(
-      chunks: AsyncIterable<string>,
+      chunks: string | AsyncIterable<string>,
       onAudio: (chunk: Uint8Array) => void,
       signal?: AbortSignal,
     ): Promise<void> {
       if (disposed || signal?.aborted) return;
 
-      log.info("synthesizeStream start", { voice: config.voice });
+      console.info("synthesizeStream start", { voice: config.voice });
 
       const conn = await connect();
       if (signal?.aborted) return;
 
       onAudioCb = onAudio;
-      for await (const text of chunks) {
-        if (signal?.aborted) return;
-        conn.send(text);
+      if (typeof chunks === "string") {
+        conn.send(chunks);
+      } else {
+        for await (const text of chunks) {
+          if (signal?.aborted) return;
+          conn.send(text);
+        }
       }
       conn.send("<FLUSH>");
       await waitForCompletion(signal);
@@ -175,11 +169,9 @@ export function createTtsClient(config: TTSConfig) {
         if (ws.readyState === WebSocket.OPEN) {
           ws.send("<EOS>");
         }
-        safeClose(ws);
+        ws.close();
         ws = null;
       }
     },
   };
 }
-
-export type TtsClient = ReturnType<typeof createTtsClient>;

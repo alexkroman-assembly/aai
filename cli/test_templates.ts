@@ -1,12 +1,14 @@
 #!/usr/bin/env -S deno run --allow-all --unstable-worker-options
 /**
- * Scaffolds every template into a temp directory and runs `aai --dry-run`
+ * Scaffolds every template into a temp directory and runs a build
  * to verify type-checking, validation, and bundling all pass.
  */
 
 import { bold, green, red } from "@std/fmt/colors";
+import { runBuild } from "./build.ts";
+import { runNew } from "./new.ts";
+import { dirname, fromFileUrl, join } from "@std/path";
 
-const CLI_ENTRY = new URL("./cli.ts", import.meta.url).pathname;
 const TEMPLATES_DIR = new URL("../templates", import.meta.url).pathname;
 
 // Discover all templates
@@ -20,50 +22,43 @@ console.log(`Testing ${templates.length} templates...\n`);
 
 const results: { name: string; ok: boolean; error?: string }[] = [];
 
+// Ensure ASSEMBLYAI_API_KEY is set for build
+if (!Deno.env.get("ASSEMBLYAI_API_KEY")) {
+  Deno.env.set("ASSEMBLYAI_API_KEY", "test");
+}
+
 for (const template of templates) {
   const tmpDir = await Deno.makeTempDir({ prefix: `aai-test-${template}-` });
 
   try {
     // Scaffold the template
-    const scaffold = new Deno.Command("deno", {
-      args: [
-        "run",
-        "--allow-all",
-        "--unstable-worker-options",
-        CLI_ENTRY,
-        "--yes",
-        "--template",
-        template,
-        "--dry-run",
-      ],
-      env: {
-        ...Object.fromEntries(
-          Object.entries(Deno.env.toObject()),
-        ),
-        INIT_CWD: tmpDir,
-        ASSEMBLYAI_API_KEY: "dry-run",
-      },
-      stdout: "piped",
-      stderr: "piped",
+    await runNew({
+      targetDir: tmpDir,
+      template,
+      templatesDir: TEMPLATES_DIR,
     });
 
-    const { success, stdout, stderr } = await scaffold.output();
-    const out = new TextDecoder().decode(stdout);
-    const err = new TextDecoder().decode(stderr);
+    // Copy CLAUDE.md
+    const cliDir = dirname(fromFileUrl(import.meta.url));
+    const srcClaude = join(cliDir, "claude.md");
+    await Deno.copyFile(srcClaude, join(tmpDir, "CLAUDE.md"));
 
-    if (success) {
-      console.log(`  ${green("✓")} ${template}`);
-      results.push({ name: template, ok: true });
-    } else {
-      console.log(`  ${red("✗")} ${template}`);
-      const output = (err + "\n" + out).trim();
-      if (output) {
-        for (const line of output.split("\n")) {
-          console.log(`    ${line}`);
-        }
-      }
-      results.push({ name: template, ok: false, error: output });
-    }
+    // Write a .env with test key
+    await Deno.writeTextFile(
+      join(tmpDir, ".env"),
+      "ASSEMBLYAI_API_KEY=test\n",
+    );
+
+    // Build it
+    await runBuild({ agentDir: tmpDir });
+
+    console.log(`  ${green("✓")} ${template}`);
+    results.push({ name: template, ok: true });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.log(`  ${red("✗")} ${template}`);
+    console.log(`    ${msg}`);
+    results.push({ name: template, ok: false, error: msg });
   } finally {
     await Deno.remove(tmpDir, { recursive: true });
   }

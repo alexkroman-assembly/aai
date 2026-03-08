@@ -80,8 +80,6 @@ esac
 echo "Run 'aai' to get started"
 `;
 
-export function handleInstall(): Response {
-  return new Response(INSTALL_SCRIPT, {
-    headers: { "Content-Type": "text/plain; charset=utf-8" },
-  });
+export function handleInstall(_req: Request): Response {
+  return new Response(INSTALL_SCRIPT);
 }

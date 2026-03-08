@@ -1,6 +1,6 @@
 import type { AgentState } from "./types.ts";
 
-export interface Theme {
+export type Theme = {
   bg: string;
   surface: string;
   surfaceLight: string;
@@ -11,7 +11,7 @@ export interface Theme {
   font: string;
   radius: string;
   stateColors: Record<AgentState, string>;
-}
+};
 
 export const defaultTheme: Theme = Object.freeze({
   bg: "#ffffff",
@@ -53,11 +53,7 @@ export const darkTheme: Theme = Object.freeze({
   }),
 });
 
-function camelToKebab(s: string): string {
-  return s.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
-}
-
-export function setThemeVars(el: HTMLElement, theme: Readonly<Theme>): void {
+export function applyTheme(el: HTMLElement, theme: Readonly<Theme>): void {
   const s = el.style;
   for (const [key, value] of Object.entries(theme)) {
     if (key === "stateColors") {
@@ -67,18 +63,16 @@ export function setThemeVars(el: HTMLElement, theme: Readonly<Theme>): void {
         s.setProperty(`--aai-state-${state}`, color);
       }
     } else {
-      s.setProperty(`--aai-${camelToKebab(key)}`, value as string);
+      s.setProperty(
+        `--aai-${key.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`,
+        value as string,
+      );
     }
   }
-}
 
-export function applyTheme(el: HTMLElement, theme: Readonly<Theme>): void {
-  setThemeVars(el, theme);
-
-  // Apply base styles on the container so the theme works without extra CSS.
-  el.style.background = theme.bg;
-  el.style.color = theme.text;
-  el.style.fontFamily = theme.font;
-  el.style.minHeight = "100vh";
-  el.style.margin = "0";
+  s.background = theme.bg;
+  s.color = theme.text;
+  s.fontFamily = theme.font;
+  s.minHeight = "100vh";
+  s.margin = "0";
 }

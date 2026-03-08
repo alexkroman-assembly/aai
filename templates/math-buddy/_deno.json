@@ -1,0 +1,5 @@
+{
+  "imports": {
+    "@aai/sdk": "jsr:@aai/sdk@^0.1.0"
+  }
+}

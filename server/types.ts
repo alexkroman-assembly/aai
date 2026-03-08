@@ -2,25 +2,11 @@ import { z } from "zod";
 import {
   DEFAULT_STT_SAMPLE_RATE,
   DEFAULT_TTS_SAMPLE_RATE,
-} from "../sdk/_protocol.ts";
+} from "../core/_protocol.ts";
+import type { AgentSlot } from "./worker_pool.ts";
+import type { BundleStore } from "./bundle_store_tigris.ts";
 
-// Re-export agent types from sdk/
-export {
-  type AgentConfig,
-  type AgentOptions,
-  agentToolsToSchemas,
-  type BuiltinTool,
-  DEFAULT_GREETING,
-  DEFAULT_INSTRUCTIONS,
-  type ToolContext,
-  type ToolDef,
-  type ToolSchema,
-  type Voice,
-} from "../sdk/types.ts";
-
-// --- Config types (plain interfaces — not validated at boundaries) ---
-
-export interface STTConfig {
+export type STTConfig = {
   sampleRate: number;
   speechModel: string;
   wssBase: string;
@@ -30,7 +16,7 @@ export interface STTConfig {
   maxTurnSilence: number;
   vadThreshold: number;
   prompt?: string;
-}
+};
 
 export const DEFAULT_STT_CONFIG: STTConfig = {
   sampleRate: DEFAULT_STT_SAMPLE_RATE,
@@ -40,10 +26,10 @@ export const DEFAULT_STT_CONFIG: STTConfig = {
   formatTurns: true,
   minEndOfTurnSilenceWhenConfident: 100,
   maxTurnSilence: 1000,
-  vadThreshold: 0.4,
+  vadThreshold: 0.5,
 };
 
-export interface TTSConfig {
+export type TTSConfig = {
   wssUrl: string;
   apiKey: string;
   voice: string;
@@ -51,7 +37,8 @@ export interface TTSConfig {
   audioFormat: string;
   samplingRate: number;
   sampleRate: number;
-}
+  speedAlpha?: number;
+};
 
 export const DEFAULT_TTS_CONFIG: TTSConfig = {
   wssUrl: "wss://users-ws.rime.ai/ws",
@@ -61,26 +48,12 @@ export const DEFAULT_TTS_CONFIG: TTSConfig = {
   audioFormat: "pcm",
   samplingRate: DEFAULT_TTS_SAMPLE_RATE,
   sampleRate: DEFAULT_TTS_SAMPLE_RATE,
+  speedAlpha: 1.2,
 };
 
 export const DEFAULT_MODEL = "claude-haiku-4-5-20251001";
 
-// --- STT message types (Zod-first) ---
-
-export type SttMessage = {
-  type: string;
-  transcript?: string;
-  is_final?: boolean;
-  turn_is_formatted?: boolean;
-  turn_order?: number;
-  end_of_turn?: boolean;
-  timestamp?: number;
-  audio_duration_seconds?: number;
-  session_duration_seconds?: number;
-  [key: string]: unknown;
-};
-
-export const SttMessageSchema: z.ZodType<SttMessage> = z
+export const SttMessageSchema = z
   .object({
     type: z.string(),
     transcript: z.string().optional(),
@@ -94,22 +67,9 @@ export const SttMessageSchema: z.ZodType<SttMessage> = z
   })
   .passthrough();
 
-// --- LLM types (Zod-first) ---
+export type SttMessage = z.infer<typeof SttMessageSchema>;
 
-export type ChatMessage = {
-  role: "system" | "user" | "assistant" | "tool";
-  content: string | null;
-  tool_calls?: {
-    id: string;
-    type: "function";
-    function: { name: string; arguments: string; [key: string]: unknown };
-    [key: string]: unknown;
-  }[];
-  tool_call_id?: string;
-  [key: string]: unknown;
-};
-
-const ChatMessageSchema: z.ZodType<ChatMessage> = z.object({
+const ChatMessageSchema = z.object({
   role: z.enum(["system", "user", "assistant", "tool"]),
   content: z.string().nullable(),
   tool_calls: z.array(
@@ -123,13 +83,9 @@ const ChatMessageSchema: z.ZodType<ChatMessage> = z.object({
   tool_call_id: z.string().optional(),
 }).passthrough();
 
-export type LLMResponse = {
-  id?: string;
-  choices: { index?: number; message: ChatMessage; finish_reason: string }[];
-  [key: string]: unknown;
-};
+export type ChatMessage = z.infer<typeof ChatMessageSchema>;
 
-export const LLMResponseSchema: z.ZodType<LLMResponse> = z
+export const LLMResponseSchema = z
   .object({
     id: z.string().optional(),
     choices: z.array(z.object({
@@ -139,3 +95,11 @@ export const LLMResponseSchema: z.ZodType<LLMResponse> = z
     })).nullable().transform((v) => v ?? []),
   })
   .passthrough();
+
+export type LLMResponse = z.infer<typeof LLMResponseSchema>;
+
+export type ServerContext = {
+  slots: Map<string, AgentSlot>;
+  sessions: Map<string, unknown>;
+  store: BundleStore;
+};

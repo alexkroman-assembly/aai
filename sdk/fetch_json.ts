@@ -1,8 +1,8 @@
-export class HttpError extends Error {
-  constructor(public status: number, statusText: string) {
-    super(`${status} ${statusText}`);
-    this.name = "HttpError";
-  }
+export function httpError(status: number, statusText: string): Error {
+  const err = new Error(`${status} ${statusText}`);
+  err.name = "HttpError";
+  (err as Error & { status: number }).status = status;
+  return err;
 }
 
 export async function fetchJSON<T = unknown>(
@@ -11,6 +11,6 @@ export async function fetchJSON<T = unknown>(
 ): Promise<T> {
   const { fetch: fetchFn = globalThis.fetch, ...rest } = init ?? {};
   const resp = await fetchFn(url, rest);
-  if (!resp.ok) throw new HttpError(resp.status, resp.statusText);
+  if (!resp.ok) throw httpError(resp.status, resp.statusText);
   return resp.json();
 }
