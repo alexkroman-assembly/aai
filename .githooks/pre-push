@@ -17,6 +17,7 @@ deno compile \
   --no-check \
   --allow-all \
   --unstable-worker-options \
+  --include deno.json \
   --include templates/ \
   --include sdk/ \
   --include core/ \
