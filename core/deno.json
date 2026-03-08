@@ -7,5 +7,8 @@
     "./rpc": "./_rpc.ts",
     "./deno-worker": "./_deno_worker.ts"
   },
+  "imports": {
+    "@aai/sdk": "workspace:@aai/sdk"
+  },
   "lint": {}
 }

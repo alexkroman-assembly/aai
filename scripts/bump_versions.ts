@@ -1,6 +1,9 @@
 /**
  * Auto-bump patch versions for packages with staged changes.
  *
+ * Reads workspace members from the root deno.json, so any new package added
+ * to the workspace is automatically included.
+ *
  * Compares staged files against the last commit to determine which packages
  * changed, then bumps their patch version in deno.json. Dependents are also
  * bumped when their dependencies change:
@@ -14,12 +17,12 @@
  * Usage: deno run --allow-read --allow-write --allow-run scripts/bump_versions.ts
  */
 
-const PACKAGES = ["sdk", "cli", "core", "server", "ui"] as const;
-type Pkg = typeof PACKAGES[number];
+const rootConfig = JSON.parse(await Deno.readTextFile("deno.json"));
+const PACKAGES: string[] = rootConfig.workspace;
 
 // When a package changes, these dependents must also be bumped.
 // Based on the dependency graph: cli/, server/, ui/ depend on sdk/ and core/.
-const DEPENDENTS: Record<string, Pkg[]> = {
+const DEPENDENTS: Record<string, string[]> = {
   sdk: ["cli", "core", "server", "ui"],
   core: ["cli", "server", "ui"],
 };
