@@ -1,10 +1,10 @@
 import { cyan, dim, green, red, yellow } from "@std/fmt/colors";
-import { error, step } from "@aai/cli/output";
-import { type AgentEntry, loadAgent } from "@aai/cli/discover";
-import { bundleAgent, type BundleOutput } from "@aai/cli/bundler";
-import { validateAgent, type ValidationResult } from "@aai/cli/validate";
+import { error, step } from "./_output.ts";
+import { type AgentEntry, loadAgent } from "./_discover.ts";
+import { bundleAgent, type BundleOutput } from "./_bundler.ts";
+import { validateAgent, type ValidationResult } from "./_validate.ts";
 
-export type { BundleOutput } from "@aai/cli/bundler";
+export type { BundleOutput } from "./_bundler.ts";
 
 export type BuildResult = {
   agent: AgentEntry;

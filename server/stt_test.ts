@@ -1,8 +1,8 @@
 import { expect } from "@std/expect";
 import { assertSpyCalls, spy } from "@std/testing/mock";
-import { connectStt } from "@aai/server/stt";
-import { DEFAULT_STT_CONFIG } from "@aai/server/types";
-import { installMockWebSocket, type MockWebSocket } from "@aai/server/mock-ws";
+import { connectStt } from "./stt.ts";
+import { DEFAULT_STT_CONFIG } from "./types.ts";
+import { installMockWebSocket, type MockWebSocket } from "./_mock_ws.ts";
 
 function createMockSttEvents() {
   return {

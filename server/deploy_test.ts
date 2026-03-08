@@ -1,7 +1,7 @@
 import { expect } from "@std/expect";
-import { handleDeploy, hashApiKey } from "@aai/server/deploy";
-import type { AgentSlot } from "@aai/server/worker-pool";
-import { createTestStore, VALID_ENV } from "@aai/server/testing";
+import { handleDeploy, hashApiKey } from "./deploy.ts";
+import type { AgentSlot } from "./worker_pool.ts";
+import { createTestStore, VALID_ENV } from "./_test_utils.ts";
 
 function setup() {
   const store = createTestStore();

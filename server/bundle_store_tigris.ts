@@ -5,7 +5,7 @@ import {
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
-import type { AgentMetadata } from "@aai/server/worker-pool";
+import type { AgentMetadata } from "./worker_pool.ts";
 import { AgentMetadataSchema } from "@aai/core/rpc-schema";
 
 export type FileKey = "worker" | "client" | "client_map";

@@ -1,23 +1,20 @@
 import { type Route, route } from "@std/http/unstable-route";
-import { handleFavicon, renderLandingPage } from "@aai/server/html";
-import { handleInstall } from "@aai/server/install";
-import { handleDeploy } from "@aai/server/deploy";
+import { handleFavicon, renderLandingPage } from "./html.ts";
+import { handleInstall } from "./install.ts";
+import { handleDeploy } from "./deploy.ts";
 import {
   handleAgentHealth,
   handleAgentPage,
   handleAgentRedirect,
   handleStaticFile,
   handleWebSocket,
-} from "@aai/server/transport-websocket";
-import type { AgentSlot } from "@aai/server/worker-pool";
-import type { BundleStore } from "@aai/server/bundle-store-tigris";
-import type { Session } from "@aai/server/session";
-import {
-  handleTwilioStream,
-  handleTwilioVoice,
-} from "@aai/server/transport-twilio";
-import type { ServerContext } from "@aai/server/types";
-import { handleDevWebSocket } from "@aai/server/dev-session";
+} from "./transport_websocket.ts";
+import type { AgentSlot } from "./worker_pool.ts";
+import type { BundleStore } from "./bundle_store_tigris.ts";
+import type { Session } from "./session.ts";
+import { handleTwilioStream, handleTwilioVoice } from "./transport_twilio.ts";
+import type { ServerContext } from "./types.ts";
+import { handleDevWebSocket } from "./dev_session.ts";
 
 type Params = Record<string, string>;
 

@@ -1,6 +1,6 @@
 import { expect } from "@std/expect";
-import { loadPlatformConfig } from "@aai/server/config";
-import { DEFAULT_MODEL } from "@aai/server/types";
+import { loadPlatformConfig } from "./config.ts";
+import { DEFAULT_MODEL } from "./types.ts";
 
 const validEnv = { ASSEMBLYAI_API_KEY: "test-key-123" };
 

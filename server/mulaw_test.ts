@@ -5,7 +5,7 @@ import {
   mulawToPcm16,
   pcm16ToMulaw,
   resample,
-} from "@aai/server/mulaw";
+} from "./mulaw.ts";
 
 Deno.test("encodeMulaw / decodeMulaw roundtrip", async (t) => {
   await t.step("silence encodes and decodes to near-zero", () => {

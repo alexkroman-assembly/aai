@@ -1,5 +1,5 @@
 import { expect } from "@std/expect";
-import { applyTheme, darkTheme, defaultTheme } from "@aai/ui/theme";
+import { applyTheme, darkTheme, defaultTheme } from "./theme.ts";
 
 function mockElement(): { el: HTMLElement; props: Map<string, string> } {
   const props = new Map<string, string>();

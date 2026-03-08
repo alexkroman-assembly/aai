@@ -1,5 +1,5 @@
 import { ClientMessageSchema } from "@aai/core/protocol";
-import type { Session } from "@aai/server/session";
+import type { Session } from "./session.ts";
 
 export type WsSessionOptions = {
   createSession: (sessionId: string, ws: WebSocket) => Session;

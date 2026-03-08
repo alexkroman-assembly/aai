@@ -2,8 +2,8 @@ import type * as preact from "preact";
 import { useRef } from "preact/hooks";
 import { useComputed, useSignalEffect } from "@preact/signals";
 import type { Signal } from "@preact/signals";
-import type { AgentState, Message, SessionError } from "@aai/ui/types";
-import { useSession } from "@aai/ui/signals";
+import type { AgentState, Message, SessionError } from "./types.ts";
+import { useSession } from "./signals.tsx";
 import {
   base,
   bubble,
@@ -14,7 +14,7 @@ import {
   layout,
   messageArea,
   thinking,
-} from "@aai/ui/styles";
+} from "./styles.ts";
 
 export function StateIndicator(
   { state }: { state: Signal<AgentState> },

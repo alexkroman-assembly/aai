@@ -2,7 +2,7 @@ import { parseArgs } from "@std/cli/parse-args";
 import { exists } from "@std/fs/exists";
 import { dirname, fromFileUrl, join } from "@std/path";
 import { bold, cyan, dim, green } from "@std/fmt/colors";
-import { ensureClaudeMd } from "@aai/cli/discover";
+import { ensureClaudeMd } from "./_discover.ts";
 
 export async function runNewCommand(
   args: string[],
@@ -42,7 +42,7 @@ ${bold("OPTIONS:")}
 
   const cliDir = dirname(fromFileUrl(import.meta.url));
   const templatesDir = join(cliDir, "..", "templates");
-  const { listTemplates, runNew } = await import("@aai/cli/new");
+  const { listTemplates, runNew } = await import("./new.ts");
 
   const template = flags.template || "simple";
   await runNew({

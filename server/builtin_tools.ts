@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { createRpcCaller } from "@aai/core/rpc";
 import type { ToolSchema } from "@aai/sdk/types";
-import { htmlToMarkdown } from "@aai/server/html";
+import { htmlToMarkdown } from "./html.ts";
 import { createDenoWorker } from "@aai/core/deno-worker";
 
 export const _internals = {

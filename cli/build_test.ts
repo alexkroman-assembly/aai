@@ -1,6 +1,6 @@
 import { expect } from "@std/expect";
 import { join } from "@std/path";
-import { runBuild } from "@aai/cli/build";
+import { runBuild } from "./build.ts";
 
 Deno.test(
   { name: "runBuild", sanitizeOps: false, sanitizeResources: false },

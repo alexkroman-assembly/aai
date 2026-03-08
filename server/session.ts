@@ -1,18 +1,18 @@
-import type { PlatformConfig } from "@aai/server/config";
-import { callLLM, type CallLLMOptions } from "@aai/server/llm";
+import type { PlatformConfig } from "./config.ts";
+import { callLLM, type CallLLMOptions } from "./llm.ts";
 import type { ExecuteTool } from "@aai/core/worker-entry";
-import { connectStt, type SttEvents, type SttHandle } from "@aai/server/stt";
-import { createTtsClient } from "@aai/server/tts";
-import { executeBuiltinTool } from "@aai/server/builtin-tools";
-import { executeTurn, type TurnCallLLMOptions } from "@aai/server/turn-handler";
-import type { ChatMessage, LLMResponse, STTConfig } from "@aai/server/types";
+import { connectStt, type SttEvents, type SttHandle } from "./stt.ts";
+import { createTtsClient } from "./tts.ts";
+import { executeBuiltinTool } from "./builtin_tools.ts";
+import { executeTurn, type TurnCallLLMOptions } from "./turn_handler.ts";
+import type { ChatMessage, LLMResponse, STTConfig } from "./types.ts";
 import {
   type AgentConfig,
   DEFAULT_GREETING,
   type ToolSchema,
 } from "@aai/sdk/types";
 import type { WorkerApi } from "@aai/core/worker-entry";
-import { buildSystemPrompt } from "@aai/server/system-prompt";
+import { buildSystemPrompt } from "./system_prompt.ts";
 
 export type SessionTransport = {
   send(data: string | ArrayBuffer | Uint8Array): void;

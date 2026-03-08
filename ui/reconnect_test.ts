@@ -1,7 +1,7 @@
 import { expect } from "@std/expect";
 import { assertSpyCalls, spy } from "@std/testing/mock";
 import { FakeTime } from "@std/testing/time";
-import { createReconnect } from "@aai/ui/session";
+import { createReconnect } from "./session.ts";
 
 Deno.test("canRetry true initially, false after max attempts", () => {
   const time = new FakeTime();

@@ -2,8 +2,8 @@ import { expect } from "@std/expect";
 import { FakeTime } from "@std/testing/time";
 import { render } from "preact";
 import { signal } from "@preact/signals";
-import { createMockSignals, getContainer, setupDOM } from "@aai/ui/test-utils";
-import { SessionProvider } from "@aai/ui/signals";
+import { createMockSignals, getContainer, setupDOM } from "./_test_utils.ts";
+import { SessionProvider } from "./signals.tsx";
 import {
   App,
   ChatView,
@@ -11,9 +11,9 @@ import {
   MessageBubble,
   StateIndicator,
   Transcript,
-} from "@aai/ui/components";
-import type { SessionSignals } from "@aai/ui/signals";
-import type { AgentState, Message } from "@aai/ui/types";
+} from "./components.tsx";
+import type { SessionSignals } from "./signals.tsx";
+import type { AgentState, Message } from "./types.ts";
 
 function withDOM(
   fn: (container: Element) => void | Promise<void>,

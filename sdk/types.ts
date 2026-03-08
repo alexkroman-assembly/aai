@@ -1,6 +1,6 @@
 import { z } from "zod";
-import type { BuiltinTool, ToolSchema, Transport } from "@aai/sdk/schema";
-export type { AgentConfig, BuiltinTool, ToolSchema } from "@aai/sdk/schema";
+import type { BuiltinTool, ToolSchema, Transport } from "./_schema.ts";
+export type { AgentConfig, BuiltinTool, ToolSchema } from "./_schema.ts";
 
 export type ToolContext = {
   sessionId: string;

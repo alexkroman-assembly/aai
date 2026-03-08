@@ -1,7 +1,7 @@
 import { encodeHex } from "@std/encoding/hex";
-import { loadPlatformConfig } from "@aai/server/config";
-import type { AgentSlot } from "@aai/server/worker-pool";
-import type { BundleStore } from "@aai/server/bundle-store-tigris";
+import { loadPlatformConfig } from "./config.ts";
+import type { AgentSlot } from "./worker_pool.ts";
+import type { BundleStore } from "./bundle_store_tigris.ts";
 import { DeployBodySchema, normalizeTransport } from "@aai/sdk/schema";
 
 export async function hashApiKey(apiKey: string): Promise<string> {

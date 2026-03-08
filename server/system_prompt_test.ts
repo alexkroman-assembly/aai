@@ -1,5 +1,5 @@
 import { expect } from "@std/expect";
-import { buildSystemPrompt } from "@aai/server/system-prompt";
+import { buildSystemPrompt } from "./system_prompt.ts";
 import {
   type AgentConfig,
   DEFAULT_INSTRUCTIONS,

@@ -1,5 +1,5 @@
-export { defineAgent } from "@aai/sdk/define-agent";
-export { fetchJSON, httpError } from "@aai/sdk/fetch-json";
+export { defineAgent } from "./define_agent.ts";
+export { fetchJSON, httpError } from "./fetch_json.ts";
 export type {
   AgentDef,
   AgentOptions,
@@ -8,5 +8,5 @@ export type {
   ToolContext,
   ToolDef,
   Voice,
-} from "@aai/sdk/types";
-export type { Transport } from "@aai/sdk/schema";
+} from "./types.ts";
+export type { Transport } from "./_schema.ts";

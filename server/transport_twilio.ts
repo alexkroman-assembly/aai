@@ -5,16 +5,16 @@ import {
   createToolExecutor,
   trackSessionClose,
   trackSessionOpen,
-} from "@aai/server/worker-pool";
-import { loadPlatformConfig } from "@aai/server/config";
-import { getBuiltinToolSchemas } from "@aai/server/builtin-tools";
-import { createSession, type SessionTransport } from "@aai/server/session";
-import type { ServerContext } from "@aai/server/types";
+} from "./worker_pool.ts";
+import { loadPlatformConfig } from "./config.ts";
+import { getBuiltinToolSchemas } from "./builtin_tools.ts";
+import { createSession, type SessionTransport } from "./session.ts";
+import type { ServerContext } from "./types.ts";
 import {
   DEFAULT_STT_SAMPLE_RATE,
   DEFAULT_TTS_SAMPLE_RATE,
 } from "@aai/core/protocol";
-import { mulawToPcm16, pcm16ToMulaw, resample } from "@aai/server/mulaw";
+import { mulawToPcm16, pcm16ToMulaw, resample } from "./mulaw.ts";
 import { z } from "zod";
 
 const TwilioMessageSchema = z.object({

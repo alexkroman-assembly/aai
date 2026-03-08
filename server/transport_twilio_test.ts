@@ -6,12 +6,12 @@ import {
   mulawToPcm16,
   pcm16ToMulaw,
   resample,
-} from "@aai/server/mulaw";
+} from "./mulaw.ts";
 import {
   createAudioBuffer,
   createTwilioTransport,
   decodeTwilioFrame,
-} from "@aai/server/transport-twilio";
+} from "./transport_twilio.ts";
 
 // --- mulaw codec ---
 

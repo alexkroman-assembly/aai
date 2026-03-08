@@ -1,7 +1,7 @@
 import { expect } from "@std/expect";
 import { assertSpyCalls, spy, stub } from "@std/testing/mock";
-import { _internals, runDeploy } from "@aai/cli/deploy";
-import type { BundleOutput } from "@aai/cli/bundler";
+import { _internals, runDeploy } from "./deploy.ts";
+import type { BundleOutput } from "./_bundler.ts";
 
 function makeBundle(): BundleOutput {
   return {

@@ -10,7 +10,7 @@ import type { InitializeOptions } from "esbuild-wasm-types";
 import { denoPlugin } from "@deno/esbuild-plugin";
 import { dirname, fromFileUrl, join, resolve } from "@std/path";
 import { toFileUrl } from "@std/path/to-file-url";
-import type { AgentEntry } from "@aai/cli/discover";
+import type { AgentEntry } from "./_discover.ts";
 
 export function bundleError(message: string): Error {
   const err = new Error(message);

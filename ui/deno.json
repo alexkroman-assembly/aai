@@ -1,6 +1,6 @@
 {
   "name": "@aai/ui",
-  "version": "0.1.8",
+  "version": "0.1.10",
   "exports": "./mod.ts",
   "publish": {
     "exclude": [
@@ -19,19 +19,7 @@
     "preact/hooks": "npm:preact@10.28.4/hooks",
     "@preact/signals": "npm:@preact/signals@2.8.1",
     "goober": "npm:goober@2.1.18",
-    "@b-fuze/deno-dom": "jsr:@b-fuze/deno-dom@^0.1.56",
-    "@aai/ui/types": "./types.ts",
-    "@aai/ui/session": "./session.ts",
-    "@aai/ui/signals": "./signals.tsx",
-    "@aai/ui/theme": "./theme.ts",
-    "@aai/ui/mount": "./mount.tsx",
-    "@aai/ui/components": "./components.tsx",
-    "@aai/ui/audio": "./audio.ts",
-    "@aai/ui/resample": "./resample.ts",
-    "@aai/ui/test-utils": "./_test_utils.ts",
-    "@aai/ui/dom-shim": "./_dom_shim.ts",
-    "@aai/ui/styles": "./styles.ts",
-    "@aai/ui/client": "./client.tsx"
+    "@b-fuze/deno-dom": "jsr:@b-fuze/deno-dom@^0.1.56"
   },
   "compilerOptions": {
     "jsx": "react-jsx",

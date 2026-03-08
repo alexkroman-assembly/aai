@@ -1,9 +1,9 @@
 import { encodeBase64 } from "@std/encoding/base64";
-import { loadPlatformConfig } from "@aai/server/config";
+import { loadPlatformConfig } from "./config.ts";
 import type { AgentConfig, ToolSchema } from "@aai/sdk/types";
 import { createWorkerApi, type WorkerApi } from "@aai/core/worker-entry";
 import type { ExecuteTool } from "@aai/core/worker-entry";
-import type { BundleStore } from "@aai/server/bundle-store-tigris";
+import type { BundleStore } from "./bundle_store_tigris.ts";
 import type { AgentMetadata } from "@aai/core/rpc-schema";
 import { createDenoWorker } from "@aai/core/deno-worker";
 export type { AgentMetadata } from "@aai/core/rpc-schema";

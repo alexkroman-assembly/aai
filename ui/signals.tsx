@@ -3,9 +3,9 @@ import { createContext } from "preact";
 import { useContext } from "preact/hooks";
 import type { ComponentChildren } from "preact";
 import { batch, effect, type Signal, signal } from "@preact/signals";
-import type { VoiceSession } from "@aai/ui/session";
+import type { VoiceSession } from "./session.ts";
 
-import type { AgentState, Message, SessionError } from "@aai/ui/types";
+import type { AgentState, Message, SessionError } from "./types.ts";
 
 export type SessionSignals = {
   state: Signal<AgentState>;

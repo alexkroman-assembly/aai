@@ -3,8 +3,8 @@ import {
   DEFAULT_STT_SAMPLE_RATE,
   DEFAULT_TTS_SAMPLE_RATE,
 } from "@aai/core/protocol";
-import type { AgentSlot } from "@aai/server/worker-pool";
-import type { BundleStore } from "@aai/server/bundle-store-tigris";
+import type { AgentSlot } from "./worker_pool.ts";
+import type { BundleStore } from "./bundle_store_tigris.ts";
 
 export type STTConfig = {
   sampleRate: number;

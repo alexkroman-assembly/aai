@@ -1,16 +1,16 @@
-import { renderAgentPage } from "@aai/server/html";
-import { handleSessionWebSocket } from "@aai/server/ws-handler";
-import { createSession, type Session } from "@aai/server/session";
+import { renderAgentPage } from "./html.ts";
+import { handleSessionWebSocket } from "./ws_handler.ts";
+import { createSession, type Session } from "./session.ts";
 import {
   type AgentSlot,
   createToolExecutor,
   registerSlot,
   trackSessionClose,
   trackSessionOpen,
-} from "@aai/server/worker-pool";
-import { loadPlatformConfig } from "@aai/server/config";
-import { getBuiltinToolSchemas } from "@aai/server/builtin-tools";
-import type { ServerContext } from "@aai/server/types";
+} from "./worker_pool.ts";
+import { loadPlatformConfig } from "./config.ts";
+import { getBuiltinToolSchemas } from "./builtin_tools.ts";
+import type { ServerContext } from "./types.ts";
 
 async function discoverSlot(
   slug: string,

@@ -1,7 +1,7 @@
 import { expect } from "@std/expect";
 import { stub } from "@std/testing/mock";
-import { _internals, callLLM } from "@aai/server/llm";
-import type { ChatMessage } from "@aai/server/types";
+import { _internals, callLLM } from "./llm.ts";
+import type { ChatMessage } from "./types.ts";
 import type { ToolSchema } from "@aai/sdk/types";
 
 function mockFetch(

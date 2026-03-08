@@ -1,7 +1,7 @@
 import { bold, cyan, dim, green } from "@std/fmt/colors";
 import { dirname, fromFileUrl, join } from "@std/path";
-import { error } from "@aai/cli/output";
-import { promptUpgradeIfAvailable } from "@aai/cli/update";
+import { error } from "./_output.ts";
+import { promptUpgradeIfAvailable } from "./_update.ts";
 
 const denoConfig = await import("./deno.json", { with: { type: "json" } });
 const VERSION: string = denoConfig.default.version;
@@ -9,7 +9,7 @@ const VERSION: string = denoConfig.default.version;
 async function printUsage(): Promise<void> {
   const cliDir = dirname(fromFileUrl(import.meta.url));
   const templatesDir = join(cliDir, "..", "templates");
-  const { listTemplates } = await import("@aai/cli/new");
+  const { listTemplates } = await import("./new.ts");
   const templates = await listTemplates(templatesDir);
   const templateList = templates.map((t) => `    ${t}`).join("\n");
   console.log(
@@ -59,19 +59,19 @@ export async function main(args: string[]): Promise<number> {
 
   switch (command) {
     case "new": {
-      const { runNewCommand } = await import("@aai/cli/cmd-new");
+      const { runNewCommand } = await import("./cmd_new.ts");
       return await runNewCommand(subArgs);
     }
     case "build": {
-      const { runBuildCommand } = await import("@aai/cli/cmd-build");
+      const { runBuildCommand } = await import("./cmd_build.ts");
       return await runBuildCommand(subArgs);
     }
     case "dev": {
-      const { runDevCommand } = await import("@aai/cli/cmd-dev");
+      const { runDevCommand } = await import("./cmd_dev.ts");
       return await runDevCommand(subArgs);
     }
     case "deploy": {
-      const { runDeployCommand } = await import("@aai/cli/cmd-deploy");
+      const { runDeployCommand } = await import("./cmd_deploy.ts");
       return await runDeployCommand(subArgs);
     }
     default: {

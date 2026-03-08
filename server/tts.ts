@@ -1,6 +1,6 @@
 import { debounce } from "@std/async/debounce";
-import type { TTSConfig } from "@aai/server/types";
-import { createWebSocketWithHeaders } from "@aai/server/deno-ws";
+import type { TTSConfig } from "./types.ts";
+import { createWebSocketWithHeaders } from "./_deno_ws.ts";
 
 const IDLE_MS = 300;
 const NO_AUDIO_TIMEOUT_MS = 5000;

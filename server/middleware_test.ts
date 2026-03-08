@@ -1,6 +1,6 @@
 import { expect } from "@std/expect";
-import { createOrchestrator } from "@aai/server/orchestrator";
-import { createTestStore, DUMMY_INFO } from "@aai/server/testing";
+import { createOrchestrator } from "./orchestrator.ts";
+import { createTestStore, DUMMY_INFO } from "./_test_utils.ts";
 
 Deno.test("orchestrator adds Cross-Origin-Isolation headers", async () => {
   using store = createTestStore();

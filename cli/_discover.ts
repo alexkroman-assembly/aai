@@ -4,8 +4,8 @@ import { basename, join, resolve } from "@std/path";
 function slugify(str: string): string {
   return str.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
-import { step } from "@aai/cli/output";
-import { AAI_ROOT, importTempModule } from "@aai/cli/bundler";
+import { step } from "./_output.ts";
+import { AAI_ROOT, importTempModule } from "./_bundler.ts";
 import {
   type AgentConfig,
   type AgentDef,

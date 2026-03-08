@@ -5,14 +5,14 @@ import {
   createSession,
   type SessionOptions,
   type SessionTransport,
-} from "@aai/server/session";
+} from "./session.ts";
 import type { AgentConfig, ToolSchema } from "@aai/sdk/types";
-import { createMockLLMResponse } from "@aai/server/testing";
-import type { SttEvents } from "@aai/server/stt";
-import type { ChatMessage, LLMResponse } from "@aai/server/types";
-import { DEFAULT_STT_CONFIG, DEFAULT_TTS_CONFIG } from "@aai/server/types";
-import type { CallLLMOptions } from "@aai/server/llm";
-import type { PlatformConfig } from "@aai/server/config";
+import { createMockLLMResponse } from "./_test_utils.ts";
+import type { SttEvents } from "./stt.ts";
+import type { ChatMessage, LLMResponse } from "./types.ts";
+import { DEFAULT_STT_CONFIG, DEFAULT_TTS_CONFIG } from "./types.ts";
+import type { CallLLMOptions } from "./llm.ts";
+import type { PlatformConfig } from "./config.ts";
 
 function createMockTransport(): SessionTransport & {
   sent: (string | ArrayBuffer | Uint8Array)[];

@@ -1,8 +1,8 @@
 import { expect } from "@std/expect";
 import { render } from "preact";
-import { installMockWebSocket, setupDOM } from "@aai/ui/test-utils";
-import { mount } from "@aai/ui/mount";
-import { defaultTheme } from "@aai/ui/theme";
+import { installMockWebSocket, setupDOM } from "./_test_utils.ts";
+import { mount } from "./mount.tsx";
+import { defaultTheme } from "./theme.ts";
 
 function withMountEnv(
   fn: (mock: ReturnType<typeof installMockWebSocket>) => void | Promise<void>,

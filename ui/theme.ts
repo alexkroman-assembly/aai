@@ -1,4 +1,4 @@
-import type { AgentState } from "@aai/ui/types";
+import type { AgentState } from "./types.ts";
 
 export type Theme = {
   bg: string;

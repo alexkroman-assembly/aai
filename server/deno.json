@@ -1,6 +1,6 @@
 {
   "name": "@aai/server",
-  "version": "0.1.5",
+  "version": "0.1.7",
   "exports": {
     ".": "./main.ts",
     "./types": "./types.ts",
@@ -9,30 +9,7 @@
   "imports": {
     "@aai/sdk": "workspace:@aai/sdk",
     "@aai/core": "workspace:@aai/core",
-    "@aws-sdk/client-s3": "npm:@aws-sdk/client-s3@^3.1001.0",
-    "@aai/server/types": "./types.ts",
-    "@aai/server/testing": "./_test_utils.ts",
-    "@aai/server/orchestrator": "./orchestrator.ts",
-    "@aai/server/html": "./html.ts",
-    "@aai/server/install": "./install.ts",
-    "@aai/server/deploy": "./deploy.ts",
-    "@aai/server/transport-websocket": "./transport_websocket.ts",
-    "@aai/server/transport-twilio": "./transport_twilio.ts",
-    "@aai/server/worker-pool": "./worker_pool.ts",
-    "@aai/server/bundle-store-tigris": "./bundle_store_tigris.ts",
-    "@aai/server/session": "./session.ts",
-    "@aai/server/dev-session": "./dev_session.ts",
-    "@aai/server/stt": "./stt.ts",
-    "@aai/server/deno-ws": "./_deno_ws.ts",
-    "@aai/server/llm": "./llm.ts",
-    "@aai/server/tts": "./tts.ts",
-    "@aai/server/builtin-tools": "./builtin_tools.ts",
-    "@aai/server/turn-handler": "./turn_handler.ts",
-    "@aai/server/config": "./config.ts",
-    "@aai/server/ws-handler": "./ws_handler.ts",
-    "@aai/server/system-prompt": "./system_prompt.ts",
-    "@aai/server/mulaw": "./mulaw.ts",
-    "@aai/server/mock-ws": "./_mock_ws.ts"
+    "@aws-sdk/client-s3": "npm:@aws-sdk/client-s3@^3.1001.0"
   },
   "lint": {}
 }

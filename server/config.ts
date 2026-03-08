@@ -4,7 +4,7 @@ import {
   DEFAULT_TTS_CONFIG,
   type STTConfig,
   type TTSConfig,
-} from "@aai/server/types";
+} from "./types.ts";
 import { EnvSchema } from "@aai/sdk/schema";
 
 export type PlatformConfig = {

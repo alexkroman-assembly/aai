@@ -5,7 +5,7 @@ import {
   type RpcRequest,
   RpcRequestSchema,
   RpcResponseSchema,
-} from "@aai/core/rpc-schema";
+} from "./_rpc_schema.ts";
 
 export type MessageTarget = {
   onmessage: ((e: MessageEvent) => void) | null;

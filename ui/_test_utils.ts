@@ -1,8 +1,8 @@
-import { installDomShim } from "@aai/ui/dom-shim";
+import { installDomShim } from "./_dom_shim.ts";
 import { DOMParser } from "@b-fuze/deno-dom";
 import { signal } from "@preact/signals";
-import type { SessionSignals } from "@aai/ui/signals";
-import type { AgentState, Message, SessionError } from "@aai/ui/types";
+import type { SessionSignals } from "./signals.tsx";
+import type { AgentState, Message, SessionError } from "./types.ts";
 
 const HTML =
   `<!DOCTYPE html><html><head></head><body><div id="app"></div></body></html>`;

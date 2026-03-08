@@ -7,7 +7,7 @@
     "new": "deno run --allow-net --allow-env --allow-read --allow-write --allow-run cli/cli.ts new",
     "serve": "deno run --allow-net --allow-env --allow-read --allow-write --unstable-worker-options server/main.ts",
     "test": "deno test --allow-net --allow-read --allow-write --allow-env --allow-run --unstable-worker-options",
-    "check": "deno check server/**/*.ts ui/**/*.ts ui/**/*.tsx cli/**/*.ts sdk/**/*.ts core/**/*.ts $(find templates -name '*.ts' ! -path 'templates/npm-tools/*') && deno lint && deno fmt --check && deno run -A npm:markdownlint-cli CLAUDE.md README.md cli/claude.md && deno task check:boundaries && deno test --quiet --allow-net --allow-read --allow-write --allow-env --allow-run --unstable-worker-options && deno task test:templates",
+    "check": "deno check server/**/*.ts ui/**/*.ts ui/**/*.tsx cli/**/*.ts sdk/**/*.ts core/**/*.ts $(find templates -name '*.ts' ! -path 'templates/npm-tools/*') && deno lint && deno fmt --check && deno run -A npm:markdownlint-cli CLAUDE.md README.md cli/claude.md && deno task check:boundaries && deno task publish && deno test --quiet --allow-net --allow-read --allow-write --allow-env --allow-run --unstable-worker-options && deno task test:templates",
     "check:boundaries": "deno run --allow-read scripts/check_boundaries.ts",
     "bump": "deno run --allow-read --allow-write --allow-run scripts/bump_versions.ts",
     "test:templates": "deno run --allow-all --unstable-worker-options cli/test_templates.ts",

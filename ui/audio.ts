@@ -1,5 +1,5 @@
-import { MIC_BUFFER_SECONDS } from "@aai/ui/types";
-import { resample } from "@aai/ui/resample";
+import { MIC_BUFFER_SECONDS } from "./types.ts";
+import { resample } from "./resample.ts";
 
 export type VoiceIOOptions = {
   sttSampleRate: number;

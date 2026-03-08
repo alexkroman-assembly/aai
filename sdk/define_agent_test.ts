@@ -1,7 +1,7 @@
 import { expect } from "@std/expect";
 import { z } from "zod";
-import { defineAgent } from "@aai/sdk/define-agent";
-import { DEFAULT_GREETING, DEFAULT_INSTRUCTIONS } from "@aai/sdk/types";
+import { defineAgent } from "./define_agent.ts";
+import { DEFAULT_GREETING, DEFAULT_INSTRUCTIONS } from "./types.ts";
 
 Deno.test("defineAgent", async (t) => {
   await t.step("returns frozen object", () => {

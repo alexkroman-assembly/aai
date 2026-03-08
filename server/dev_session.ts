@@ -2,10 +2,10 @@ import { type DevRegister, DevRegisterSchema } from "@aai/core/protocol";
 import { createWebSocketTarget } from "@aai/core/rpc";
 import { createWorkerApi } from "@aai/core/worker-entry";
 import type { AgentConfig, ToolSchema } from "@aai/sdk/types";
-import { getBuiltinToolSchemas } from "@aai/server/builtin-tools";
-import type { AgentSlot } from "@aai/server/worker-pool";
-import type { ServerContext } from "@aai/server/types";
-import { hashApiKey } from "@aai/server/deploy";
+import { getBuiltinToolSchemas } from "./builtin_tools.ts";
+import type { AgentSlot } from "./worker_pool.ts";
+import type { ServerContext } from "./types.ts";
+import { hashApiKey } from "./deploy.ts";
 
 export function handleDevWebSocket(
   req: Request,

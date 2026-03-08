@@ -1,5 +1,5 @@
 import { expect } from "@std/expect";
-import { htmlToMarkdown, renderAgentPage } from "@aai/server/html";
+import { htmlToMarkdown, renderAgentPage } from "./html.ts";
 
 const HTML_TO_MD_CASES: [string, string, string][] = [
   [

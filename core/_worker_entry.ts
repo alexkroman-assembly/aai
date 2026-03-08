@@ -10,7 +10,7 @@ import {
   type MessageTarget,
   type RpcHandlers,
   serveRpc,
-} from "@aai/core/rpc";
+} from "./_rpc.ts";
 
 export const TOOL_HANDLER_TIMEOUT = 30_000;
 

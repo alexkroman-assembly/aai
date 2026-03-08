@@ -1,8 +1,8 @@
 import { expect } from "@std/expect";
-import { createTtsClient } from "@aai/server/tts";
-import { DEFAULT_TTS_CONFIG } from "@aai/server/types";
-import { installMockWebSocket } from "@aai/server/mock-ws";
-import { flush } from "@aai/server/testing";
+import { createTtsClient } from "./tts.ts";
+import { DEFAULT_TTS_CONFIG } from "./types.ts";
+import { installMockWebSocket } from "./_mock_ws.ts";
+import { flush } from "./_test_utils.ts";
 
 const config = { ...DEFAULT_TTS_CONFIG, apiKey: "test-tts-key" };
 
