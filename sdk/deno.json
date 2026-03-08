@@ -1,9 +1,10 @@
 {
   "name": "@aai/sdk",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "exports": {
     ".": "./mod.ts",
     "./types": "./types.ts",
+    "./schema": "./_schema.ts",
     "./define-agent": "./define_agent.ts",
     "./fetch-json": "./fetch_json.ts"
   },
