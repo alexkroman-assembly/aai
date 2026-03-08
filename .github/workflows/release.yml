@@ -116,7 +116,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: gh release delete latest --yes --cleanup-tag || true
 
-      - name: Create GitHub Release
+      - name: Create versioned release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.check-version.outputs.version }}
@@ -126,3 +126,15 @@ jobs:
           files: |
             artifacts/*.tar.gz
             artifacts/checksums.txt
+            artifacts/VERSION
+
+      - name: Create latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create latest \
+            --title "Latest" \
+            --notes "Latest release (v${{ needs.check-version.outputs.version }})" \
+            --target "${{ github.sha }}" \
+            artifacts/*.tar.gz artifacts/checksums.txt artifacts/VERSION
