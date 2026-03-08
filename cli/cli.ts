@@ -18,6 +18,7 @@ Voice agent development kit
 
 ${bold("COMMANDS:")}
   ${cyan("aai new")}            Scaffold a new agent project
+  ${cyan("aai build")}          Validate and bundle the agent
   ${cyan("aai dev")}            Run local dev server with file watching
   ${cyan("aai deploy")}         Bundle and deploy to production
 
@@ -60,6 +61,10 @@ export async function main(args: string[]): Promise<number> {
     case "new": {
       const { runNewCommand } = await import("./cmd_new.ts");
       return await runNewCommand(subArgs);
+    }
+    case "build": {
+      const { runBuildCommand } = await import("./cmd_build.ts");
+      return await runBuildCommand(subArgs);
     }
     case "dev": {
       const { runDevCommand } = await import("./cmd_dev.ts");
