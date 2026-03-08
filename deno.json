@@ -9,6 +9,7 @@
     "test": "deno test --allow-net --allow-read --allow-write --allow-env --allow-run --unstable-worker-options",
     "check": "deno check server/**/*.ts ui/**/*.ts ui/**/*.tsx cli/**/*.ts sdk/**/*.ts core/**/*.ts $(find templates -name '*.ts' ! -path 'templates/npm-tools/*') && deno lint && deno fmt --check && deno run -A npm:markdownlint-cli CLAUDE.md README.md cli/claude.md && deno task check:boundaries && deno test --quiet --allow-net --allow-read --allow-write --allow-env --allow-run --unstable-worker-options && deno task test:templates",
     "check:boundaries": "deno run --allow-read scripts/check_boundaries.ts",
+    "bump": "deno run --allow-read --allow-write --allow-run scripts/bump_versions.ts",
     "test:templates": "deno run --allow-all --unstable-worker-options cli/test_templates.ts",
     "install-dev": "echo '#!/bin/sh\nINIT_CWD=\"$(pwd)\" exec deno run --allow-all --unstable-worker-options '\"$(pwd)/cli/cli.ts\"' \"$@\"' > \"$HOME/.deno/bin/aai\" && chmod +x \"$HOME/.deno/bin/aai\" && echo 'Installed aai to ~/.deno/bin/aai'",
     "publish": "cd sdk && deno publish --allow-dirty --dry-run && cd ../ui && deno publish --allow-dirty --dry-run && echo 'Dry run OK. Run deno task publish:live to publish.'",

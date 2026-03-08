@@ -101,6 +101,9 @@ jobs:
           path: artifacts
           merge-multiple: true
 
+      - name: Create VERSION file
+        run: echo "${{ needs.check-version.outputs.version }}" > artifacts/VERSION
+
       - name: Generate checksums
         run: |
           cd artifacts
