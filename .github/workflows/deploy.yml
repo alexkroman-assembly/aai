@@ -6,7 +6,29 @@ on:
     branches: [main]
 
 jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.check.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check if server version changed
+        id: check
+        run: |
+          OLD=$(git show HEAD~1:server/deno.json 2>/dev/null | jq -r .version || echo "")
+          NEW=$(jq -r .version server/deno.json)
+          if [ "$OLD" != "$NEW" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
   deploy:
+    needs: [check-version]
+    if: needs.check-version.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
