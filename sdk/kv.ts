@@ -5,6 +5,62 @@ export type KvClient = {
   keys(pattern?: string): Promise<string[]>;
 };
 
+const MAX_VALUE_SIZE = 65_536;
+
+function createMemoryKvClient(): KvClient {
+  const store = new Map<string, { value: string; expiresAt?: number }>();
+
+  function isExpired(entry: { expiresAt?: number }): boolean {
+    return entry.expiresAt !== undefined && entry.expiresAt <= Date.now();
+  }
+
+  return {
+    get(key) {
+      const entry = store.get(key);
+      if (!entry || isExpired(entry)) {
+        if (entry) store.delete(key);
+        return Promise.resolve(null);
+      }
+      return Promise.resolve(entry.value);
+    },
+
+    set(key, value, ttl) {
+      if (value.length > MAX_VALUE_SIZE) {
+        throw new Error(`Value exceeds max size of ${MAX_VALUE_SIZE} bytes`);
+      }
+      store.set(key, {
+        value,
+        expiresAt: ttl && ttl > 0 ? Date.now() + ttl * 1000 : undefined,
+      });
+      return Promise.resolve();
+    },
+
+    del(key) {
+      store.delete(key);
+      return Promise.resolve();
+    },
+
+    keys(pattern) {
+      const now = Date.now();
+      const results: string[] = [];
+      for (const [key, entry] of store) {
+        if (entry.expiresAt && entry.expiresAt <= now) {
+          store.delete(key);
+          continue;
+        }
+        results.push(key);
+      }
+      if (pattern) {
+        const regex = new RegExp(
+          "^" + pattern.replace(/\*/g, ".*").replace(/\?/g, ".") + "$",
+        );
+        return Promise.resolve(results.filter((k) => regex.test(k)));
+      }
+      return Promise.resolve(results);
+    },
+  };
+}
+
 export function createKv(
   ctx: { env: Record<string, string> },
 ): KvClient {
@@ -12,10 +68,7 @@ export function createKv(
   const kvToken = ctx.env.AAI_SCOPE_TOKEN;
 
   if (!kvUrl || !kvToken) {
-    throw new Error(
-      "KV storage not available. " +
-        "Make sure you are using a server that supports KV storage.",
-    );
+    return createMemoryKvClient();
   }
 
   async function kvFetch(body: Record<string, unknown>): Promise<unknown> {
