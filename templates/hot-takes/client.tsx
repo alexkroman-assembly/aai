@@ -219,13 +219,6 @@ export default function App() {
   const session = useSession();
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Auto-start session on mount
-  useEffect(() => {
-    if (!session.started.value) {
-      session.start();
-    }
-  }, []);
-
   // Auto-scroll on new messages
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -282,7 +275,8 @@ export default function App() {
         >
           <MicBtn
             active={running}
-            onClick={() => session.toggle()}
+            onClick={() =>
+              session.started.value ? session.toggle() : session.start()}
           >
             {running ? "\uD83C\uDFA4" : "\u25B6"}
           </MicBtn>

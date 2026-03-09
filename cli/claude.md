@@ -1,147 +1,108 @@
-# Create or update an aai voice agent
+# Build a voice agent with `aai`
 
-You are building a voice agent using the **aai** framework. Generate or update
-files based on the user's description in `$ARGUMENTS`.
+You are helping a user build a voice agent using the **aai** framework. Generate
+or update files based on the user's description in `$ARGUMENTS`.
 
-## Agent structure
+## Quick start
 
-Every agent imports from `@aai/sdk` and exports a default `defineAgent()` call:
+Every agent lives in `agent.ts` and exports a default `defineAgent()` call:
 
 ```ts
 import { defineAgent } from "@aai/sdk";
 
 export default defineAgent({
-  name: "Agent Name",
-  instructions: "...",
-  greeting: "...",
-  voice: "luna", // see Voice type below
-  builtinTools: [], // see BuiltinTool type below
-  tools: {}, // custom tools defined inline
+  name: "My Agent",
+  instructions: "You are a helpful assistant that...",
+  greeting: "Hey there. What can I help you with?",
+  voice: "luna",
 });
 ```
 
-For tools with parameters, also import `z`:
+Run it: `aai dev`
+
+## Imports
+
+Import what you need from `@aai/sdk`:
 
 ```ts
+// Always needed
+import { defineAgent } from "@aai/sdk";
+
+// For tools with parameters
 import { defineAgent, z } from "@aai/sdk";
-```
 
-For tools that call external APIs, import `fetchJSON`:
+// For type-safe tools (recommended)
+import { defineAgent, tool, z } from "@aai/sdk";
 
-```ts
+// For external API calls
 import { defineAgent, fetchJSON, z } from "@aai/sdk";
+
+// For persistent memory helpers
+import { defineAgent, kvTools } from "@aai/sdk";
+
+// For multi-action tools
+import { defineAgent, multiTool, z } from "@aai/sdk";
+
+// Type imports (when you need explicit type annotations)
+import type { HookContext, ToolContext } from "@aai/sdk";
 ```
 
-## TypeScript types
+---
+
+## `defineAgent()` options
 
 ```ts
-type BuiltinTool =
-  | "web_search" // Search the web via Brave Search API
-  | "visit_webpage" // Fetch & convert a webpage to markdown
-  | "fetch_json" // HTTP GET a JSON REST API
-  | "run_code" // Execute JavaScript in a sandboxed Deno worker
-  | "user_input" // Ask the user a follow-up question (always auto-included)
-  | "final_answer"; // Deliver spoken response (always auto-included)
-
-### Built-in tool reference
-
-**web_search** — Search the web via Brave Search API.
-- Parameters: `query` (string), `max_results` (number, optional, default 5)
-- Returns: array of `{ title, url, description }`
-
-**visit_webpage** — Fetch a URL and return its content as Markdown.
-- Parameters: `url` (string)
-- Returns: `{ url, content }` (Markdown text, max ~10K chars)
-
-**fetch_json** — HTTP GET a JSON API endpoint.
-- Parameters: `url` (string), `headers` (object, optional)
-- Returns: parsed JSON response
-
-**run_code** — Execute JavaScript in a sandboxed Deno worker (no network, no filesystem).
-- Parameters: `code` (string)
-- Returns: captured `console.log()` output as a string
-- 30-second timeout; all output must use `console.log()`
-
-**user_input** — Ask the user a follow-up question and wait for their spoken
-response. Always available (auto-included). Ends the current turn.
-- Parameters: `question` (string)
-
-**final_answer** — Deliver the agent's spoken response via TTS. Always available
-(auto-included). Ends the current turn. The framework forces this tool after 4
-tool iterations.
-- Parameters: `answer` (string)
-
-type Voice =
-  | "luna"
-  | "andromeda"
-  | "celeste"
-  | "orion"
-  | "sirius"
-  | "lyra"
-  | "estelle"
-  | "esther"
-  | "kima"
-  | "bond"
-  | "thalassa"
-  | "vespera"
-  | "moss"
-  | "fern"
-  | "astra"
-  | "tauro"
-  | "walnut"
-  | "arcana"
-  | (string & Record<never, never>); // any Rime speaker ID — https://docs.rime.ai/api-reference/voices
-
-interface ToolDef {
-  description: string; // LLM reads this to decide when to call the tool
-  parameters?: z.ZodObject<z.ZodRawShape>; // Zod schema
-  // ^^ omit for no-arg tools
-  execute: (
-    args: Record<string, unknown>,
-    ctx: ToolContext,
-  ) => Promise<unknown> | unknown;
-}
-
-interface ToolContext {
-  sessionId: string; // unique per-connection session ID
-  env: Record<string, string>; // env vars from .env
-  signal?: AbortSignal;
-  state: unknown; // per-session state (see "Per-session state" section)
-  kv: Kv; // persistent KV store (see "Persistent storage" section)
-}
-
-interface HookContext {
-  sessionId: string;
-  env: Record<string, string>; // env vars from .env — same as ToolContext.env
-  state: unknown; // per-session state
-  kv: Kv; // persistent KV store
-}
-
-interface AgentOptions {
-  name: string; // Required: display name
-  env?: string[]; // Env var names to load (default: ["ASSEMBLYAI_API_KEY"])
-  transport?: Transport | Transport[]; // "websocket" | "twilio" (default: ["websocket"])
-  instructions?: string; // System prompt (voice-first default provided)
-  greeting?: string; // Spoken on connect
-  voice?: Voice; // Rime TTS voice (default: "luna")
-  prompt?: string; // TTS voice guidance (pacing, tone, emotion)
-  builtinTools?: BuiltinTool[]; // Subset of built-in tools to enable
-  tools?: Record<string, ToolDef>; // Custom tools keyed by name
-  state?: () => S; // Factory for per-session state (auto-managed)
+defineAgent({
+  name: string;              // Required: display name
+  instructions?: string;     // System prompt (sensible voice-first default provided)
+  greeting?: string;         // Spoken on connect
+  voice?: Voice;             // Rime TTS voice (default: "luna")
+  prompt?: string;           // TTS voice guidance — controls pacing, tone, emotion
+  transport?: Transport[];   // "websocket" | "twilio" (default: ["websocket"])
+  env?: string[];            // Env var names to load (default: ["ASSEMBLYAI_API_KEY"])
+  builtinTools?: BuiltinTool[];
+  tools?: Record<string, ToolDef>;
+  state?: () => S;           // Factory for per-session state
   onConnect?: (ctx: HookContext) => void | Promise<void>;
   onDisconnect?: (ctx: HookContext) => void | Promise<void>;
-  // ctx is undefined if error occurs outside a session
   onError?: (error: Error, ctx?: HookContext) => void;
   onTurn?: (text: string, ctx: HookContext) => void | Promise<void>;
-}
-
-type Transport = "websocket" | "twilio";
+});
 ```
+
+---
 
 ## Custom tools
 
-Tool parameters are defined using Zod schemas. Import `z` from `"@aai/sdk"` and
-use `z.object({...})` to define the parameter schema:
+### Using the `tool()` helper (recommended)
+
+The `tool()` helper infers argument types from your Zod schema, so you don't
+need manual `args as {...}` casts:
+
+```ts
+import { defineAgent, tool, z } from "@aai/sdk";
+
+export default defineAgent({
+  name: "Weather Agent",
+  tools: {
+    get_weather: tool({
+      description: "Get current weather for a city",
+      parameters: z.object({
+        city: z.string().describe("City name"),
+      }),
+      execute: async (args, ctx) => {
+        // args.city is typed as string — no cast needed
+        const data = await fetch(
+          `https://api.example.com/weather?q=${args.city}`,
+        );
+        return data.json();
+      },
+    }),
+  },
+});
+```
+
+### Inline definition (without `tool()`)
 
 ```ts
 tools: {
@@ -158,20 +119,12 @@ tools: {
 },
 ```
 
-**Important:** The `execute` function receives `args: Record<string, unknown>`.
-Use `args as { ... }` to destructure with type safety.
+With this approach, `args` is `Record<string, unknown>` — use `args as { ... }`
+to destructure with type safety.
 
-For enums, numbers, or optional params:
+### No-parameter tools
 
-```ts
-parameters: z.object({
-  category: z.enum(["a", "b", "c"]),
-  count: z.number().describe("How many"),
-  label: z.string().describe("Optional label").optional(),
-}),
-```
-
-For a tool with no parameters, just omit `parameters`:
+Omit `parameters` entirely:
 
 ```ts
 tools: {
@@ -182,10 +135,21 @@ tools: {
 },
 ```
 
-### multiTool helper
+### Zod schema patterns
 
-For multi-action tools (one tool with many operations), use `multiTool()`. This
-replaces the manual switch-case pattern:
+```ts
+parameters: z.object({
+  query: z.string().describe("Search query"),
+  category: z.enum(["a", "b", "c"]),
+  count: z.number().describe("How many"),
+  label: z.string().describe("Optional label").optional(),
+}),
+```
+
+### `multiTool()` — one tool, many actions
+
+Replaces manual switch-case patterns. Automatically generates a `z.enum` for the
+`action` parameter and merges all action schemas:
 
 ```ts
 import { defineAgent, multiTool, z } from "@aai/sdk";
@@ -227,143 +191,181 @@ export default defineAgent({
 });
 ```
 
-`multiTool()` automatically generates a `z.enum` for the `action` parameter and
-merges all action schemas. See `infocom-adventure` for a full example.
+---
 
-### fetchJSON with fallback
+## Tool context
 
-`fetchJSON` supports a `fallback` option that returns a default value instead of
-throwing on HTTP or network errors:
+Every `execute` function and lifecycle hook receives a context object:
 
 ```ts
-const data = await fetchJSON<MyType>(url, {
-  fallback: { error: "API unavailable" },
-});
+// Tools get ToolContext
+ctx.sessionId; // string — unique per connection
+ctx.env; // Record<string, string> — env vars from .env
+ctx.signal; // AbortSignal — cancelled on interruption (tools only)
+ctx.state; // per-session state (see "Per-session state")
+ctx.kv; // persistent KV store (see "Persistent storage")
+
+// Hooks get HookContext (same minus signal)
 ```
 
-For tools that call external APIs, use `fetchJSON`. It supports a generic type
-parameter for type-safe responses:
+---
 
-```ts
-interface SearchResult { items: { title: string; url: string }[] }
+## Built-in tools
 
-execute: async (args) => {
-  const { query } = args as { query: string };
-  const url = "https://api.example.com/data?q=" +
-    encodeURIComponent(query);
-  const data = await fetchJSON<SearchResult>(url);
-  return data.items;
-},
-```
+Enable built-in tools via the `builtinTools` array. `user_input` and
+`final_answer` are always auto-included.
+
+- **`web_search`** — Search the web (Brave Search). Params: `query`,
+  `max_results?` (default 5)
+- **`visit_webpage`** — Fetch URL → Markdown. Params: `url`
+- **`fetch_json`** — HTTP GET a JSON API. Params: `url`, `headers?`
+- **`run_code`** — Execute JS in a sandbox (no net/fs, 30s timeout). Params:
+  `code`
+- **`user_input`** — Ask user a follow-up question (auto-included). Params:
+  `question`
+- **`final_answer`** — Deliver spoken response via TTS (auto-included). Params:
+  `answer`
+
+The framework forces `final_answer` after 4 tool iterations.
+
+---
 
 ## Environment variables
 
-Variables listed in the `env` array in `defineAgent()` are loaded from `.env`
-(or the process environment) and passed as `ctx.env` — a
-`Record<string, string>` — in both tool `execute` functions and lifecycle hooks.
-They are **not** available via `Deno.env` inside agent code. The default is
-`["ASSEMBLYAI_API_KEY"]`.
+Variables in the `env` array are loaded from `.env` and passed as `ctx.env`.
+They are **not** available via `Deno.env` inside agent code.
 
 ```ts
-// .env: MY_API_KEY=sk-abc123
-
 export default defineAgent({
   name: "My Agent",
   env: ["ASSEMBLYAI_API_KEY", "MY_API_KEY"],
   tools: {
-    call_api: {
+    call_api: tool({
       description: "Call an external API",
-      parameters: z.object({
-        query: z.string().describe("search query"),
-      }),
+      parameters: z.object({ query: z.string() }),
       execute: async (args, ctx) => {
-        const { query } = args as { query: string };
-        const key = ctx.env.MY_API_KEY;
-        const res = await fetch(`https://api.example.com?q=${query}`, {
-          headers: { Authorization: `Bearer ${key}` },
+        const res = await fetch(`https://api.example.com?q=${args.query}`, {
+          headers: { Authorization: `Bearer ${ctx.env.MY_API_KEY}` },
         });
         return res.json();
       },
-    },
-  },
-  onConnect: (ctx) => {
-    console.log("Connected:", ctx.sessionId, ctx.env.MY_API_KEY);
+    }),
   },
 });
 ```
+
+After creating `agent.ts`, add a **`.env`** file for agent-specific keys.
+`ASSEMBLYAI_API_KEY` is saved in the global aai config — no need to add it to
+`.env`.
+
+```sh
+MY_API_KEY=<user needs to add>
+```
+
+---
+
+## `fetchJSON` — typed API calls
+
+Supports generics for type-safe responses and a `fallback` option for graceful
+error handling:
+
+```ts
+import { defineAgent, fetchJSON } from "@aai/sdk";
+
+interface SearchResult {
+  items: { title: string; url: string }[];
+}
+
+// Basic usage
+const data = await fetchJSON<SearchResult>(url);
+
+// With fallback on error
+const data = await fetchJSON<SearchResult>(url, {
+  fallback: { items: [] },
+});
+
+// With custom headers
+const data = await fetchJSON<SearchResult>(url, {
+  headers: { Authorization: `Bearer ${ctx.env.API_KEY}` },
+});
+```
+
+---
+
+## Per-session state
+
+For data that lasts only for a single connection (games, workflows, multi-step
+processes). The framework creates fresh state per session and cleans up on
+disconnect:
+
+```ts
+export default defineAgent({
+  name: "Quiz Agent",
+  state: () => ({ score: 0, question: 0 }),
+  tools: {
+    answer: tool({
+      description: "Submit an answer",
+      parameters: z.object({ answer: z.string() }),
+      execute: (args, ctx) => {
+        const state = ctx.state as { score: number; question: number };
+        state.question++;
+        // check answer...
+        return state;
+      },
+    }),
+  },
+});
+```
+
+Access via `ctx.state` in both tools and hooks.
+
+---
 
 ## Persistent storage (KV)
 
 Every tool and hook receives `ctx.kv` — a persistent key-value store scoped per
-agent and per API key. No imports needed. Values are automatically JSON
-serialized/deserialized — store objects, get objects back.
+agent. Values are automatically JSON serialized/deserialized.
 
-**KV API (`ctx.kv`):**
+**API:**
 
-- `kv.get<T>(key)` — returns `T | null`, auto-deserializes JSON
-- `kv.set(key, value, options?)` — store any JS value, optional
-  `{ expireIn: ms }`
-- `kv.delete(key)` — remove a key
-- `kv.list<T>(prefix, options?)` — returns `{ key, value }[]` entries matching
-  prefix, with optional `{ limit, reverse }`
+- `kv.get<T>(key)` → `T | null`
+- `kv.set(key, value, options?)` — optional `{ expireIn: ms }`
+- `kv.delete(key)`
+- `kv.list<T>(prefix, options?)` → `{ key, value }[]` — optional
+  `{ limit, reverse }`
 
-Values are auto-serialized (max 64 KB). Keys are strings using colon-separated
-prefixes by convention (e.g. `"user:123"`, `"take:1710000000"`).
-
-### Using ctx.kv directly
+Keys are strings; use colon-separated prefixes by convention (`"user:123"`). Max
+value size: 64 KB.
 
 ```ts
-import { defineAgent, z } from "@aai/sdk";
-import type { ToolContext } from "@aai/sdk";
+// Save
+await ctx.kv.set(`note:${Date.now()}`, { text: "hello" });
 
-export default defineAgent({
-  name: "Hot Takes",
-  tools: {
-    save_take: {
-      description: "Save a hot take",
-      parameters: z.object({
-        take: z.string().describe("The hot take text"),
-      }),
-      execute: async (args: Record<string, unknown>, ctx: ToolContext) => {
-        const { take } = args as { take: string };
-        await ctx.kv.set(`take:${Date.now()}`, {
-          text: take,
-          timestamp: new Date().toISOString(),
-        });
-        return { saved: true };
-      },
-    },
-    get_recent: {
-      description: "Get recent takes",
-      execute: async (_args: Record<string, unknown>, ctx: ToolContext) => {
-        const takes = await ctx.kv.list("take:", { limit: 20, reverse: true });
-        return takes.map((e) => e.value);
-      },
-    },
-  },
-});
+// Read
+const note = await ctx.kv.get<{ text: string }>("note:123");
+
+// List
+const notes = await ctx.kv.list("note:", { limit: 10, reverse: true });
+
+// Delete
+await ctx.kv.delete("note:123");
 ```
 
-See the `hot-takes` template for a full example with custom UI.
+### `kvTools()` — drop-in persistent memory
 
-### kvTools helper
-
-The fastest way to add generic persistent memory. Spreads four pre-built tools
-into your agent: `save_memory`, `recall_memory`, `list_memories`,
-`forget_memory`.
+Spreads four pre-built tools into your agent: `save_memory`, `recall_memory`,
+`list_memories`, `forget_memory`:
 
 ```ts
 import { defineAgent, kvTools } from "@aai/sdk";
 
 export default defineAgent({
   name: "Memory Agent",
-  tools: {
-    ...kvTools(),
-  },
+  tools: { ...kvTools() },
 });
 ```
 
-To customize tool names or descriptions:
+Customize names/descriptions:
 
 ```ts
 tools: {
@@ -374,191 +376,69 @@ tools: {
 },
 ```
 
-See the `memory-agent` template for a full example.
+---
 
-## Per-session state
-
-For data that only needs to last for a single connection (games, workflows,
-multi-step processes), use the `state` option in `defineAgent()`. The framework
-automatically creates a fresh state for each session and cleans it up on
-disconnect:
+## Voices
 
 ```ts
-export default defineAgent({
-  name: "Stateful Agent",
-  state: () => ({ score: 0, items: [] as string[] }),
-  tools: {
-    update: {
-      description: "Update session state",
-      parameters: z.object({ item: z.string() }),
-      execute: (args, ctx) => {
-        const { item } = args as { item: string };
-        const state = ctx.state as { score: number; items: string[] };
-        state.items.push(item);
-        return state;
-      },
-    },
-  },
-});
+type Voice =
+  | "luna"
+  | "andromeda"
+  | "celeste"
+  | "orion"
+  | "sirius"
+  | "lyra"
+  | "estelle"
+  | "esther"
+  | "kima"
+  | "bond"
+  | "thalassa"
+  | "vespera"
+  | "moss"
+  | "fern"
+  | "astra"
+  | "tauro"
+  | "walnut"
+  | "arcana"
+  | string; // any Rime speaker ID — https://docs.rime.ai/api-reference/voices
 ```
 
-The `state` factory runs once per session. Access it via `ctx.state` in tools
-and hooks. No `onConnect`/`onDisconnect` needed for state management — the
-framework handles creation and cleanup automatically.
+### TTS voice guidance (`prompt`)
 
-See the `infocom-adventure` template for a full example with inventory, room
-tracking, score, and game flags. See `dispatch-center` for a complex example
-with incident management and triage scoring.
-
-## TTS voice guidance (prompt)
-
-The `prompt` field controls how the TTS voice speaks — pacing, tone, and
-emotion. It does not affect what the LLM says, only how it sounds:
+Controls how the voice speaks — pacing, tone, emotion. Does not affect what the
+LLM says:
 
 ```ts
 export default defineAgent({
-  name: "Narrator",
   voice: "orion",
   prompt: "Speak in a dramatic, atmospheric tone. Use pauses for suspense.",
 });
 ```
 
-## Voice-first instructions guidelines
+---
 
-Best practices for the `instructions` field (what the voice agent is told to
-do):
+## Writing good `instructions`
 
-- Optimize for spoken responses — short, punchy sentences
+The `instructions` field is the system prompt for your voice agent. Optimize for
+spoken conversation:
+
+- Short, punchy sentences — optimize for speech, not text
 - Never mention "search results" or "sources" — speak as if knowledge is your
   own
-- No visual formatting references (no "bullet point", "bold", etc.)
-- Use "First", "Next", "Finally" instead of numbered lists
-- Start with the most important information
-- Be concise and confident — no hedging phrases
-- Never use exclamation points
-- Tell the agent its personality, tone, and what it specializes in
-- Include specific instructions for how to use each tool and when
+- No visual formatting ("bullet point", "bold", etc.) — use "First", "Next",
+  "Finally"
+- Lead with the most important information
+- Be concise and confident — no hedging ("It seems that", "I believe")
+- No exclamation points — keep tone calm and conversational
+- Define the agent's personality, tone, and specialty
+- Include when and how to use each tool
 
-## Example agents by category
+---
 
-### Minimal agent
+## Custom UI (`client.tsx`)
 
-```ts
-export default defineAgent({
-  name: "Simple Assistant",
-});
-```
-
-### Research agent (web search + page reading)
-
-Use `web_search`, `visit_webpage`. Good for agents that answer questions using
-live web data.
-
-### Code/calculation agent (sandbox execution)
-
-Use `run_code`. Good for math, unit conversions, data processing. The `run_code`
-tool executes JavaScript — instruct the agent to always compute rather than
-guess.
-
-### API-powered agent (external data)
-
-Use `fetch_json` and/or custom tools with `fetch`. Good for weather, finance,
-health data, or any REST API. Include the API endpoint URLs and expected
-response shapes in the instructions.
-
-### Embedded knowledge agent (local data)
-
-Import a JSON file and expose it through custom tools:
-
-```ts
-import knowledge from "./knowledge.json" with { type: "json" };
-
-export default defineAgent({
-  name: "FAQ Bot",
-  tools: {
-    search_faq: {
-      description: "Search the knowledge base",
-      parameters: z.object({
-        query: z.string().describe("search term"),
-      }),
-      execute: (args) => {
-        const { query } = args as { query: string };
-        const results = knowledge.faqs.filter((f: { question: string }) =>
-          f.question.toLowerCase().includes(query.toLowerCase())
-        );
-        return results.length ? results : { message: "No matches found" };
-      },
-    },
-  },
-});
-```
-
-### Phone agent (Twilio integration)
-
-Same as any agent, but with a `transport` field in `defineAgent()`:
-
-```ts
-export default defineAgent({
-  name: "Phone Agent",
-  transport: ["websocket", "twilio"],
-  builtinTools: ["web_search", "visit_webpage"],
-});
-```
-
-### npm/jsr dependencies agent
-
-When an agent needs external packages, use npm to install them. Create a
-`.npmrc` file to enable JSR registry access:
-
-```ini
-@jsr:registry=https://npm.jsr.io
-```
-
-Then install packages with npm:
-
-```sh
-npm install lodash-es
-npm install @jsr/scope__package-name  # for JSR packages
-```
-
-Import them as bare specifiers in `agent.ts`:
-
-```ts
-import { capitalize } from "lodash-es";
-
-export default defineAgent({
-  name: "My Agent",
-  tools: {
-    format_name: {
-      description: "Capitalize a name",
-      parameters: z.object({
-        name: z.string().describe("Name to format"),
-      }),
-      execute: (args) => {
-        const { name } = args as { name: string };
-        return capitalize(name);
-      },
-    },
-  },
-});
-```
-
-The `aai` bundler automatically resolves packages from `node_modules`.
-
-### Custom UI agent
-
-Add a `client.tsx` file alongside `agent.ts`. Import from `@aai/ui` and
-`preact/hooks`, then export a default component — the framework auto-mounts it
-for you.
-
-**Templates with custom UI** (use `aai new -t <name>` to scaffold):
-
-- `night-owl` — dark ambient theme, demonstrates styled components
-- `dispatch-center` — complex dashboard with sidebar, severity indicators
-- `infocom-adventure` — retro CRT terminal with CSS animations and boot screen
-- `hot-takes` — KV-powered crowd-sourced opinions with dark gradient UI
-
-Minimal example:
+Add a `client.tsx` file alongside `agent.ts`. Export a default Preact component
+— the framework auto-mounts it:
 
 ```tsx
 import { useSession } from "@aai/ui";
@@ -578,112 +458,140 @@ export default function App() {
 }
 ```
 
-**Rules for `client.tsx`:**
+**Rules:**
 
-- Export a default function component — the framework auto-mounts it for you
-- Import `useSession`, `css`, `keyframes`, `styled`, and UI components from
-  `@aai/ui`
-- Import Preact hooks (`useEffect`, `useRef`, `useState`, etc.) from
-  `preact/hooks`
-- The component is auto-mounted to the page — do not call `mount()` yourself
+- Export a default function component — do not call `mount()` yourself
+- Import hooks from `preact/hooks` (`useEffect`, `useRef`, `useState`, etc.)
+- Import UI utilities from `@aai/ui`
 
-**Available styling imports from `@aai/ui` (powered by goober):**
+**Styling (powered by goober):**
 
-- `css` — tagged template for class names: ``const myClass = css`color: red`;``
-- `keyframes` — tagged template for animations:
-  ``const fade = keyframes`from { opacity: 0 } to { opacity: 1 }`;``
-- `styled` — styled-components API: `const Box = styled('div')`...``
+- `css` — tagged template for class names: `` css`color: red` ``
+- `keyframes` — tagged template for animations
+- `styled` — styled-components API: `` styled('div')`...` ``
 
-**Available built-in components from `@aai/ui`:**
+**Built-in components from `@aai/ui`:**
 
-- `ErrorBanner` — shows session errors: `<ErrorBanner error={session.error} />`
-- `StateIndicator` — shows current agent state as a colored dot
-- `Transcript` — shows live speech-to-text transcript
+- `ErrorBanner` — `<ErrorBanner error={session.error} />`
+- `StateIndicator` — colored dot showing agent state
+- `Transcript` — live speech-to-text transcript
 - `ChatView` — default chat message list
-- `MessageBubble` — individual message: `<MessageBubble msg={msg} />`
+- `MessageBubble` — individual message bubble
 - `ThinkingIndicator` — animated thinking state
 
-**Available session signals via `useSession()`:**
+**Session signals (`useSession()`):**
 
-- `session.state.value` — `AgentState`: "connecting" | "ready" | "listening" |
-  "thinking" | "speaking" | "error"
-- `session.messages.value` — `Message[]`: array of `{ role, text }` objects
-- `session.transcript.value` — `string`: live speech-to-text transcript
-- `session.error.value` — `SessionError | null`: `{ code, message }` if errored
-- `session.started.value` / `session.running.value` — `boolean` flags
-- `session.start()` — begin the session
-- `session.toggle()` — pause/resume
-- `session.reset()` — restart the session
-- `session.dispose()` — clean up
+- `session.state.value` (`AgentState`) — "connecting", "ready", "listening",
+  "thinking", "speaking", "error"
+- `session.messages.value` (`Message[]`) — `{ role, text }` objects
+- `session.transcript.value` (`string`) — Live speech-to-text
+- `session.error.value` (`SessionError | null`) — `{ code, message }`
+- `session.started.value` (`boolean`) — Whether session has started
+- `session.running.value` (`boolean`) — Whether session is active
 
-## Required files
+**Methods:** `session.start()`, `session.toggle()`, `session.reset()`,
+`session.dispose()`
 
-After creating `agent.ts`, also create a **`.env`** file if the agent uses
-custom API keys (e.g. for external APIs). The `ASSEMBLYAI_API_KEY` does not need
-to go in `.env` — it is saved in the global aai config on first run. Only add
-`.env` for agent-specific keys:
+**Templates with custom UI** (scaffold with `aai new -t <name>`): `night-owl`,
+`dispatch-center`, `infocom-adventure`, `hot-takes`
+
+---
+
+## Using npm/jsr packages
 
 ```sh
-MY_API_KEY=<user needs to add>
+npm install lodash-es
 ```
 
-## Troubleshooting
+For JSR packages, add a `.npmrc`:
 
-**"missing default export"** — Your `agent.ts` must use
-`export default defineAgent({...})`.
+```ini
+@jsr:registry=https://npm.jsr.io
+```
 
-**"missing env vars required by agent: X"** — Add the listed variables to your
-`.env` file, or remove them from the `env` array if not needed.
+Then `npm install @jsr/scope__package-name`.
 
-**"schema validation failed with sample args"** — A Zod schema in one of your
-tools has a constraint that rejects empty/zero values. Check `.min()`,
-`.regex()`, or `.refine()` validators.
+Import as bare specifiers — the bundler resolves from `node_modules`:
 
-**"bundle failed"** — Usually a TypeScript syntax error in `agent.ts`. Check for
-missing imports, unclosed brackets, or unsupported syntax.
+```ts
+import { capitalize } from "lodash-es";
+```
 
-**Tool test shows "✗"** — The tool's `execute` function threw an error when
-called with empty/sample args. If the tool requires real data (API calls, etc.),
-this may be expected — check that the schema is correct.
+---
 
-**Dev server shows error but still running** — The previous working version
-continues to serve. Fix the errors and save the file to trigger a rebuild.
+## Phone agents (Twilio)
+
+Add `transport: ["websocket", "twilio"]` to enable phone support:
+
+```ts
+export default defineAgent({
+  name: "Phone Agent",
+  transport: ["websocket", "twilio"],
+});
+```
+
+---
+
+## Embedded knowledge
+
+Import a JSON file and expose it through tools:
+
+```ts
+import knowledge from "./knowledge.json" with { type: "json" };
+
+export default defineAgent({
+  name: "FAQ Bot",
+  tools: {
+    search_faq: tool({
+      description: "Search the knowledge base",
+      parameters: z.object({ query: z.string() }),
+      execute: (args) => {
+        return knowledge.faqs.filter((f: { question: string }) =>
+          f.question.toLowerCase().includes(args.query.toLowerCase())
+        );
+      },
+    }),
+  },
+});
+```
+
+---
+
+## CLI commands
+
+```sh
+aai dev          # Local dev server with file watching
+aai deploy       # Bundle and deploy to production
+aai deploy --dry-run  # Validate and bundle without deploying
+aai new          # Scaffold a new agent project
+```
+
+Install: `curl -fsSL https://aai-agent.fly.dev/install | sh`
+
+---
 
 ## Build validation
 
-`aai build` validates your agent before bundling:
+`aai dev` and `aai deploy` validate before bundling:
 
-1. Imports `agent.ts` and checks for a default export from `defineAgent()`
-2. Validates the `name` field is a non-empty string
-3. Tests each custom tool:
-   - Verifies the tool has a `description`
-   - Validates the Zod schema by parsing sample args (empty strings, zeros,
-     first enum values)
-   - Runs `execute()` with the sample args — execution errors are OK (schema
-     validity is what matters)
+1. Checks for a default export from `defineAgent()`
+2. Validates `name` is a non-empty string
+3. For each custom tool: verifies `description`, validates Zod schema with
+   sample args, test-runs `execute()` (execution errors are OK — schema validity
+   is what matters)
 4. Bundles with esbuild
 
-Tools that fail schema validation will show "✗" in the build output. Tools that
-pass schema but throw during execution still show "✓" (the schema is valid;
-runtime errors with sample data are expected).
+---
 
-## Running and deploying the agent
+## Troubleshooting
 
-```sh
-aai dev       # Run local dev server with file watching
-aai deploy    # Bundle and deploy to production
-aai new       # Scaffold a new agent project
-```
-
-`aai dev` starts a local server, bundles and deploys the agent to it, and
-watches for file changes. Use it during development.
-
-`aai deploy` bundles and deploys to the production server.
-
-`aai deploy --dry-run` validates and bundles without deploying.
-
-If they don't have aai installed:
-
-```sh
-curl -fsSL https://aai-agent.fly.dev/install | sh
-```
+- **"missing default export"** — Use `export default defineAgent({...})`
+- **"missing env vars required by agent: X"** — Add to `.env` or remove from
+  `env` array
+- **"schema validation failed with sample args"** — Check `.min()`, `.regex()`,
+  `.refine()` validators
+- **"bundle failed"** — TypeScript syntax error — check imports, brackets
+- **Tool test shows "✗"** — `execute` threw with sample args — may be expected
+  if tool needs real data
+- **Dev server shows error but still running** — Previous working version still
+  serves — fix and save

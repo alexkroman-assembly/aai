@@ -25,9 +25,9 @@ export const DEFAULT_STT_CONFIG: STTConfig = {
   wssBase: "wss://streaming.assemblyai.com/v3/ws",
   tokenExpiresIn: 480,
   formatTurns: true,
-  minEndOfTurnSilenceWhenConfident: 100,
+  minEndOfTurnSilenceWhenConfident: 400,
   maxTurnSilence: 1000,
-  vadThreshold: 0.5,
+  vadThreshold: 0.6,
 };
 
 export type TTSConfig = {

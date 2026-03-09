@@ -6,11 +6,7 @@ import { createTtsClient } from "./tts.ts";
 import { executeBuiltinTool } from "./builtin_tools.ts";
 import { executeTurn, type TurnCallLLMOptions } from "./turn_handler.ts";
 import type { ChatMessage, LLMResponse, STTConfig } from "./types.ts";
-import {
-  type AgentConfig,
-  DEFAULT_GREETING,
-  type ToolSchema,
-} from "@aai/sdk/types";
+import type { AgentConfig, ToolSchema } from "@aai/sdk/types";
 import type { WorkerApi } from "@aai/core/worker-entry";
 import { buildSystemPrompt } from "./system_prompt.ts";
 
@@ -286,8 +282,7 @@ export function createSession(opts: SessionOptions): Session {
 
   return {
     async start(): Promise<void> {
-      const greeting = agentConfig.greeting ?? DEFAULT_GREETING;
-      if (greeting) pendingGreeting = greeting;
+      if (agentConfig.greeting) pendingGreeting = agentConfig.greeting;
 
       invokeHook("onConnect");
 
@@ -342,10 +337,9 @@ export function createSession(opts: SessionOptions): Session {
       messages = messages.slice(0, 1);
       trySendJson({ type: "reset" });
 
-      const greeting = agentConfig.greeting ?? DEFAULT_GREETING;
-      if (greeting) {
-        trySendJson({ type: "chat", text: greeting });
-        speakText(greeting);
+      if (agentConfig.greeting) {
+        trySendJson({ type: "chat", text: agentConfig.greeting });
+        speakText(agentConfig.greeting);
       }
     },
 
