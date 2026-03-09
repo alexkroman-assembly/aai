@@ -43,6 +43,7 @@
     "jsr:@std/path@^1.0.8": "1.1.4",
     "jsr:@std/path@^1.1.1": "1.1.4",
     "jsr:@std/path@^1.1.4": "1.1.4",
+    "jsr:@std/semver@^1.0.6": "1.0.8",
     "jsr:@std/testing@^1.0.17": "1.0.17",
     "jsr:@zip-js/zip-js@^2.7.52": "2.8.22",
     "jsr:@zod/zod@^4.3.6": "4.3.6",
@@ -190,6 +191,9 @@
       "dependencies": [
         "jsr:@std/internal"
       ]
+    },
+    "@std/semver@1.0.8": {
+      "integrity": "dc830e8b8b6a380c895d53fbfd1258dc253704ca57bbe1629ac65fd7830179b7"
     },
     "@std/testing@1.0.17": {
       "integrity": "87bdc2700fa98249d48a17cd72413352d3d3680dcfbdb64947fd0982d6bbf681",
@@ -2004,6 +2008,7 @@
       "jsr:@std/html@^1.0.5",
       "jsr:@std/http@^1.0.18",
       "jsr:@std/path@^1.1.4",
+      "jsr:@std/semver@^1.0.6",
       "jsr:@std/testing@^1.0.17",
       "jsr:@zod/zod@^4.3.6",
       "npm:@preact/signals@^2.8.1",

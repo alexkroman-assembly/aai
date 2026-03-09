@@ -1,5 +1,6 @@
 import { deadline } from "@std/async/deadline";
 import { bold, cyan, dim, yellow } from "@std/fmt/colors";
+import { greaterThan, parse } from "@std/semver";
 
 const REPO = "alexkroman/aai";
 const VERSION_URL =
@@ -19,7 +20,8 @@ async function checkForUpdate(
     const resp = await deadline(fetch(VERSION_URL), CHECK_TIMEOUT_MS);
     if (!resp.ok) return null;
     const remote = (await resp.text()).trim();
-    return remote !== currentVersion ? remote : null;
+    if (greaterThan(parse(remote), parse(currentVersion))) return remote;
+    return null;
   } catch {
     return null;
   }

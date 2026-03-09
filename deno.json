@@ -31,6 +31,7 @@
     "@std/fs": "jsr:@std/fs@^1.0.17",
     "@std/http": "jsr:@std/http@^1.0.18",
     "@std/encoding": "jsr:@std/encoding@^1.0.7",
+    "@std/semver": "jsr:@std/semver@^1.0.6",
     "@astral/astral": "jsr:@astral/astral@^0.5.5",
 "preact": "npm:preact@^10.28.4",
     "preact/hooks": "npm:preact@^10.28.4/hooks",
