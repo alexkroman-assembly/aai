@@ -163,7 +163,7 @@ export function createToolExecutor(
   return {
     executeTool: async (name, args, sessionId) => {
       const api = await getWorkerApi();
-      return api.executeTool(name, args, sessionId, 30_000);
+      return api.executeTool(name, args, sessionId, 30_000, slot.env);
     },
     getWorkerApi,
   };

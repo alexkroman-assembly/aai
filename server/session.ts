@@ -74,6 +74,7 @@ export function createSession(opts: SessionOptions): Session {
     getWorkerApi,
   } = opts;
 
+  const slotEnv = opts.env as Record<string, string> | undefined;
   let cachedWorkerApi: WorkerApi | undefined;
   async function invokeHook(
     hook: string,
@@ -82,7 +83,7 @@ export function createSession(opts: SessionOptions): Session {
     if (!getWorkerApi) return;
     try {
       cachedWorkerApi ??= await getWorkerApi();
-      await cachedWorkerApi.invokeHook(hook, id, extra, 5_000);
+      await cachedWorkerApi.invokeHook(hook, id, extra, 5_000, slotEnv);
     } catch (err: unknown) {
       console.error(`${hook} hook failed`, { err });
     }

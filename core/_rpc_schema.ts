@@ -33,6 +33,7 @@ export type RpcRequest =
     name: string;
     args: Record<string, unknown>;
     sessionId?: string;
+    env?: Record<string, string>;
   }
   | {
     id: number;
@@ -41,6 +42,7 @@ export type RpcRequest =
     sessionId: string;
     text?: string;
     error?: string;
+    env?: Record<string, string>;
   }
   | { id: number; type: "execute"; code: string };
 
@@ -53,6 +55,7 @@ export const RpcRequestSchema: z.ZodType<RpcRequest> = z.discriminatedUnion(
       name: z.string(),
       args: z.record(z.string(), z.unknown()),
       sessionId: z.string().optional(),
+      env: z.record(z.string(), z.string()).optional(),
     }),
     z.object({
       id: z.number(),
@@ -61,6 +64,7 @@ export const RpcRequestSchema: z.ZodType<RpcRequest> = z.discriminatedUnion(
       sessionId: z.string(),
       text: z.string().optional(),
       error: z.string().optional(),
+      env: z.record(z.string(), z.string()).optional(),
     }),
     z.object({
       id: z.number(),

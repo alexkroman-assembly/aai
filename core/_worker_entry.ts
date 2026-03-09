@@ -5,7 +5,7 @@ import type {
   ToolContext,
   ToolDef,
 } from "@aai/sdk/types";
-import { createKv } from "@aai/sdk/kv";
+import { createKv, type Kv } from "@aai/sdk/kv";
 import {
   createRpcCaller,
   type MessageTarget,
@@ -28,6 +28,7 @@ export async function executeToolCall(
   env: Record<string, string>,
   sessionId?: string,
   state?: unknown,
+  kv?: Kv,
 ): Promise<string> {
   const schema = tool.parameters ?? z.object({});
   const parsed = schema.safeParse(args);
@@ -46,7 +47,7 @@ export async function executeToolCall(
       env: envCopy,
       signal,
       state: (state ?? {}) as Record<string, unknown>,
-      kv: createKv({ env: envCopy }),
+      kv: kv ?? createKv({ env: envCopy }),
     };
     const result = await Promise.resolve(
       tool.execute(parsed.data, ctx),
@@ -69,28 +70,30 @@ export type WorkerApi = {
     args: Record<string, unknown>,
     sessionId?: string,
     timeoutMs?: number,
+    env?: Record<string, string>,
   ): Promise<string>;
   invokeHook(
     hook: string,
     sessionId: string,
     extra?: { text?: string; error?: string },
     timeoutMs?: number,
+    env?: Record<string, string>,
   ): Promise<void>;
 };
 
 export function createWorkerApi(port: MessageTarget): WorkerApi {
   const call = createRpcCaller(port);
   return {
-    async executeTool(name, args, sessionId, timeoutMs) {
+    async executeTool(name, args, sessionId, timeoutMs, env) {
       const raw = await call(
         "executeTool",
-        { name, args, sessionId },
+        { name, args, sessionId, env },
         timeoutMs,
       );
       return typeof raw === "string" ? raw : String(raw ?? "");
     },
-    async invokeHook(hook, sessionId, extra, timeoutMs) {
-      await call("invokeHook", { hook, sessionId, ...extra }, timeoutMs);
+    async invokeHook(hook, sessionId, extra, timeoutMs, env) {
+      await call("invokeHook", { hook, sessionId, ...extra, env }, timeoutMs);
     },
   };
 }
@@ -102,6 +105,17 @@ export function startWorker(
 ): void {
   const toolHandlers = new Map(Object.entries(agent.tools));
   const sessions = new Map<string, unknown>();
+  let mergedEnv = { ...env };
+  let sharedKv: Kv = createKv({ env: mergedEnv });
+
+  function applyEnv(extra?: Record<string, string>): void {
+    if (!extra) return;
+    const updated = { ...mergedEnv, ...extra };
+    if (JSON.stringify(updated) !== JSON.stringify(mergedEnv)) {
+      mergedEnv = updated;
+      sharedKv = createKv({ env: mergedEnv });
+    }
+  }
 
   function getState(sessionId: string): unknown {
     if (!sessions.has(sessionId) && agent.state) {
@@ -114,26 +128,28 @@ export function startWorker(
 
   const handlers: RpcHandlers = {
     executeTool(req) {
+      applyEnv(req.env);
       const tool = toolHandlers.get(req.name);
       if (!tool) return `Error: Unknown tool "${req.name}"`;
       return executeToolCall(
         req.name,
         req.args,
         tool,
-        env,
+        mergedEnv,
         req.sessionId,
         getState(req.sessionId ?? ""),
+        sharedKv,
       );
     },
 
     async invokeHook(req) {
+      applyEnv(req.env);
       const state = getState(req.sessionId);
-      const envCopy = { ...env };
       const ctx: HookContext = {
         sessionId: req.sessionId,
-        env: envCopy,
+        env: { ...mergedEnv },
         state: state as Record<string, unknown>,
-        kv: createKv({ env: envCopy }),
+        kv: sharedKv,
       };
       if (req.hook === "onConnect") {
         await agent.onConnect?.(ctx);

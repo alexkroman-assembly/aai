@@ -493,7 +493,7 @@ export default function App() {
 `session.dispose()`
 
 **Templates with custom UI** (scaffold with `aai new -t <name>`): `night-owl`,
-`dispatch-center`, `infocom-adventure`, `hot-takes`
+`dispatch-center`, `infocom-adventure`
 
 ---
 

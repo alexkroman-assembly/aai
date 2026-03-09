@@ -6,28 +6,37 @@ export const base = css`
   margin: 0 auto;
   padding: 20px;
   color: var(--aai-text);
+
+  @media (max-width: 480px) {
+    padding: 12px;
+  }
 `;
 
 export const layout = css`
   min-height: 100vh;
+  min-height: 100dvh;
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
 `;
 
 export const hero = css`
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 300px;
+  min-height: 100vh;
+  min-height: 100dvh;
 
   & button {
-    padding: 16px 32px;
+    padding: 18px 40px;
     border: none;
     border-radius: var(--aai-radius);
     background: var(--aai-primary);
     color: var(--aai-text);
-    font-size: 16px;
+    font-size: 18px;
     font-weight: 500;
     cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
   }
 `;
 
@@ -36,6 +45,7 @@ export const indicator = css`
   align-items: center;
   gap: 8px;
   margin-bottom: 16px;
+  flex-shrink: 0;
 
   & .dot {
     width: 12px;
@@ -59,26 +69,35 @@ export const errorBanner = css`
 `;
 
 export const messageArea = css`
-  min-height: 300px;
-  max-height: 500px;
+  flex: 1;
+  min-height: 200px;
   overflow-y: auto;
   margin-bottom: 16px;
   border: 1px solid var(--aai-surface-light);
   border-radius: var(--aai-radius);
   padding: 16px;
+  -webkit-overflow-scrolling: touch;
+
+  @media (max-width: 480px) {
+    padding: 12px;
+  }
 `;
 
 export const controls = css`
   display: flex;
   gap: 8px;
+  flex-shrink: 0;
+  padding-bottom: env(safe-area-inset-bottom, 0);
 
   & button {
-    padding: 8px 16px;
+    flex: 1;
+    padding: 12px 16px;
     border: none;
     border-radius: var(--aai-radius);
     cursor: pointer;
-    font-size: 14px;
+    font-size: 15px;
     color: var(--aai-text);
+    -webkit-tap-highlight-color: transparent;
   }
   & .reset {
     border: 1px solid var(--aai-surface-light);

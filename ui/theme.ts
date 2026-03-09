@@ -14,6 +14,28 @@ export type Theme = {
 };
 
 export const defaultTheme: Theme = Object.freeze({
+  bg: "#0f0e17",
+  surface: "#1a1a2e",
+  surfaceLight: "#2b2c3f",
+  primary: "#7f5af0",
+  text: "#fffffe",
+  textMuted: "#94a1b2",
+  error: "#ff6b6b",
+  font: "system-ui, -apple-system, sans-serif",
+  radius: "8px",
+  stateColors: Object.freeze({
+    connecting: "#94a1b2",
+    ready: "#72f1b8",
+    listening: "#7f5af0",
+    thinking: "#e2b714",
+    speaking: "#ff6480",
+    error: "#ff6b6b",
+  }),
+});
+
+export const darkTheme: Theme = defaultTheme;
+
+export const lightTheme: Theme = Object.freeze({
   bg: "#ffffff",
   surface: "#f5f5f5",
   surfaceLight: "#e0e0e0",
@@ -30,26 +52,6 @@ export const defaultTheme: Theme = Object.freeze({
     thinking: "#FF9800",
     speaking: "#9C27B0",
     error: "#f44336",
-  }),
-});
-
-export const darkTheme: Theme = Object.freeze({
-  bg: "#0f0e17",
-  surface: "#1a1a2e",
-  surfaceLight: "#2b2c3f",
-  primary: "#7f5af0",
-  text: "#fffffe",
-  textMuted: "#94a1b2",
-  error: "#ff6b6b",
-  font: "'SF Mono', 'Fira Code', monospace",
-  radius: "8px",
-  stateColors: Object.freeze({
-    connecting: "#94a1b2",
-    ready: "#72f1b8",
-    listening: "#7f5af0",
-    thinking: "#e2b714",
-    speaking: "#ff6480",
-    error: "#ff6b6b",
   }),
 });
 
