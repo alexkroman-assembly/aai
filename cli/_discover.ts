@@ -1,7 +1,7 @@
 import { parse as parseDotenv } from "@std/dotenv/parse";
 import { exists } from "@std/fs/exists";
 import { basename, join, resolve } from "@std/path";
-function slugify(str: string): string {
+export function slugify(str: string): string {
   return str.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 import { step } from "./_output.ts";

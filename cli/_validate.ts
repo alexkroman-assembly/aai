@@ -88,7 +88,7 @@ async function testTools(
 }
 
 /** Generate a sample value from a JSON Schema property. */
-function sampleFromJsonSchema(schema: Record<string, unknown>): unknown {
+export function sampleFromJsonSchema(schema: Record<string, unknown>): unknown {
   const type = schema.type as string | undefined;
   if (schema.enum) return (schema.enum as unknown[])[0];
   if (schema.const !== undefined) return schema.const;
@@ -119,7 +119,7 @@ function sampleFromJsonSchema(schema: Record<string, unknown>): unknown {
 }
 
 /** Generate sample args for a Zod object schema using its JSON Schema. */
-function sampleArgs(
+export function sampleArgs(
   schema: z.ZodObject<z.ZodRawShape>,
 ): Record<string, unknown> {
   const jsonSchema = z.toJSONSchema(schema) as Record<string, unknown>;
