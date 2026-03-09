@@ -3,6 +3,14 @@ import { loadPlatformConfig } from "./config.ts";
 import type { AgentSlot } from "./worker_pool.ts";
 import type { BundleStore } from "./bundle_store_tigris.ts";
 import { DeployBodySchema, normalizeTransport } from "@aai/sdk/schema";
+import type { TokenSigner } from "./scope_token.ts";
+
+export function getServerBaseUrl(req: Request): string {
+  const flyApp = Deno.env.get("FLY_APP_NAME");
+  if (flyApp) return `https://${flyApp}.fly.dev`;
+  const u = new URL(req.url);
+  return `${u.protocol}//${u.host}`;
+}
 
 export async function hashApiKey(apiKey: string): Promise<string> {
   const data = new TextEncoder().encode(apiKey);
@@ -13,7 +21,11 @@ export async function hashApiKey(apiKey: string): Promise<string> {
 export async function handleDeploy(
   req: Request,
   params: Record<string, string>,
-  ctx: { slots: Map<string, AgentSlot>; store: BundleStore },
+  ctx: {
+    slots: Map<string, AgentSlot>;
+    store: BundleStore;
+    tokenSigner: TokenSigner;
+  },
 ): Promise<Response> {
   const { slots, store } = ctx;
   const namespace = params.namespace;
@@ -81,9 +93,20 @@ export async function handleDeploy(
 
   const transport = normalizeTransport(body.transport);
 
+  const baseUrl = getServerBaseUrl(req);
+  const kvToken = await ctx.tokenSigner.sign({
+    ownerHash,
+    slug: compositeSlug,
+  });
+  const envWithKv = {
+    ...body.env,
+    AAI_KV_URL: `${baseUrl}/kv`,
+    AAI_SCOPE_TOKEN: kvToken,
+  };
+
   await store.putAgent({
     slug: compositeSlug,
-    env: body.env,
+    env: envWithKv,
     transport,
     worker: body.worker,
     client: body.client,
@@ -94,7 +117,7 @@ export async function handleDeploy(
 
   const slot: AgentSlot = {
     slug: compositeSlug,
-    env: body.env,
+    env: envWithKv,
     transport,
     config: body.config,
     name: body.config?.name,

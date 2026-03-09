@@ -290,10 +290,80 @@ export default defineAgent({
 });
 ```
 
+## Persistent storage (KV)
+
+For data that persists across sessions (user preferences, accumulated knowledge,
+settings), use `kvTools()`. Data is scoped per agent and per API key — agents
+cannot access each other's data.
+
+### kvTools helper
+
+The fastest way to add persistent memory. Spreads four pre-built tools into your
+agent: `save_memory`, `recall_memory`, `list_memories`, `forget_memory`.
+
+```ts
+import { defineAgent, kvTools } from "@aai/sdk";
+
+export default defineAgent({
+  name: "Memory Agent",
+  tools: {
+    ...kvTools(),
+  },
+});
+```
+
+To customize tool names or descriptions:
+
+```ts
+tools: {
+  ...kvTools({
+    names: { save: "store_note", forget: "erase_note" },
+    descriptions: { save: "Store a note for later" },
+  }),
+},
+```
+
+See the `memory-agent` template for a full example.
+
+### createKv (low-level)
+
+For custom KV tools beyond the standard four, use `createKv(ctx)` directly:
+
+```ts
+import { createKv, defineAgent, z } from "@aai/sdk";
+
+export default defineAgent({
+  name: "Custom KV Agent",
+  tools: {
+    save: {
+      description: "Save a value",
+      parameters: z.object({
+        key: z.string().describe("Storage key"),
+        value: z.string().describe("Value to store"),
+      }),
+      execute: async ({ key, value }, ctx) => {
+        const kv = createKv(ctx);
+        await kv.set(key as string, value as string);
+        return { saved: key };
+      },
+    },
+  },
+});
+```
+
+**KV API:**
+
+- `kv.get(key)` — returns `string | null`
+- `kv.set(key, value, ttl?)` — set a value, optional TTL in seconds
+- `kv.del(key)` — delete a key
+- `kv.keys(pattern?)` — list keys matching a glob (e.g. `"user:*"`)
+
+Values are strings (max 64 KB). Use `JSON.stringify`/`JSON.parse` for objects.
+
 ## Per-session state
 
-For agents that need to track state per connection (games, workflows, multi-step
-processes), use the `state` option in `defineAgent()`. The framework
+For data that only needs to last for a single connection (games, workflows,
+multi-step processes), use the `state` option in `defineAgent()`. The framework
 automatically creates a fresh state for each session and cleans it up on
 disconnect:
 

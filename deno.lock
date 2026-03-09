@@ -50,6 +50,7 @@
     "npm:@aws-sdk/client-s3@^3.1001.0": "3.1001.0",
     "npm:@preact/signals@2.8.1": "2.8.1_preact@10.28.4",
     "npm:@preact/signals@^2.8.1": "2.8.1_preact@10.28.4",
+    "npm:@upstash/redis@^1.36.1": "1.36.4",
     "npm:esbuild-wasm@~0.27.3": "0.27.3",
     "npm:esbuild@~0.25.5": "0.25.12",
     "npm:goober@2.1.18": "2.1.18_csstype@3.2.3",
@@ -1334,6 +1335,12 @@
     "@types/unist@2.0.11": {
       "integrity": "sha512-CmBKiL6NNo/OqgmMn95Fk9Whlp2mtvIv+KNpQKN2F4SjvrEesubTRWGYSg+BnWZOnlCaSTU1sMpsBOzgbYhnsA=="
     },
+    "@upstash/redis@1.36.4": {
+      "integrity": "sha512-w4s/msmyMqxOxaVhC8TQ2whJ77+Zd8YaSFokXL4mULQopaYb4xNJcm/PedtFQyLJn65nneySw9IwYnlMBBmFHg==",
+      "dependencies": [
+        "uncrypto"
+      ]
+    },
     "ansi-regex@5.0.1": {
       "integrity": "sha512-quJQXlTSUGL2LH9SUXo8VwsY4soanhgo6LNSm84E1LBcE8s3O0wpdiRzyR9z/ZZJMlMWv37qOOb9pdJlMUEKFQ=="
     },
@@ -1950,6 +1957,9 @@
     "uc.micro@2.1.0": {
       "integrity": "sha512-ARDJmphmdvUk6Glw7y9DQ2bFkKBHwQHLi2lsaH6PPmz/Ka9sFOBsBluozhDltWmnv9u/cF6Rt87znRTPV+yp/A=="
     },
+    "uncrypto@0.1.3": {
+      "integrity": "sha512-Ql87qFHB3s/De2ClA9e0gsnS6zXG27SkTiSJwjCc9MebbfapQfuPzumMIUMi38ezPZVNFcHI9sUIepeQfw8J8Q=="
+    },
     "which@2.0.2": {
       "integrity": "sha512-BLI3Tl1TW3Pvl70l3yq3Y64i+awpwXqsGBYWkkqMtnbXgrMD+yj7rhW0kuEDxzJaYXGjEW5ogapKNMEKNMjibA==",
       "dependencies": [
@@ -2037,7 +2047,8 @@
       },
       "server": {
         "dependencies": [
-          "npm:@aws-sdk/client-s3@^3.1001.0"
+          "npm:@aws-sdk/client-s3@^3.1001.0",
+          "npm:@upstash/redis@^1.36.1"
         ]
       },
       "ui": {

@@ -1,6 +1,7 @@
 import { deadline } from "@std/async/deadline";
 import { createOrchestrator } from "./orchestrator.ts";
 import { createBundleStore, createS3Client } from "./bundle_store_tigris.ts";
+import { createKvStore, createMemoryKvStore } from "./kv.ts";
 
 try {
   const { load } = await import("@std/dotenv");
@@ -19,7 +20,19 @@ if (Deno.env.get("AWS_ENDPOINT_URL_S3")) {
   console.info("Using in-memory storage (no S3 configured)");
 }
 const store = createBundleStore(s3, bucket);
-const { handler } = createOrchestrator({ store });
+
+const upstashUrl = Deno.env.get("UPSTASH_REDIS_REST_URL");
+const upstashToken = Deno.env.get("UPSTASH_REDIS_REST_TOKEN");
+let kvStore;
+if (upstashUrl && upstashToken) {
+  kvStore = createKvStore(upstashUrl, upstashToken);
+  console.info("KV storage: Upstash Redis");
+} else {
+  kvStore = createMemoryKvStore();
+  console.info("KV storage: in-memory (no Upstash configured)");
+}
+
+const { handler } = await createOrchestrator({ store, kvStore });
 
 const port = parseInt(Deno.env.get("PORT") ?? "3100");
 const abort = new AbortController();

@@ -1,26 +1,27 @@
-import { expect } from "@std/expect";
+import { assertEquals } from "@std/assert";
 import { createOrchestrator } from "./orchestrator.ts";
 import { createTestStore, DUMMY_INFO } from "./_test_utils.ts";
 
 Deno.test("orchestrator adds Cross-Origin-Isolation headers", async () => {
   using store = createTestStore();
-  const { handler } = createOrchestrator({ store });
+  const { handler } = await createOrchestrator({ store });
   const res = await handler(
     new Request("http://localhost/health"),
     DUMMY_INFO,
   );
-  expect(res.headers.get("Cross-Origin-Opener-Policy")).toBe("same-origin");
-  expect(res.headers.get("Cross-Origin-Embedder-Policy")).toBe(
+  assertEquals(res.headers.get("Cross-Origin-Opener-Policy"), "same-origin");
+  assertEquals(
+    res.headers.get("Cross-Origin-Embedder-Policy"),
     "credentialless",
   );
 });
 
 Deno.test("orchestrator returns 400 on deploy without auth", async () => {
   using store = createTestStore();
-  const { handler } = createOrchestrator({ store });
+  const { handler } = await createOrchestrator({ store });
   const res = await handler(
     new Request("http://localhost/ns/agent/deploy", { method: "POST" }),
     DUMMY_INFO,
   );
-  expect(res.status).toBe(400);
+  assertEquals(res.status, 400);
 });
