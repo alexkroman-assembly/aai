@@ -72,7 +72,8 @@ Rules:
           "Number of random words to return (1-6)",
         ),
       }),
-      execute: ({ category, count }) => {
+      execute: (args) => {
+        const { category, count } = args as { category: string; count: number };
         const list = WORD_LISTS[category];
         if (!list) return { error: `Unknown category: ${category}` };
         const n = Math.min(Math.max(1, count), 6);
@@ -90,7 +91,8 @@ Rules:
           "Shuffle individual letters or whole words",
         ).optional(),
       }),
-      execute: ({ phrase, mode }) => {
+      execute: (args) => {
+        const { phrase, mode } = args as { phrase: string; mode?: string };
         if (mode === "words") {
           return { result: shuffle(words(phrase)).join(" ") };
         }

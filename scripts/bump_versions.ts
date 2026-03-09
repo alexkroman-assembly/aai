@@ -50,10 +50,18 @@ async function gitAdd(path: string): Promise<void> {
 const staged = await getStagedFiles();
 const directlyChanged = new Set<string>();
 
+// Directories outside workspace packages that should trigger a cli rebuild.
+const CLI_EXTRAS = ["templates/"];
+
 for (const file of staged) {
   for (const pkg of PACKAGES) {
     if (file.startsWith(`${pkg}/`) && file !== `${pkg}/deno.json`) {
       directlyChanged.add(pkg);
+    }
+  }
+  for (const prefix of CLI_EXTRAS) {
+    if (file.startsWith(prefix)) {
+      directlyChanged.add("cli");
     }
   }
 }
