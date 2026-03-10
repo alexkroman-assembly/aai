@@ -6,6 +6,8 @@ import type { ExecuteTool } from "@aai/core/worker-entry";
 import type { BundleStore } from "./bundle_store_tigris.ts";
 import type { AgentMetadata } from "@aai/core/rpc-schema";
 import { createDenoWorker } from "@aai/core/deno-worker";
+import type { RpcHandlers } from "@aai/core/rpc";
+import { assertPublicUrl } from "./builtin_tools.ts";
 export type { AgentMetadata } from "@aai/core/rpc-schema";
 
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
@@ -41,7 +43,7 @@ async function spawnAgent(
   const workerUrl = `data:application/javascript;base64,${encodeBase64(code)}`;
 
   const worker = createDenoWorker(workerUrl, slug, {
-    net: true,
+    net: false,
     read: false,
     env: false,
     run: false,
@@ -58,8 +60,33 @@ async function spawnAgent(
     }) as EventListener,
   );
 
-  const api = createWorkerApi(worker);
+  const api = createWorkerApi(worker, createFetchHandlers());
   slot.worker = { handle: worker, api };
+}
+
+function createFetchHandlers(): RpcHandlers {
+  return {
+    async fetch(req) {
+      await assertPublicUrl(req.url);
+      const resp = await fetch(req.url, {
+        method: req.method,
+        headers: req.headers,
+        body: req.body,
+        signal: AbortSignal.timeout(30_000),
+      });
+      const body = await resp.text();
+      const headers: Record<string, string> = {};
+      resp.headers.forEach((v, k) => {
+        headers[k] = v;
+      });
+      return {
+        status: resp.status,
+        statusText: resp.statusText,
+        headers,
+        body,
+      };
+    },
+  };
 }
 
 export function ensureAgent(

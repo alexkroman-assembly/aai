@@ -30,7 +30,7 @@ const BLOCKED_CIDRS = [
   "ff00::/8",
 ];
 
-async function assertPublicUrl(url: string): Promise<void> {
+export async function assertPublicUrl(url: string): Promise<void> {
   const parsed = new URL(url);
   const hostname = parsed.hostname.replace(/^\[|\]$/g, "");
   const { resolve } = await import("node:dns/promises");

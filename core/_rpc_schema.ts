@@ -44,7 +44,15 @@ export type RpcRequest =
     error?: string;
     env?: Record<string, string>;
   }
-  | { id: number; type: "execute"; code: string };
+  | { id: number; type: "execute"; code: string }
+  | {
+    id: number;
+    type: "fetch";
+    url: string;
+    method: string;
+    headers: Record<string, string>;
+    body: string | null;
+  };
 
 export const RpcRequestSchema: z.ZodType<RpcRequest> = z.discriminatedUnion(
   "type",
@@ -70,6 +78,14 @@ export const RpcRequestSchema: z.ZodType<RpcRequest> = z.discriminatedUnion(
       id: z.number(),
       type: z.literal("execute"),
       code: z.string(),
+    }),
+    z.object({
+      id: z.number(),
+      type: z.literal("fetch"),
+      url: z.string(),
+      method: z.string(),
+      headers: z.record(z.string(), z.string()),
+      body: z.string().nullable(),
     }),
   ],
 );

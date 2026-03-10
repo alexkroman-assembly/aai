@@ -74,10 +74,10 @@ never on each other.
   manages interruptions
 - `turn_handler.ts` — agentic loop: LLM + tool calls (up to 5 iterations),
   forces `final_answer` on last
-- `worker_pool.ts` — spawns agent code in sandboxed Deno Workers (net-only
-  permissions), idle eviction
+- `worker_pool.ts` — spawns agent code in sandboxed Deno Workers (all
+  permissions false), idle eviction, hosts fetch proxy handler
 - `worker_entry.ts` — runs inside Worker; exposes `executeTool`/`invokeHook`
-  via RPC
+  via RPC, monkeypatches `fetch` to proxy through host
 - `tool_executor.ts` — dispatches custom tool calls to Worker via RPC
 - `builtin_tools.ts` — web_search, visit_webpage, fetch_json, run_code,
   user_input, final_answer
@@ -102,9 +102,29 @@ never on each other.
 
 ### Agent Isolation
 
-Agent code runs in Deno Workers with only `net: true` permission. The worker
-communicates with the host via RPC over `postMessage`. Custom tool `execute`
-functions run inside the worker; built-in tools run on the host.
+Agent code runs in Deno Workers with **all permissions false** (including
+`net: false`). The worker communicates with the host via bidirectional RPC over
+`postMessage`. Custom tool `execute` functions run inside the worker; built-in
+tools run on the host.
+
+**Fetch proxy**: Since workers have no network access, `globalThis.fetch` is
+monkeypatched in the worker entry (`core/_worker_entry.ts`) to proxy HTTP
+requests through RPC to the host process. The host handler
+(`server/worker_pool.ts`) validates each URL via `assertPublicUrl()`
+(`server/builtin_tools.ts`) to block requests to private/internal addresses
+(SSRF protection) before executing the real fetch.
+
+**RPC architecture**: `core/_rpc.ts` provides three primitives:
+- `serveRpc` — unidirectional: only handles incoming requests
+- `createRpcCaller` — unidirectional: only makes outgoing calls
+- `createRpcEndpoint` — **bidirectional**: serves incoming requests AND makes
+  outgoing calls on the same `MessageTarget` (discriminates by `type` field
+  presence)
+
+The worker uses `createRpcEndpoint` (serves executeTool/invokeHook, calls
+fetch). The host uses `createRpcEndpoint` when `hostHandlers` are provided to
+`createWorkerApi` (serves fetch, calls executeTool/invokeHook). RPC message
+types are defined in `core/_rpc_schema.ts`.
 
 ## Conventions
 

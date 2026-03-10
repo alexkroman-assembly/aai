@@ -89,6 +89,84 @@ export type RpcCall = (
   timeoutMs?: number,
 ) => Promise<unknown>;
 
+/**
+ * Bidirectional RPC endpoint that both serves incoming requests and makes
+ * outgoing calls over the same MessageTarget. Incoming messages are routed by
+ * checking for a `type` field (requests) vs its absence (responses).
+ */
+export function createRpcEndpoint(
+  port: MessageTarget,
+  methods: RpcHandlers,
+): RpcCall {
+  let nextId = 0;
+  const pending = new Map<number, PendingCall>();
+
+  port.onmessage = async (e: MessageEvent) => {
+    const data = e.data;
+    if (data && typeof data === "object" && "type" in data) {
+      // Incoming request
+      const parsed = RpcRequestSchema.safeParse(data);
+      if (!parsed.success) {
+        const id = (data as { id?: number }).id;
+        if (typeof id === "number") {
+          port.postMessage({ id, error: "Invalid RPC request" });
+        }
+        return;
+      }
+      const req = parsed.data;
+      const fn = methods[req.type] as
+        | ((params: RpcRequest) => Promise<unknown> | unknown)
+        | undefined;
+      if (!fn) {
+        port.postMessage({
+          id: req.id,
+          error: `Unknown RPC method "${req.type}"`,
+        });
+        return;
+      }
+      try {
+        const result = await fn(req);
+        port.postMessage({ id: req.id, result });
+      } catch (err: unknown) {
+        port.postMessage({
+          id: req.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    } else {
+      // Incoming response
+      const parsed = RpcResponseSchema.safeParse(data);
+      if (!parsed.success) return;
+      const msg = parsed.data;
+      const p = pending.get(msg.id);
+      if (!p) return;
+      pending.delete(msg.id);
+      if (msg.error) p.reject(new Error(msg.error));
+      else p.resolve(msg.result);
+    }
+  };
+
+  return (
+    type: string,
+    payload?: Record<string, unknown>,
+    timeoutMs?: number,
+  ): Promise<unknown> => {
+    const id = nextId++;
+    port.postMessage({ id, type, ...payload });
+    const promise = new Promise((resolve, reject) => {
+      pending.set(id, { resolve, reject });
+    });
+    if (!timeoutMs) return promise;
+    return deadline(promise, timeoutMs)
+      .catch((err) => {
+        throw err.name === "TimeoutError"
+          ? new Error(`RPC "${type}" timed out after ${timeoutMs}ms`)
+          : err;
+      })
+      .finally(() => pending.delete(id));
+  };
+}
+
 export function createRpcCaller(port: MessageTarget): RpcCall {
   let nextId = 0;
   const pending = new Map<number, PendingCall>();

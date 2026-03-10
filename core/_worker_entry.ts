@@ -8,9 +8,10 @@ import type {
 import { createKv, type Kv } from "@aai/sdk/kv";
 import {
   createRpcCaller,
+  createRpcEndpoint,
   type MessageTarget,
+  type RpcCall,
   type RpcHandlers,
-  serveRpc,
 } from "./_rpc.ts";
 
 export const TOOL_HANDLER_TIMEOUT = 30_000;
@@ -81,8 +82,13 @@ export type WorkerApi = {
   ): Promise<void>;
 };
 
-export function createWorkerApi(port: MessageTarget): WorkerApi {
-  const call = createRpcCaller(port);
+export function createWorkerApi(
+  port: MessageTarget,
+  hostHandlers?: RpcHandlers,
+): WorkerApi {
+  const call = hostHandlers
+    ? createRpcEndpoint(port, hostHandlers)
+    : createRpcCaller(port);
   return {
     async executeTool(name, args, sessionId, timeoutMs, env) {
       const raw = await call(
@@ -164,5 +170,53 @@ export function startWorker(
     },
   };
 
-  serveRpc(port, handlers);
+  const call = createRpcEndpoint(port, handlers);
+  installFetchProxy(call);
+}
+
+const FETCH_TIMEOUT_MS = 30_000;
+
+/** Replace globalThis.fetch with an RPC-backed proxy to the host process. */
+function installFetchProxy(call: RpcCall): void {
+  globalThis.fetch = async (
+    input: string | URL | Request,
+    init?: RequestInit,
+  ): Promise<Response> => {
+    let url: string;
+    let method: string;
+    let headers: Record<string, string>;
+    let body: string | null;
+
+    if (input instanceof Request) {
+      url = input.url;
+      method = init?.method ?? input.method;
+      headers = Object.fromEntries(
+        new Headers(init?.headers ?? input.headers).entries(),
+      );
+      body = init?.body != null
+        ? String(init.body)
+        : input.body != null
+        ? await input.text()
+        : null;
+    } else {
+      url = String(input);
+      method = init?.method ?? "GET";
+      headers = Object.fromEntries(
+        new Headers(init?.headers).entries(),
+      );
+      body = init?.body != null ? String(init.body) : null;
+    }
+
+    const result = (await call(
+      "fetch",
+      { url, method, headers, body },
+      FETCH_TIMEOUT_MS,
+    )) as { status: number; statusText: string; headers: Record<string, string>; body: string };
+
+    return new Response(result.body, {
+      status: result.status,
+      statusText: result.statusText,
+      headers: result.headers,
+    });
+  };
 }
