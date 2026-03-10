@@ -25,7 +25,7 @@ export function loadPlatformConfig(
     sttConfig: { ...DEFAULT_STT_CONFIG },
     ttsConfig: {
       ...DEFAULT_TTS_CONFIG,
-      apiKey: (env.RIME_API_KEY as string) ?? "",
+      apiKey: Deno.env.get("RIME_API_KEY") ?? "",
     },
     model: parsed.LLM_MODEL ?? DEFAULT_MODEL,
     llmGatewayBase: "https://llm-gateway.assemblyai.com/v1",

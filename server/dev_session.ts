@@ -18,6 +18,7 @@ import { getServerBaseUrl } from "./deploy.ts";
 import { claimNamespace, verifyOwner } from "./auth.ts";
 import { loadPlatformConfig } from "./config.ts";
 import { createSession, type Session } from "./session.ts";
+import { signScopeToken } from "./scope_token.ts";
 import { handleSessionWebSocket } from "./ws_handler.ts";
 import type { ZodType } from "zod";
 
@@ -171,7 +172,7 @@ export async function registerDevAgent(
     existing.worker.handle.terminate();
   }
 
-  const kvToken = await ctx.tokenSigner.sign({ ownerHash, slug });
+  const kvToken = await signScopeToken(ctx.scopeKey, { ownerHash, slug });
   const envWithKv = {
     ...msg.env,
     AAI_KV_URL: `${baseUrl}/kv`,

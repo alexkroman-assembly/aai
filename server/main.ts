@@ -2,7 +2,7 @@ import { deadline } from "@std/async/deadline";
 import { createOrchestrator } from "./orchestrator.ts";
 import { createBundleStore, createS3Client } from "./bundle_store_tigris.ts";
 import { createKvStore, createMemoryKvStore } from "./kv.ts";
-import { createTokenSigner } from "./scope_token.ts";
+import { importScopeKey } from "./scope_token.ts";
 
 try {
   const { load } = await import("@std/dotenv");
@@ -43,11 +43,9 @@ if (upstashUrl && upstashToken) {
   console.info("KV storage: in-memory (no Upstash configured)");
 }
 
-const tokenSigner = await createTokenSigner(
-  scopeSecret ?? crypto.randomUUID(),
-);
+const scopeKey = await importScopeKey(scopeSecret ?? crypto.randomUUID());
 
-const { handler } = await createOrchestrator({ store, kvStore, tokenSigner });
+const handler = createOrchestrator({ store, kvStore, scopeKey });
 
 const port = parseInt(Deno.env.get("PORT") ?? "3100");
 const abort = new AbortController();

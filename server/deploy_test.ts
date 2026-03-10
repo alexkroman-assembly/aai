@@ -4,7 +4,7 @@ import { hashApiKey, requireOwner } from "./auth.ts";
 import type { ServerContext } from "./types.ts";
 import {
   createTestStore,
-  createTestTokenSigner,
+  createTestScopeKey,
   VALID_ENV,
 } from "./_test_utils.ts";
 
@@ -14,7 +14,7 @@ async function setup(): Promise<ServerContext> {
     devSlots: new Map(),
     sessions: new Map(),
     store: createTestStore(),
-    tokenSigner: await createTestTokenSigner(),
+    scopeKey: await createTestScopeKey(),
   };
 }
 

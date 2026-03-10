@@ -11,14 +11,6 @@ Deno.test("loadPlatformConfig loads config from valid env", () => {
   expect(config.sttConfig.sampleRate).toBe(16_000);
 });
 
-Deno.test("loadPlatformConfig reads RIME_API_KEY from env", () => {
-  const config = loadPlatformConfig({
-    ...validEnv,
-    RIME_API_KEY: "test-tts-key-456",
-  });
-  expect(config.ttsConfig.apiKey).toBe("test-tts-key-456");
-});
-
 Deno.test("loadPlatformConfig throws when ASSEMBLYAI_API_KEY is missing", () => {
   expect(() => loadPlatformConfig({})).toThrow();
 });

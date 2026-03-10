@@ -5,7 +5,6 @@ import {
 } from "@aai/core/protocol";
 import type { AgentSlot } from "./worker_pool.ts";
 import type { BundleStore } from "./bundle_store_tigris.ts";
-import type { TokenSigner } from "./scope_token.ts";
 
 export type STTConfig = {
   sampleRate: number;
@@ -134,5 +133,5 @@ export type ServerContext = {
   devSlots: Map<string, AgentSlot>;
   sessions: Map<string, unknown>;
   store: BundleStore;
-  tokenSigner: TokenSigner;
+  scopeKey: CryptoKey;
 };

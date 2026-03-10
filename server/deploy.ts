@@ -2,6 +2,7 @@ import { loadPlatformConfig } from "./config.ts";
 import { DeployBodySchema, normalizeTransport } from "@aai/sdk/schema";
 import type { AgentSlot } from "./worker_pool.ts";
 import type { ServerContext } from "./types.ts";
+import { signScopeToken } from "./scope_token.ts";
 
 export { hashApiKey } from "./auth.ts";
 
@@ -60,7 +61,7 @@ export async function handleDeploy(
   const transport = normalizeTransport(body.transport);
 
   const baseUrl = getServerBaseUrl(req);
-  const kvToken = await ctx.tokenSigner.sign({
+  const kvToken = await signScopeToken(ctx.scopeKey, {
     ownerHash,
     slug: compositeSlug,
   });

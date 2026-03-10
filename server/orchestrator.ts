@@ -21,7 +21,6 @@ import {
 } from "./dev_session.ts";
 import { handleKv } from "./kv_handler.ts";
 import { createMemoryKvStore, type KvStore } from "./kv.ts";
-import type { TokenSigner } from "./scope_token.ts";
 
 type Params = Record<string, string>;
 
@@ -76,17 +75,17 @@ function withCors(
 export function createOrchestrator(opts: {
   store: BundleStore;
   kvStore?: KvStore;
-  tokenSigner: TokenSigner;
-}): { handler: Deno.ServeHandler; tokenSigner: TokenSigner } {
+  scopeKey: CryptoKey;
+}): Deno.ServeHandler {
   const { store } = opts;
 
   const kvStore = opts.kvStore ?? createMemoryKvStore();
-  const tokenSigner = opts.tokenSigner;
+  const scopeKey = opts.scopeKey;
 
   const slots = new Map<string, AgentSlot>();
   const devSlots = new Map<string, AgentSlot>();
   const sessions = new Map<string, Session>();
-  const ctx: ServerContext = { slots, devSlots, sessions, store, tokenSigner };
+  const ctx: ServerContext = { slots, devSlots, sessions, store, scopeKey };
 
   const routes: Route[] = [
     {
@@ -113,7 +112,7 @@ export function createOrchestrator(opts: {
     {
       pattern: new URLPattern({ pathname: "/kv" }),
       method: ["POST"],
-      handler: (req) => handleKv(req, { kvStore, tokenSigner }),
+      handler: (req) => handleKv(req, { kvStore, scopeKey }),
     },
 
     {
@@ -191,5 +190,5 @@ export function createOrchestrator(opts: {
     route(routes, () => Response.json({ error: "Not found" }, { status: 404 })),
   );
 
-  return { handler, tokenSigner };
+  return handler;
 }

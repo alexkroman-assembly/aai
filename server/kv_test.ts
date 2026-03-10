@@ -1,44 +1,47 @@
 import { assertEquals, assertNotEquals, assertThrows } from "@std/assert";
 import { createMemoryKvStore } from "./kv.ts";
 import type { AgentScope } from "./scope_token.ts";
-import { createTokenSigner } from "./scope_token.ts";
+import { importScopeKey, signScopeToken, verifyScopeToken } from "./scope_token.ts";
 
-Deno.test("TokenSigner", async (t) => {
+Deno.test("scope tokens", async (t) => {
   const scope: AgentScope = { ownerHash: "abc123", slug: "ns/my-agent" };
 
   await t.step("round-trips a scope", async () => {
-    const signer = await createTokenSigner("test-secret");
-    const token = await signer.sign(scope);
-    assertEquals(await signer.verify(token), scope);
+    const key = await importScopeKey("test-secret");
+    const token = await signScopeToken(key, scope);
+    assertEquals(await verifyScopeToken(key, token), scope);
   });
 
   await t.step("rejects tampered token", async () => {
-    const signer = await createTokenSigner("test-secret");
-    const token = await signer.sign(scope);
+    const key = await importScopeKey("test-secret");
+    const token = await signScopeToken(key, scope);
     const mid = Math.floor(token.length / 2);
     const tampered = token.slice(0, mid) +
       (token[mid] === "A" ? "B" : "A") +
       token.slice(mid + 1);
-    assertEquals(await signer.verify(tampered), null);
+    assertEquals(await verifyScopeToken(key, tampered), null);
   });
 
   await t.step("rejects garbage", async () => {
-    const signer = await createTokenSigner("test-secret");
-    assertEquals(await signer.verify("not-a-token"), null);
-    assertEquals(await signer.verify(""), null);
+    const key = await importScopeKey("test-secret");
+    assertEquals(await verifyScopeToken(key, "not-a-token"), null);
+    assertEquals(await verifyScopeToken(key, ""), null);
   });
 
   await t.step("different scopes produce different tokens", async () => {
-    const signer = await createTokenSigner("test-secret");
+    const key = await importScopeKey("test-secret");
     const other: AgentScope = { ownerHash: "abc123", slug: "ns/other-agent" };
-    assertNotEquals(await signer.sign(scope), await signer.sign(other));
+    assertNotEquals(
+      await signScopeToken(key, scope),
+      await signScopeToken(key, other),
+    );
   });
 
   await t.step("wrong key rejects token", async () => {
-    const signer1 = await createTokenSigner("key-one");
-    const signer2 = await createTokenSigner("key-two");
-    const token = await signer1.sign(scope);
-    assertEquals(await signer2.verify(token), null);
+    const key1 = await importScopeKey("key-one");
+    const key2 = await importScopeKey("key-two");
+    const token = await signScopeToken(key1, scope);
+    assertEquals(await verifyScopeToken(key2, token), null);
   });
 });
 
