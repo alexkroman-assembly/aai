@@ -2,6 +2,12 @@ import { encodeHex } from "@std/encoding/hex";
 import type { BundleStore } from "./bundle_store_tigris.ts";
 import type { ServerContext } from "./types.ts";
 
+/** Extract a Bearer token from a request, or null if missing/malformed. */
+export function bearerToken(req: Request): string | null {
+  const h = req.headers.get("Authorization");
+  return h?.startsWith("Bearer ") ? h.slice(7) : null;
+}
+
 export async function hashApiKey(apiKey: string): Promise<string> {
   const data = new TextEncoder().encode(apiKey);
   const hashBuffer = await crypto.subtle.digest("SHA-256", data);
@@ -38,14 +44,13 @@ export async function requireOwner(
   slug: string,
   ctx: ServerContext,
 ): Promise<string | Response> {
-  const authHeader = req.headers.get("Authorization");
-  if (!authHeader?.startsWith("Bearer ")) {
+  const apiKey = bearerToken(req);
+  if (!apiKey) {
     return Response.json(
       { error: "Missing Authorization header (Bearer <API_KEY>)" },
       { status: 401 },
     );
   }
-  const apiKey = authHeader.slice(7);
   const namespace = slug.split("/")[0];
 
   const ownerHash = await verifyOwner(apiKey, namespace, ctx.store);

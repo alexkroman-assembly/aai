@@ -28,6 +28,7 @@
     "@std/bytes": "jsr:@std/bytes@^1.0.6",
     "@std/fs": "jsr:@std/fs@^1.0.17",
     "@std/http": "jsr:@std/http@^1.0.18",
+    "@std/crypto": "jsr:@std/crypto@^1.0.4",
     "@std/encoding": "jsr:@std/encoding@^1.0.7",
     "@std/net": "jsr:@std/net@^1.0.6",
     "@std/semver": "jsr:@std/semver@^1.0.6",

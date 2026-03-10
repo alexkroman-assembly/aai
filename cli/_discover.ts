@@ -28,8 +28,6 @@ type AgentLink = {
 
 type CliConfig = {
   assemblyai_api_key?: string;
-  rime_api_key?: string;
-  brave_api_key?: string;
   namespace?: string;
   agents?: Record<string, AgentLink>;
 };

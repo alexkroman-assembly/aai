@@ -5,10 +5,17 @@ import { DEFAULT_MODEL } from "./types.ts";
 const validEnv = { ASSEMBLYAI_API_KEY: "test-key-123" };
 
 Deno.test("loadPlatformConfig loads config from valid env", () => {
-  const config = loadPlatformConfig(validEnv, "test-tts-key-456");
+  const config = loadPlatformConfig(validEnv);
   expect(config.apiKey).toBe("test-key-123");
   expect(config.model).toBe(DEFAULT_MODEL);
   expect(config.sttConfig.sampleRate).toBe(16_000);
+});
+
+Deno.test("loadPlatformConfig reads RIME_API_KEY from env", () => {
+  const config = loadPlatformConfig({
+    ...validEnv,
+    RIME_API_KEY: "test-tts-key-456",
+  });
   expect(config.ttsConfig.apiKey).toBe("test-tts-key-456");
 });
 

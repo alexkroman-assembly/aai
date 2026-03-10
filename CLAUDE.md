@@ -68,7 +68,7 @@ never on each other.
 
 #### server/
 
-- `orchestrator.ts` — Hono app: deploy, health, WebSocket, Twilio, landing
+- `orchestrator.ts` — HTTP router: deploy, health, WebSocket, Twilio, landing
   page routes
 - `session.ts` — per-connection session: wires STT → turn handler → TTS,
   manages interruptions
@@ -109,7 +109,7 @@ functions run inside the worker; built-in tools run on the host.
 ## Conventions
 
 - **Runtime**: Deno (not Node). Use `@std/*` for standard library.
-- **Frameworks**: Hono (server), Preact (client UI)
+- **Frameworks**: `@std/http` (server routing), Preact (client UI)
 - **Testing**: `@std/testing/bdd` (`describe`/`it`) + `@std/expect`. Test files
   are co-located: `foo.ts` → `foo_test.ts`
 - **Browser behavior**: CLI opens the browser only when scaffolding a new agent,
