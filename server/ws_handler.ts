@@ -79,6 +79,8 @@ export function handleSessionWebSocket(
   ws.addEventListener("message", (event) => {
     const isBinary = event.data instanceof ArrayBuffer;
 
+    if (!isBinary && (event.data as string).length > 1_000_000) return;
+
     if (!ready) {
       if (!isBinary) {
         let json: unknown;

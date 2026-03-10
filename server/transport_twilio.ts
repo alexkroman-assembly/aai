@@ -186,6 +186,7 @@ export function handleTwilioStream(
 
   socket.addEventListener("message", (event) => {
     if (typeof event.data !== "string") return;
+    if (event.data.length > 1_000_000) return;
     let json: unknown;
     try {
       json = JSON.parse(event.data);

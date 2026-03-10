@@ -30,7 +30,7 @@ export type DevRegister = {
   toolSchemas: ToolSchema[];
   env: Record<string, string>;
   transport: Transport[];
-  client: string;
+  client?: string;
 };
 
 export const DevRegisterSchema: z.ZodType<DevRegister> = z.object({
@@ -39,7 +39,7 @@ export const DevRegisterSchema: z.ZodType<DevRegister> = z.object({
   toolSchemas: z.array(ToolSchemaSchema),
   env: z.record(z.string(), z.string()),
   transport: z.array(TransportSchema),
-  client: z.string(),
+  client: z.string().optional(),
 });
 
 export type DevRegistered = {

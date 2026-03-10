@@ -73,8 +73,8 @@ export type DeployBody = {
 
 export const DeployBodySchema: z.ZodType<DeployBody> = z.object({
   env: z.record(z.string(), z.string()),
-  worker: z.string().min(1),
-  client: z.string().min(1),
+  worker: z.string().min(1).max(10_000_000),
+  client: z.string().min(1).max(10_000_000),
   transport: z.union([
     TransportSchema,
     z.array(TransportSchema),

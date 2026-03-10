@@ -15,7 +15,10 @@ import type { BundleStore } from "./bundle_store_tigris.ts";
 import type { Session } from "./session.ts";
 import { handleTwilioStream, handleTwilioVoice } from "./transport_twilio.ts";
 import type { ServerContext } from "./types.ts";
-import { handleDevWebSocket } from "./dev_session.ts";
+import {
+  handleDevSessionWebSocket,
+  handleDevWebSocket,
+} from "./dev_session.ts";
 import { handleKv } from "./kv_handler.ts";
 import { createMemoryKvStore, type KvStore } from "./kv.ts";
 import type { TokenSigner } from "./scope_token.ts";
@@ -26,9 +29,25 @@ function groups(match: URLPatternResult): Params {
   return (match.pathname.groups ?? {}) as Params;
 }
 
-function slug(match: URLPatternResult): string {
+const VALID_SLUG_PART = /^[a-z0-9][a-z0-9_-]{0,62}[a-z0-9]$/;
+const BAD_SLUG = Response.json({ error: "Invalid slug" }, { status: 400 });
+
+function slug(match: URLPatternResult): string | null {
   const p = groups(match);
+  if (!VALID_SLUG_PART.test(p.namespace) || !VALID_SLUG_PART.test(p.slug)) {
+    return null;
+  }
   return `${p.namespace}/${p.slug}`;
+}
+
+function withSlug(
+  fn: (req: Request, s: string) => Response | Promise<Response>,
+): (req: Request, match: URLPatternResult) => Response | Promise<Response> {
+  return (req, match) => {
+    const s = slug(match);
+    if (!s) return BAD_SLUG;
+    return fn(req, s);
+  };
 }
 
 const CORS_HEADERS: [string, string][] = [
@@ -65,8 +84,9 @@ export function createOrchestrator(opts: {
   const tokenSigner = opts.tokenSigner;
 
   const slots = new Map<string, AgentSlot>();
+  const devSlots = new Map<string, AgentSlot>();
   const sessions = new Map<string, Session>();
-  const ctx: ServerContext = { slots, sessions, store, tokenSigner };
+  const ctx: ServerContext = { slots, devSlots, sessions, store, tokenSigner };
 
   const routes: Route[] = [
     {
@@ -99,59 +119,62 @@ export function createOrchestrator(opts: {
     {
       pattern: new URLPattern({ pathname: "/:namespace/:slug/deploy" }),
       method: ["POST"],
-      handler: async (req, match) => {
-        const s = slug(match);
+      handler: withSlug(async (req, s) => {
         const owner = await requireOwner(req, s, ctx);
         if (owner instanceof Response) return owner;
         return handleDeploy(req, s, owner, ctx);
-      },
+      }),
     },
 
     {
       pattern: new URLPattern({ pathname: "/:namespace/:slug/twilio/voice" }),
       method: ["POST"],
-      handler: (req, match) => handleTwilioVoice(req, slug(match), ctx),
+      handler: withSlug((req, s) => handleTwilioVoice(req, s, ctx)),
     },
     {
       pattern: new URLPattern({ pathname: "/:namespace/:slug/twilio/stream" }),
-      handler: (req, match) => handleTwilioStream(req, slug(match), ctx),
+      handler: withSlug((req, s) => handleTwilioStream(req, s, ctx)),
     },
 
     {
       pattern: new URLPattern({ pathname: "/:namespace/:slug/dev" }),
-      handler: (req, match) => handleDevWebSocket(req, slug(match), ctx),
+      handler: withSlug((req, s) => handleDevWebSocket(req, s, ctx)),
+    },
+    {
+      pattern: new URLPattern({ pathname: "/:namespace/:slug/dev/websocket" }),
+      handler: withSlug((req, s) => handleDevSessionWebSocket(req, s, ctx)),
     },
 
     {
       pattern: new URLPattern({ pathname: "/:namespace/:slug/health" }),
       method: ["GET"],
-      handler: (req, match) => handleAgentHealth(req, slug(match), ctx),
+      handler: withSlug((req, s) => handleAgentHealth(req, s, ctx)),
     },
     {
       pattern: new URLPattern({ pathname: "/:namespace/:slug/websocket" }),
-      handler: (req, match) => handleWebSocket(req, slug(match), ctx),
+      handler: withSlug((req, s) => handleWebSocket(req, s, ctx)),
     },
     {
       pattern: new URLPattern({ pathname: "/:namespace/:slug/client.js" }),
       method: ["GET"],
-      handler: (req, match) =>
-        handleStaticFile(req, slug(match), "client.js", ctx),
+      handler: withSlug((req, s) => handleStaticFile(req, s, "client.js", ctx)),
     },
     {
       pattern: new URLPattern({ pathname: "/:namespace/:slug/client.js.map" }),
       method: ["GET"],
-      handler: (req, match) =>
-        handleStaticFile(req, slug(match), "client.js.map", ctx),
+      handler: withSlug((req, s) =>
+        handleStaticFile(req, s, "client.js.map", ctx)
+      ),
     },
     {
       pattern: new URLPattern({ pathname: "/:namespace/:slug/" }),
       method: ["GET"],
-      handler: (req, match) => handleAgentPage(req, slug(match), ctx),
+      handler: withSlug((req, s) => handleAgentPage(req, s, ctx)),
     },
     {
       pattern: new URLPattern({ pathname: "/:namespace/:slug" }),
       method: ["GET"],
-      handler: (req, match) => handleAgentRedirect(req, slug(match), ctx),
+      handler: withSlug((req, s) => handleAgentRedirect(req, s, ctx)),
     },
 
     {

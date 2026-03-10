@@ -52,6 +52,7 @@ Deno.test("claimNamespace persists ownership", async () => {
 async function makeCtx(): Promise<ServerContext> {
   return {
     slots: new Map(),
+    devSlots: new Map(),
     sessions: new Map(),
     store: createTestStore(),
     tokenSigner: await createTestTokenSigner(),

@@ -131,6 +131,7 @@ export const LLMResponseSchema: z.ZodType<LLMResponse> = z
 
 export type ServerContext = {
   slots: Map<string, AgentSlot>;
+  devSlots: Map<string, AgentSlot>;
   sessions: Map<string, unknown>;
   store: BundleStore;
   tokenSigner: TokenSigner;

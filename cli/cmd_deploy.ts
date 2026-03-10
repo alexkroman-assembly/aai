@@ -6,9 +6,10 @@ import { runDeploy } from "./deploy.ts";
 
 export async function runDeployCommand(args: string[]): Promise<number> {
   const flags = parseArgs(args, {
-    string: ["server"],
+    string: ["server", "local"],
     alias: { h: "help", s: "server" },
     boolean: ["help", "dry-run"],
+    default: { local: undefined },
   });
 
   if (flags.help) {
@@ -31,7 +32,9 @@ ${bold("OPTIONS:")}
 
   const cwd = Deno.env.get("INIT_CWD") || Deno.cwd();
   const { DEFAULT_SERVER } = await import("./_discover.ts");
-  const serverUrl = flags.server || DEFAULT_SERVER;
+  const serverUrl = flags.local !== undefined
+    ? (flags.local || "http://localhost:3100")
+    : (flags.server || DEFAULT_SERVER);
 
   const { getApiKey, getNamespace, resolveSlug, saveAgentLink, saveNamespace } =
     await import(

@@ -22,6 +22,7 @@ export type AgentSlot = {
   activeSessions: number;
   idleTimer?: ReturnType<typeof setTimeout>;
   _dev?: boolean;
+  _devToken?: string;
 };
 
 async function spawnAgent(

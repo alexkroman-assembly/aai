@@ -46,9 +46,10 @@ function toWsUrl(httpUrl: string): string {
 
 export async function runDevCommand(args: string[]): Promise<number> {
   const flags = parseArgs(args, {
-    string: ["port", "server"],
+    string: ["port", "server", "local"],
     alias: { h: "help", p: "port", s: "server" },
     boolean: ["help"],
+    default: { local: undefined },
   });
 
   if (flags.help) {
@@ -73,7 +74,9 @@ ${bold("OPTIONS:")}
 
   const cwd = Deno.env.get("INIT_CWD") || Deno.cwd();
   const port = parseInt(flags.port ?? "3000");
-  const serverUrl = flags.server ?? DEFAULT_SERVER;
+  const serverUrl = flags.local !== undefined
+    ? (flags.local || "http://localhost:3100")
+    : (flags.server ?? DEFAULT_SERVER);
 
   const {
     ensureClaudeMd,
@@ -113,15 +116,15 @@ ${bold("OPTIONS:")}
   let clientCode = result.bundle.client;
 
   const wsUrl = toWsUrl(serverUrl);
-  let controlWs = await connectAndRegister(
+  let reg = await connectAndRegister(
     wsUrl,
     apiKey,
     namespace,
     result.agent,
     manifest,
-    clientCode,
     localWorker,
   );
+  let devToken = reg.devToken;
 
   const proxyServer = startLocalProxy(
     port,
@@ -129,6 +132,7 @@ ${bold("OPTIONS:")}
     manifest.config?.name ?? slug,
     serverUrl,
     () => clientCode,
+    () => devToken,
   );
 
   printReady(result.agent, namespace, port);
@@ -166,16 +170,16 @@ ${bold("OPTIONS:")}
       manifest = JSON.parse(freshResult.bundle.manifest);
       clientCode = freshResult.bundle.client;
 
-      controlWs.close();
-      controlWs = await connectAndRegister(
+      reg.ws.close();
+      reg = await connectAndRegister(
         wsUrl,
         apiKey,
         namespace,
         freshResult.agent,
         manifest,
-        clientCode,
         localWorker,
       );
+      devToken = reg.devToken;
 
       printReady(freshResult.agent, namespace, port);
     } catch (err: unknown) {
@@ -200,7 +204,7 @@ ${bold("OPTIONS:")}
     } catch { /* already closed */ }
     localWorker.terminate();
     try {
-      controlWs.close();
+      reg.ws.close();
     } catch { /* already closed */ }
     proxyServer.shutdown();
     Deno.exit(0);
@@ -286,9 +290,8 @@ async function connectAndRegister(
       parameters: Record<string, unknown>;
     }[];
   },
-  clientCode: string,
   localWorker: ReturnType<typeof spawnLocalWorker>,
-): Promise<WebSocket> {
+): Promise<{ ws: WebSocket; devToken: string }> {
   const fullPath = `${namespace}/${agent.slug}`;
   const url = `${wsUrl}/${fullPath}/dev`;
   const ws = new WebSocket(url);
@@ -332,7 +335,6 @@ async function connectAndRegister(
     toolSchemas: manifest.toolSchemas ?? [],
     env: agent.env,
     transport: agent.transport,
-    client: clientCode,
   }));
   const regMsg = await nextWsMessage(ws);
   if (!regMsg || regMsg.type === "dev_error") {
@@ -364,7 +366,12 @@ async function connectAndRegister(
   };
   serveRpc(target, handlers);
 
-  return ws;
+  const devToken = regMsg.devToken as string;
+  if (!devToken) {
+    throw new Error("Server did not return a dev token");
+  }
+
+  return { ws, devToken };
 }
 
 function startLocalProxy(
@@ -373,6 +380,7 @@ function startLocalProxy(
   agentName: string,
   serverUrl: string,
   getClientCode: () => string,
+  getDevToken: () => string,
 ): Deno.HttpServer {
   const wsUrl = toWsUrl(serverUrl);
 
@@ -412,7 +420,9 @@ function startLocalProxy(
         }
 
         const { socket: clientWs, response } = Deno.upgradeWebSocket(req);
-        const targetUrl = `${wsUrl}/${fullPath}/websocket${url.search}`;
+        const params = new URLSearchParams(url.search);
+        params.set("token", getDevToken());
+        const targetUrl = `${wsUrl}/${fullPath}/dev/websocket?${params}`;
         const serverWs = new WebSocket(targetUrl);
         serverWs.binaryType = "arraybuffer";
 

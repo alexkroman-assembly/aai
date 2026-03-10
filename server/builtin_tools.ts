@@ -3,10 +3,44 @@ import { createRpcCaller } from "@aai/core/rpc";
 import type { ToolSchema } from "@aai/sdk/types";
 import { htmlToMarkdown } from "./html.ts";
 import { createDenoWorker } from "@aai/core/deno-worker";
+import { matchSubnets } from "@std/net/unstable-ip";
 
 export const _internals = {
   fetch: globalThis.fetch,
 };
+
+const BLOCKED_CIDRS = [
+  // IPv4
+  "0.0.0.0/8",
+  "10.0.0.0/8",
+  "100.64.0.0/10",
+  "127.0.0.0/8",
+  "169.254.0.0/16",
+  "172.16.0.0/12",
+  "192.0.0.0/24",
+  "192.168.0.0/16",
+  "198.18.0.0/15",
+  "224.0.0.0/4",
+  "240.0.0.0/4",
+  // IPv6
+  "::1/128",
+  "::/128",
+  "fc00::/7",
+  "fe80::/10",
+  "ff00::/8",
+];
+
+async function assertPublicUrl(url: string): Promise<void> {
+  const parsed = new URL(url);
+  const hostname = parsed.hostname.replace(/^\[|\]$/g, "");
+  const { resolve } = await import("node:dns/promises");
+  const addresses = await resolve(hostname).catch(() => [hostname]);
+  for (const addr of addresses) {
+    if (matchSubnets(addr, BLOCKED_CIDRS)) {
+      throw new Error(`Blocked request to private address: ${hostname}`);
+    }
+  }
+}
 
 const BraveSearchResponseSchema = z.object({
   web: z.object({
@@ -124,6 +158,7 @@ const visitWebpage = defineTool({
     const { url } = args;
 
     console.info("visit_webpage", { url });
+    await assertPublicUrl(url);
 
     const resp = await _internals.fetch(url, {
       headers: {
@@ -225,6 +260,7 @@ const fetchJson = defineTool({
     const { url, headers } = args;
 
     console.info("fetch_json", { url });
+    await assertPublicUrl(url);
 
     const resp = await _internals.fetch(url, {
       headers,

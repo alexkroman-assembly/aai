@@ -7,10 +7,18 @@ import { createWebSocketTarget } from "@aai/core/rpc";
 import { createWorkerApi } from "@aai/core/worker-entry";
 import type { AgentConfig, ToolSchema } from "@aai/sdk/types";
 import { getBuiltinToolSchemas } from "./builtin_tools.ts";
-import type { AgentSlot } from "./worker_pool.ts";
+import {
+  type AgentSlot,
+  createToolExecutor,
+  trackSessionClose,
+  trackSessionOpen,
+} from "./worker_pool.ts";
 import type { ServerContext } from "./types.ts";
 import { getServerBaseUrl } from "./deploy.ts";
 import { claimNamespace, verifyOwner } from "./auth.ts";
+import { loadPlatformConfig } from "./config.ts";
+import { createSession, type Session } from "./session.ts";
+import { handleSessionWebSocket } from "./ws_handler.ts";
 import type { ZodType } from "zod";
 
 export const _internals = {
@@ -25,6 +33,7 @@ function protocolMessages(socket: WebSocket): ReadableStream<unknown> {
       socket.addEventListener("message", (event) => {
         if (closed) return;
         if (typeof event.data !== "string") return;
+        if (event.data.length > 1_000_000) return;
         let json: unknown;
         try {
           json = JSON.parse(event.data);
@@ -79,11 +88,8 @@ export function handleDevWebSocket(
 
   socket.addEventListener("close", () => {
     console.info("Dev control WebSocket disconnected", { slug });
-    const slot = ctx.slots.get(slug);
-    if (slot?._dev) {
-      ctx.slots.delete(slug);
-      console.info("Removed dev slot", { slug });
-    }
+    ctx.devSlots.delete(slug);
+    console.info("Removed dev slot", { slug });
   });
 
   socket.addEventListener("error", (event) => {
@@ -160,7 +166,7 @@ export async function registerDevAgent(
     ...getBuiltinToolSchemas(agentConfig.builtinTools ?? []),
   ];
 
-  const existing = ctx.slots.get(slug);
+  const existing = ctx.devSlots.get(slug);
   if (existing?.worker) {
     existing.worker.handle.terminate();
   }
@@ -171,6 +177,8 @@ export async function registerDevAgent(
     AAI_KV_URL: `${baseUrl}/kv`,
     AAI_SCOPE_TOKEN: kvToken,
   };
+
+  const devToken = crypto.randomUUID();
 
   const slot: AgentSlot = {
     slug,
@@ -185,17 +193,9 @@ export async function registerDevAgent(
       api: workerApi,
     },
     _dev: true,
+    _devToken: devToken,
   };
-  ctx.slots.set(slug, slot);
-
-  await ctx.store.putAgent({
-    slug,
-    env: envWithKv,
-    transport: msg.transport,
-    worker: "", // no worker needed — tools run on CLI
-    client: msg.client,
-    owner_hash: ownerHash,
-  });
+  ctx.devSlots.set(slug, slot);
 
   console.info("Dev agent registered", {
     slug,
@@ -203,5 +203,55 @@ export async function registerDevAgent(
     tools: allToolSchemas.map((t) => t.name),
   });
 
-  ws.send(JSON.stringify({ type: "dev_registered", slug }));
+  ws.send(JSON.stringify({ type: "dev_registered", slug, devToken }));
+}
+
+export function handleDevSessionWebSocket(
+  req: Request,
+  slug: string,
+  ctx: ServerContext,
+): Response {
+  const slot = ctx.devSlots.get(slug);
+  if (!slot) {
+    return Response.json({ error: "No dev session for this agent" }, {
+      status: 404,
+    });
+  }
+
+  const token = new URL(req.url).searchParams.get("token");
+  if (!token || token !== slot._devToken) {
+    return Response.json({ error: "Invalid dev token" }, { status: 403 });
+  }
+
+  if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") {
+    return Response.json({ error: "Expected WebSocket upgrade" }, {
+      status: 400,
+    });
+  }
+
+  const config = slot.config!;
+  const builtinTools = getBuiltinToolSchemas(config.builtinTools ?? []);
+  const toolSchemas = [...(slot.toolSchemas ?? []), ...builtinTools];
+  const { executeTool, getWorkerApi } = createToolExecutor(slot, ctx.store);
+
+  const resume = new URL(req.url).searchParams.has("resume");
+  const { socket, response } = _internals.upgradeWebSocket(req);
+  handleSessionWebSocket(socket, ctx.sessions as Map<string, Session>, {
+    createSession: (sessionId, ws) =>
+      createSession({
+        id: sessionId,
+        transport: ws,
+        agentConfig: config,
+        toolSchemas,
+        platformConfig: loadPlatformConfig(slot.env),
+        executeTool,
+        getWorkerApi,
+        env: slot.env,
+        skipGreeting: resume,
+      }),
+    logContext: { slug, dev: "true" },
+    onOpen: () => trackSessionOpen(slot),
+    onClose: () => trackSessionClose(slot),
+  });
+  return response;
 }

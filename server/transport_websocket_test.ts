@@ -38,6 +38,7 @@ function makeSlot(overrides?: Partial<AgentSlot>): AgentSlot {
 async function setup(slots?: Map<string, AgentSlot>): Promise<ServerContext> {
   return {
     slots: slots ?? new Map(),
+    devSlots: new Map(),
     sessions: new Map(),
     store: createTestStore(),
     tokenSigner: await createTestTokenSigner(),

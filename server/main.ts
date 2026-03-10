@@ -44,7 +44,7 @@ if (upstashUrl && upstashToken) {
 }
 
 const tokenSigner = await createTokenSigner(
-  scopeSecret ?? "local-dev-secret",
+  scopeSecret ?? crypto.randomUUID(),
 );
 
 const { handler } = await createOrchestrator({ store, kvStore, tokenSigner });

@@ -15,6 +15,7 @@ import { flush } from "./_test_utils.ts";
 async function setup(): Promise<ServerContext> {
   return {
     slots: new Map(),
+    devSlots: new Map(),
     sessions: new Map(),
     store: createTestStore(),
     tokenSigner: await createTestTokenSigner(),
@@ -149,8 +150,8 @@ Deno.test("handleDevWebSocket authenticates and registers via protocol", async (
   const allSent = mockSocket.sentJson();
   const regMsg = allSent.find((m) => m.type === "dev_registered");
   expect(regMsg).toBeDefined();
-  expect(ctx.slots.has("ns/agent")).toBe(true);
-  expect(ctx.slots.get("ns/agent")!._dev).toBe(true);
+  expect(ctx.devSlots.has("ns/agent")).toBe(true);
+  expect(ctx.devSlots.get("ns/agent")!._dev).toBe(true);
 });
 
 Deno.test("handleDevWebSocket cleans up dev slot on close", async () => {
@@ -168,7 +169,7 @@ Deno.test("handleDevWebSocket cleans up dev slot on close", async () => {
   }
 
   // Simulate a dev slot existing
-  ctx.slots.set("test", {
+  ctx.devSlots.set("test", {
     slug: "test",
     env: {},
     transport: ["websocket"],
@@ -178,10 +179,10 @@ Deno.test("handleDevWebSocket cleans up dev slot on close", async () => {
 
   // Simulate close
   mockSocket.dispatchEvent(new CloseEvent("close", { code: 1000 }));
-  expect(ctx.slots.has("test")).toBe(false);
+  expect(ctx.devSlots.has("test")).toBe(false);
 });
 
-Deno.test("handleDevWebSocket does not remove non-dev slot on close", async () => {
+Deno.test("handleDevWebSocket does not affect production slots on close", async () => {
   const ctx = await setup();
   const req = new Request("http://localhost/dev/test", {
     headers: { upgrade: "websocket" },
@@ -195,13 +196,12 @@ Deno.test("handleDevWebSocket does not remove non-dev slot on close", async () =
     s.restore();
   }
 
-  // Non-dev slot
+  // Production slot with same slug should not be affected
   ctx.slots.set("test", {
     slug: "test",
     env: {},
     transport: ["websocket"],
     activeSessions: 0,
-    _dev: false,
   });
 
   mockSocket.dispatchEvent(new CloseEvent("close", { code: 1000 }));
@@ -244,7 +244,7 @@ Deno.test("handleDevWebSocket rejects different owner for claimed namespace", as
   const errorMsg = sent.find((m) => m.type === "dev_error");
   expect(errorMsg).toBeDefined();
   expect(errorMsg!.message).toContain("owned by another user");
-  expect(ctx.slots.has("ns/agent")).toBe(false);
+  expect(ctx.devSlots.has("ns/agent")).toBe(false);
 });
 
 // --- registerDevAgent ---
@@ -268,7 +268,7 @@ function makeDevRegister(
   };
 }
 
-Deno.test("registerDevAgent creates slot and stores agent", async () => {
+Deno.test("registerDevAgent creates dev slot without persisting to store", async () => {
   const ctx = await setup();
   const ws = new MockWebSocket("ws://test");
   await flush();
@@ -285,13 +285,16 @@ Deno.test("registerDevAgent creates slot and stores agent", async () => {
     ctx,
   );
 
-  // Slot should be created
-  const slot = ctx.slots.get("ns/dev-agent");
+  // Dev slot should be created
+  const slot = ctx.devSlots.get("ns/dev-agent");
   expect(slot).toBeDefined();
   expect(slot!.name).toBe("Dev Agent");
   expect(slot!._dev).toBe(true);
   expect(slot!.env.AAI_KV_URL).toBe("http://localhost:3000/kv");
   expect(slot!.env.AAI_SCOPE_TOKEN).toBeDefined();
+
+  // Production slots should not be affected
+  expect(ctx.slots.has("ns/dev-agent")).toBe(false);
 
   // Should have sent dev_registered
   const sent = ws.sentJson();
@@ -300,9 +303,9 @@ Deno.test("registerDevAgent creates slot and stores agent", async () => {
   expect(regMsg).toBeDefined();
   expect(regMsg!.slug).toBe("ns/dev-agent");
 
-  // Should be stored
+  // Should NOT be stored
   const manifest = await ctx.store.getManifest("ns/dev-agent");
-  expect(manifest).not.toBe(null);
+  expect(manifest).toBe(null);
 });
 
 Deno.test("registerDevAgent terminates existing worker", async () => {
@@ -311,7 +314,7 @@ Deno.test("registerDevAgent terminates existing worker", async () => {
   await flush();
 
   let terminated = false;
-  ctx.slots.set("ns/dev-agent", {
+  ctx.devSlots.set("ns/dev-agent", {
     slug: "ns/dev-agent",
     env: {},
     transport: ["websocket"],
@@ -342,7 +345,7 @@ Deno.test("registerDevAgent terminates existing worker", async () => {
 
   expect(terminated).toBe(true);
   // Should preserve activeSessions count
-  expect(ctx.slots.get("ns/dev-agent")!.activeSessions).toBe(2);
+  expect(ctx.devSlots.get("ns/dev-agent")!.activeSessions).toBe(2);
 });
 
 Deno.test("registerDevAgent includes builtin tools in log", async () => {
@@ -376,7 +379,7 @@ Deno.test("registerDevAgent includes builtin tools in log", async () => {
     ctx,
   );
 
-  const slot = ctx.slots.get("ns/tool-agent");
+  const slot = ctx.devSlots.get("ns/tool-agent");
   expect(slot).toBeDefined();
   expect(slot!.toolSchemas).toEqual(msg.toolSchemas);
 });

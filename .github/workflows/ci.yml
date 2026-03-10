@@ -17,7 +17,7 @@ jobs:
           deno-version: ${{ env.DENO_VERSION }}
 
       - name: Run checks
-        run: deno task check
+        run: DENO_FROZEN_LOCKFILE=true deno task check
         env:
           ASSEMBLYAI_API_KEY: ${{ secrets.ASSEMBLYAI_API_KEY }}
 

@@ -30,6 +30,17 @@ function scopePrefix(scope: AgentScope): string {
   return `kv:${scope.ownerHash}:${scope.slug}:`;
 }
 
+async function scanAll(redis: Redis, pattern: string): Promise<string[]> {
+  const keys: string[] = [];
+  let cursor = "0";
+  do {
+    const [next, batch] = await redis.scan(cursor, { match: pattern });
+    cursor = next;
+    keys.push(...batch);
+  } while (cursor !== "0");
+  return keys;
+}
+
 export function createKvStore(url: string, token: string): KvStore {
   const redis = new Redis({ url, token });
 
@@ -57,14 +68,14 @@ export function createKvStore(url: string, token: string): KvStore {
     async keys(scope, pattern) {
       const prefix = scopePrefix(scope);
       const searchPattern = pattern ? `${prefix}${pattern}` : `${prefix}*`;
-      const rawKeys = await redis.keys(searchPattern);
+      const rawKeys = await scanAll(redis, searchPattern);
       return rawKeys.map((k) => k.slice(prefix.length));
     },
 
     async list(scope, userPrefix, options) {
       const prefix = scopePrefix(scope);
       const searchPattern = `${prefix}${userPrefix}*`;
-      const rawKeys = await redis.keys(searchPattern);
+      const rawKeys = await scanAll(redis, searchPattern);
       const sorted = rawKeys.sort();
       if (options?.reverse) sorted.reverse();
       const limited = options?.limit && options.limit > 0
