@@ -1,6 +1,6 @@
 {
   "name": "@aai/core",
-  "version": "0.1.17",
+  "version": "0.1.18",
   "exports": {
     "./worker-entry": "./_worker_entry.ts",
     "./protocol": "./_protocol.ts",

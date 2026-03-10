@@ -14,6 +14,16 @@ import {
 export const DEFAULT_STT_SAMPLE_RATE = 16_000;
 export const DEFAULT_TTS_SAMPLE_RATE = 24_000;
 
+export type DevAuth = {
+  type: "dev_auth";
+  token: string;
+};
+
+export const DevAuthSchema: z.ZodType<DevAuth> = z.object({
+  type: z.literal("dev_auth"),
+  token: z.string().min(1),
+});
+
 export type DevRegister = {
   type: "dev_register";
   config: AgentConfig;

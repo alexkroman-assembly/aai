@@ -1,9 +1,9 @@
-import { encodeHex } from "@std/encoding/hex";
 import { loadPlatformConfig } from "./config.ts";
-import type { AgentSlot } from "./worker_pool.ts";
-import type { BundleStore } from "./bundle_store_tigris.ts";
 import { DeployBodySchema, normalizeTransport } from "@aai/sdk/schema";
-import type { TokenSigner } from "./scope_token.ts";
+import type { AgentSlot } from "./worker_pool.ts";
+import type { ServerContext } from "./types.ts";
+
+export { hashApiKey } from "./auth.ts";
 
 export function getServerBaseUrl(req: Request): string {
   const flyApp = Deno.env.get("FLY_APP_NAME");
@@ -12,34 +12,13 @@ export function getServerBaseUrl(req: Request): string {
   return `${u.protocol}//${u.host}`;
 }
 
-export async function hashApiKey(apiKey: string): Promise<string> {
-  const data = new TextEncoder().encode(apiKey);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
-  return encodeHex(new Uint8Array(hashBuffer));
-}
-
 export async function handleDeploy(
   req: Request,
-  params: Record<string, string>,
-  ctx: {
-    slots: Map<string, AgentSlot>;
-    store: BundleStore;
-    tokenSigner: TokenSigner;
-  },
+  compositeSlug: string,
+  ownerHash: string,
+  ctx: ServerContext,
 ): Promise<Response> {
   const { slots, store } = ctx;
-  const namespace = params.namespace;
-  const slug = params.slug;
-
-  const authHeader = req.headers.get("Authorization");
-  if (!authHeader?.startsWith("Bearer ")) {
-    return Response.json(
-      { error: "Missing Authorization header (Bearer <API_KEY>)" },
-      { status: 400 },
-    );
-  }
-  const apiKey = authHeader.slice("Bearer ".length);
-  const ownerHash = await hashApiKey(apiKey);
 
   let json: unknown;
   try {
@@ -69,19 +48,6 @@ export async function handleDeploy(
       { status: 400 },
     );
   }
-
-  const nsOwner = await store.getNamespaceOwner(namespace);
-  if (nsOwner && nsOwner !== ownerHash) {
-    return Response.json(
-      { error: `Namespace "${namespace}" is owned by another user.` },
-      { status: 403 },
-    );
-  }
-  if (!nsOwner) {
-    await store.putNamespaceOwner(namespace, ownerHash);
-  }
-
-  const compositeSlug = `${namespace}/${slug}`;
 
   const existing = slots.get(compositeSlug);
   if (existing?.worker) {

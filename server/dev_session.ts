@@ -1,15 +1,64 @@
-import { type DevRegister, DevRegisterSchema } from "@aai/core/protocol";
+import {
+  DevAuthSchema,
+  type DevRegister,
+  DevRegisterSchema,
+} from "@aai/core/protocol";
 import { createWebSocketTarget } from "@aai/core/rpc";
 import { createWorkerApi } from "@aai/core/worker-entry";
 import type { AgentConfig, ToolSchema } from "@aai/sdk/types";
 import { getBuiltinToolSchemas } from "./builtin_tools.ts";
 import type { AgentSlot } from "./worker_pool.ts";
 import type { ServerContext } from "./types.ts";
-import { getServerBaseUrl, hashApiKey } from "./deploy.ts";
+import { getServerBaseUrl } from "./deploy.ts";
+import { claimNamespace, verifyOwner } from "./auth.ts";
+import type { ZodType } from "zod";
 
 export const _internals = {
   upgradeWebSocket: (req: Request) => Deno.upgradeWebSocket(req),
 };
+
+/** Yield parsed protocol messages from a WebSocket, skipping RPC and binary. */
+function protocolMessages(socket: WebSocket): ReadableStream<unknown> {
+  let closed = false;
+  return new ReadableStream({
+    start(controller) {
+      socket.addEventListener("message", (event) => {
+        if (closed) return;
+        if (typeof event.data !== "string") return;
+        let json: unknown;
+        try {
+          json = JSON.parse(event.data);
+        } catch {
+          return;
+        }
+        // Skip RPC messages
+        if (typeof (json as Record<string, unknown>).id === "number") return;
+        controller.enqueue(json);
+      });
+      socket.addEventListener("close", () => {
+        if (closed) return;
+        closed = true;
+        controller.close();
+      });
+    },
+  });
+}
+
+/** Read the next message from the stream and parse it with a Zod schema. */
+async function nextMessage<T>(
+  reader: ReadableStreamDefaultReader<unknown>,
+  schema: ZodType<T>,
+): Promise<{ ok: true; data: T } | { ok: false; error: string }> {
+  const { value, done } = await reader.read();
+  if (done) return { ok: false, error: "Connection closed" };
+  const parsed = schema.safeParse(value);
+  if (!parsed.success) return { ok: false, error: parsed.error.message };
+  return { ok: true, data: parsed.data };
+}
+
+function sendError(socket: WebSocket, message: string) {
+  socket.send(JSON.stringify({ type: "dev_error", message }));
+}
 
 export function handleDevWebSocket(
   req: Request,
@@ -22,50 +71,10 @@ export function handleDevWebSocket(
     });
   }
 
-  const apiKey = new URL(req.url).searchParams.get("token");
-  if (!apiKey) {
-    return Response.json({ error: "Missing token parameter" }, { status: 401 });
-  }
-
   const { socket, response } = _internals.upgradeWebSocket(req);
 
   socket.addEventListener("open", () => {
     console.info("Dev control WebSocket connected", { slug });
-  });
-
-  socket.addEventListener("message", async function onRegister(event) {
-    if (typeof event.data !== "string") return;
-
-    let json: unknown;
-    try {
-      json = JSON.parse(event.data);
-    } catch {
-      return;
-    }
-
-    if (typeof (json as Record<string, unknown>).id === "number") return;
-
-    const parsed = DevRegisterSchema.safeParse(json);
-    if (!parsed.success) {
-      socket.send(JSON.stringify({
-        type: "dev_error",
-        message: `Invalid registration: ${parsed.error.message}`,
-      }));
-      return;
-    }
-
-    socket.removeEventListener("message", onRegister);
-
-    const ownerHash = await hashApiKey(apiKey);
-    const baseUrl = getServerBaseUrl(req);
-    await registerDevAgent(
-      socket,
-      slug,
-      parsed.data,
-      ownerHash,
-      baseUrl,
-      ctx,
-    );
   });
 
   socket.addEventListener("close", () => {
@@ -82,7 +91,48 @@ export function handleDevWebSocket(
     console.error("Dev control WebSocket error", { slug, error: msg });
   });
 
+  runDevSession(socket, slug, req, ctx);
+
   return response;
+}
+
+async function runDevSession(
+  socket: WebSocket,
+  slug: string,
+  req: Request,
+  ctx: ServerContext,
+): Promise<void> {
+  const reader = protocolMessages(socket).getReader();
+
+  // Phase 1: Authenticate
+  const auth = await nextMessage(reader, DevAuthSchema);
+  if (!auth.ok) {
+    sendError(socket, "First message must be dev_auth with a token");
+    socket.close();
+    return;
+  }
+
+  const namespace = slug.split("/")[0];
+  const ownerHash = await verifyOwner(auth.data.token, namespace, ctx.store);
+  if (!ownerHash) {
+    sendError(socket, `Namespace "${namespace}" is owned by another user.`);
+    socket.close();
+    return;
+  }
+
+  await claimNamespace(namespace, ownerHash, ctx.store);
+  socket.send(JSON.stringify({ type: "dev_authenticated" }));
+
+  // Phase 2: Register
+  const reg = await nextMessage(reader, DevRegisterSchema);
+  if (!reg.ok) {
+    sendError(socket, `Invalid registration: ${reg.error}`);
+    socket.close();
+    return;
+  }
+
+  const baseUrl = getServerBaseUrl(req);
+  await registerDevAgent(socket, slug, reg.data, ownerHash, baseUrl, ctx);
 }
 
 export async function registerDevAgent(

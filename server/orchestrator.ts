@@ -2,6 +2,7 @@ import { type Route, route } from "@std/http/unstable-route";
 import { handleFavicon, renderLandingPage } from "./html.ts";
 import { handleInstall } from "./install.ts";
 import { handleDeploy } from "./deploy.ts";
+import { requireOwner } from "./auth.ts";
 import {
   handleAgentHealth,
   handleAgentPage,
@@ -86,15 +87,7 @@ export function createOrchestrator(opts: {
     {
       pattern: new URLPattern({ pathname: "/health" }),
       method: ["GET"],
-      handler: () =>
-        Response.json({
-          status: "ok",
-          agents: [...slots.values()].map((s) => ({
-            slug: s.slug,
-            name: s.name ?? s.slug,
-            ready: !!s.worker,
-          })),
-        }),
+      handler: () => Response.json({ status: "ok" }),
     },
 
     {
@@ -106,8 +99,12 @@ export function createOrchestrator(opts: {
     {
       pattern: new URLPattern({ pathname: "/:namespace/:slug/deploy" }),
       method: ["POST"],
-      handler: (req, match) =>
-        handleDeploy(req, groups(match), { slots, store, tokenSigner }),
+      handler: async (req, match) => {
+        const s = slug(match);
+        const owner = await requireOwner(req, s, ctx);
+        if (owner instanceof Response) return owner;
+        return handleDeploy(req, s, owner, ctx);
+      },
     },
 
     {

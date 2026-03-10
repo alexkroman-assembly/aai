@@ -1,6 +1,6 @@
 {
   "name": "@aai/ui",
-  "version": "0.1.21",
+  "version": "0.1.22",
   "exports": "./mod.ts",
   "publish": {
     "exclude": [

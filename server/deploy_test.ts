@@ -1,111 +1,124 @@
 import { assertEquals, assertMatch, assertNotEquals } from "@std/assert";
-import { handleDeploy, hashApiKey } from "./deploy.ts";
-import type { AgentSlot } from "./worker_pool.ts";
-import { createTestStore, VALID_ENV } from "./_test_utils.ts";
-import { createTokenSigner } from "./scope_token.ts";
+import { handleDeploy } from "./deploy.ts";
+import { hashApiKey, requireOwner } from "./auth.ts";
+import type { ServerContext } from "./types.ts";
+import {
+  createTestStore,
+  createTestTokenSigner,
+  VALID_ENV,
+} from "./_test_utils.ts";
 
-async function setup() {
-  const store = createTestStore();
-  const slots = new Map<string, AgentSlot>();
-  const tokenSigner = await createTokenSigner("test-secret");
-  return { store, slots, tokenSigner };
-}
-
-function deployReq(
-  path: string,
-  apiKey?: string,
-): { req: Request; params: Record<string, string> } {
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-  };
-  if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
-  const parts = path.replace(/^\//, "").split("/");
+async function setup(): Promise<ServerContext> {
   return {
-    req: new Request(`http://localhost${path}`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        env: VALID_ENV,
-        worker: "console.log('w');",
-        client: "console.log('c');",
-        config: {
-          instructions: "test",
-          greeting: "hello",
-          voice: "luna",
-        },
-      }),
-    }),
-    params: { namespace: parts[0], slug: parts[1] },
+    slots: new Map(),
+    sessions: new Map(),
+    store: createTestStore(),
+    tokenSigner: await createTestTokenSigner(),
   };
 }
 
-Deno.test("deploy rejects missing Authorization header", async () => {
-  const ctx = await setup();
-  const { req, params } = deployReq("/ns/my-agent/deploy");
-  const res = await handleDeploy(req, params, ctx);
-  assertEquals(res.status, 400);
-});
+function deployBody() {
+  return JSON.stringify({
+    env: VALID_ENV,
+    worker: "console.log('w');",
+    client: "console.log('c');",
+    config: {
+      instructions: "test",
+      greeting: "hello",
+      voice: "luna",
+    },
+  });
+}
 
-Deno.test("new deploy succeeds and stores owner_hash", async () => {
-  const ctx = await setup();
-  const { req, params } = deployReq("/ns/my-agent/deploy", "key1");
-  const res = await handleDeploy(req, params, ctx);
-  assertEquals(res.status, 200);
-  const manifest = await ctx.store.getManifest("ns/my-agent");
-  assertEquals(manifest!.owner_hash, await hashApiKey("key1"));
-});
+// --- requireOwner ---
 
-Deno.test("same key can redeploy", async () => {
-  const ctx = await setup();
-  const d1 = deployReq("/ns/my-agent/deploy", "key1");
-  await handleDeploy(d1.req, d1.params, ctx);
-  const d2 = deployReq("/ns/my-agent/deploy", "key1");
-  const res = await handleDeploy(d2.req, d2.params, ctx);
-  assertEquals(res.status, 200);
-});
-
-Deno.test("different key is rejected for namespace owned by another", async () => {
-  const ctx = await setup();
-  const d1 = deployReq("/ns/my-agent/deploy", "key1");
-  await handleDeploy(d1.req, d1.params, ctx);
-  const d2 = deployReq("/ns/other-agent/deploy", "key2");
-  const res = await handleDeploy(d2.req, d2.params, ctx);
-  assertEquals(res.status, 403);
-});
-
-Deno.test("different namespaces with different keys both succeed", async () => {
-  const ctx = await setup();
-  const d1 = deployReq("/ns-a/agent/deploy", "key1");
-  const res1 = await handleDeploy(d1.req, d1.params, ctx);
-  const d2 = deployReq("/ns-b/agent/deploy", "key2");
-  const res2 = await handleDeploy(d2.req, d2.params, ctx);
-  assertEquals(res1.status, 200);
-  assertEquals(res2.status, 200);
-});
-
-Deno.test("deploy rejects missing config", async () => {
+Deno.test("requireOwner rejects missing Authorization header", async () => {
   const ctx = await setup();
   const req = new Request("http://localhost/ns/my-agent/deploy", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": "Bearer key1",
-    },
+    body: deployBody(),
+  });
+  const result = await requireOwner(req, "ns/my-agent", ctx);
+  assertEquals((result as Response).status, 401);
+});
+
+Deno.test("requireOwner rejects different owner for claimed namespace", async () => {
+  const ctx = await setup();
+  await ctx.store.putNamespaceOwner("ns", await hashApiKey("key1"));
+
+  const req = new Request("http://localhost/ns/my-agent/deploy", {
+    method: "POST",
+    headers: { Authorization: "Bearer key2" },
+    body: deployBody(),
+  });
+  const result = await requireOwner(req, "ns/my-agent", ctx);
+  assertEquals((result as Response).status, 403);
+});
+
+Deno.test("requireOwner returns ownerHash on success", async () => {
+  const ctx = await setup();
+  const req = new Request("http://localhost/ns/my-agent/deploy", {
+    method: "POST",
+    headers: { Authorization: "Bearer key1" },
+    body: deployBody(),
+  });
+  const result = await requireOwner(req, "ns/my-agent", ctx);
+  assertEquals(typeof result, "string");
+  assertEquals(result, await hashApiKey("key1"));
+});
+
+// --- handleDeploy (auth already resolved) ---
+
+Deno.test("handleDeploy succeeds and stores agent", async () => {
+  const ctx = await setup();
+  const ownerHash = await hashApiKey("key1");
+  const req = new Request("http://localhost/ns/my-agent/deploy", {
+    method: "POST",
+    body: deployBody(),
+  });
+  const res = await handleDeploy(req, "ns/my-agent", ownerHash, ctx);
+  assertEquals(res.status, 200);
+  const manifest = await ctx.store.getManifest("ns/my-agent");
+  assertEquals(manifest!.owner_hash, ownerHash);
+});
+
+Deno.test("handleDeploy can redeploy same slug", async () => {
+  const ctx = await setup();
+  const ownerHash = await hashApiKey("key1");
+
+  const req1 = new Request("http://localhost/ns/my-agent/deploy", {
+    method: "POST",
+    body: deployBody(),
+  });
+  await handleDeploy(req1, "ns/my-agent", ownerHash, ctx);
+
+  const req2 = new Request("http://localhost/ns/my-agent/deploy", {
+    method: "POST",
+    body: deployBody(),
+  });
+  const res = await handleDeploy(req2, "ns/my-agent", ownerHash, ctx);
+  assertEquals(res.status, 200);
+});
+
+Deno.test("handleDeploy rejects missing config", async () => {
+  const ctx = await setup();
+  const ownerHash = await hashApiKey("key1");
+  const req = new Request("http://localhost/ns/my-agent/deploy", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       env: VALID_ENV,
       worker: "console.log('w');",
       client: "console.log('c');",
     }),
   });
-  const res = await handleDeploy(
-    req,
-    { namespace: "ns", slug: "my-agent" },
-    ctx,
-  );
+  const res = await handleDeploy(req, "ns/my-agent", ownerHash, ctx);
   assertEquals(res.status, 400);
   const body = await res.json();
   assertMatch(body.error, /config/i);
 });
+
+// --- hashApiKey ---
 
 Deno.test("hashApiKey produces consistent hex output", async () => {
   const hash1 = await hashApiKey("test-key");

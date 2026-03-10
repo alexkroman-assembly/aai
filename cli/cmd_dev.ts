@@ -222,7 +222,51 @@ ${bold("OPTIONS:")}
   return 0;
 }
 
-function connectAndRegister(
+/** Bidirectional WebSocket proxy — flat listeners, no nesting. */
+function pipeWebSockets(clientWs: WebSocket, serverWs: WebSocket): void {
+  clientWs.addEventListener("message", (e) => {
+    if (serverWs.readyState === WebSocket.OPEN) serverWs.send(e.data);
+  });
+  serverWs.addEventListener("message", (e) => {
+    if (clientWs.readyState === WebSocket.OPEN) clientWs.send(e.data);
+  });
+  serverWs.addEventListener("close", () => {
+    if (clientWs.readyState === WebSocket.OPEN) clientWs.close();
+  });
+  clientWs.addEventListener("close", () => {
+    if (serverWs.readyState === WebSocket.OPEN) serverWs.close();
+  });
+  serverWs.addEventListener("error", () => {
+    if (clientWs.readyState === WebSocket.OPEN) clientWs.close();
+  });
+  clientWs.addEventListener("error", () => {
+    if (serverWs.readyState === WebSocket.OPEN) serverWs.close();
+  });
+}
+
+/** Wait for the next protocol message (skipping RPC) from a WebSocket. */
+function nextWsMessage(
+  ws: WebSocket,
+): Promise<Record<string, unknown> | null> {
+  return new Promise((resolve) => {
+    ws.addEventListener("message", function onMsg(event) {
+      if (typeof event.data !== "string") return;
+      let msg: Record<string, unknown>;
+      try {
+        msg = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+      if (typeof msg.id === "number") return; // skip RPC
+      ws.removeEventListener("message", onMsg);
+      resolve(msg);
+    });
+    ws.addEventListener("close", () => resolve(null), { once: true });
+    ws.addEventListener("error", () => resolve(null), { once: true });
+  });
+}
+
+async function connectAndRegister(
   wsUrl: string,
   apiKey: string,
   namespace: string,
@@ -246,78 +290,81 @@ function connectAndRegister(
   localWorker: ReturnType<typeof spawnLocalWorker>,
 ): Promise<WebSocket> {
   const fullPath = `${namespace}/${agent.slug}`;
-  const url = `${wsUrl}/${fullPath}/dev?token=${encodeURIComponent(apiKey)}`;
+  const url = `${wsUrl}/${fullPath}/dev`;
+  const ws = new WebSocket(url);
 
-  return new Promise<WebSocket>((resolve, reject) => {
-    const ws = new WebSocket(url);
-
-    ws.addEventListener("open", () => {
-      ws.send(JSON.stringify({
-        type: "dev_register",
-        config: manifest.config ?? {
-          instructions: "",
-          greeting: "",
-          voice: "luna",
-        },
-        toolSchemas: manifest.toolSchemas ?? [],
-        env: agent.env,
-        transport: agent.transport,
-        client: clientCode,
-      }));
-    });
-
-    ws.addEventListener("message", function onRegAck(event) {
-      if (typeof event.data !== "string") return;
-      let msg: { type?: string; slug?: string; message?: string };
-      try {
-        msg = JSON.parse(event.data);
-      } catch {
-        return;
-      }
-
-      if (typeof (msg as Record<string, unknown>).id === "number") return;
-
-      if (msg.type === "dev_registered") {
-        ws.removeEventListener("message", onRegAck);
-
-        const target = createWebSocketTarget(ws);
-        const handlers: RpcHandlers = {
-          executeTool: (req) =>
-            localWorker.workerApi.executeTool(
-              req.name,
-              req.args,
-              undefined,
-              30_000,
-            ),
-          invokeHook: (req) =>
-            localWorker.workerApi.invokeHook(
-              req.hook,
-              req.sessionId,
-              { text: req.text, error: req.error },
-              5_000,
-            ),
-        };
-        serveRpc(target, handlers);
-
-        resolve(ws);
-      } else if (msg.type === "dev_error") {
-        reject(new Error(msg.message ?? "Server rejected registration"));
-      }
-    });
-
+  await new Promise<void>((resolve, reject) => {
+    ws.addEventListener("open", () => resolve(), { once: true });
     ws.addEventListener("error", (event) => {
       const msg = event instanceof ErrorEvent
         ? event.message
         : "WebSocket error";
       reject(new Error(`Failed to connect to server: ${msg}`));
-    });
-
-    ws.addEventListener("close", (event) => {
-      if (!event.wasClean) {
-        error(`Control WebSocket closed: ${event.reason || "connection lost"}`);
-      }
-    });
+    }, { once: true });
   });
+
+  ws.addEventListener("close", (event) => {
+    if (!event.wasClean) {
+      error(`Control WebSocket closed: ${event.reason || "connection lost"}`);
+    }
+  });
+
+  // Phase 1: Authenticate
+  ws.send(JSON.stringify({ type: "dev_auth", token: apiKey }));
+  const authMsg = await nextWsMessage(ws);
+  if (!authMsg || authMsg.type === "dev_error") {
+    throw new Error(
+      (authMsg?.message as string) ?? "Server rejected authentication",
+    );
+  }
+  if (authMsg.type !== "dev_authenticated") {
+    throw new Error(`Unexpected message: ${authMsg.type}`);
+  }
+
+  // Phase 2: Register
+  ws.send(JSON.stringify({
+    type: "dev_register",
+    config: manifest.config ?? {
+      instructions: "",
+      greeting: "",
+      voice: "luna",
+    },
+    toolSchemas: manifest.toolSchemas ?? [],
+    env: agent.env,
+    transport: agent.transport,
+    client: clientCode,
+  }));
+  const regMsg = await nextWsMessage(ws);
+  if (!regMsg || regMsg.type === "dev_error") {
+    throw new Error(
+      (regMsg?.message as string) ?? "Server rejected registration",
+    );
+  }
+  if (regMsg.type !== "dev_registered") {
+    throw new Error(`Unexpected message: ${regMsg.type}`);
+  }
+
+  // Phase 3: Serve RPC
+  const target = createWebSocketTarget(ws);
+  const handlers: RpcHandlers = {
+    executeTool: (req) =>
+      localWorker.workerApi.executeTool(
+        req.name,
+        req.args,
+        undefined,
+        30_000,
+      ),
+    invokeHook: (req) =>
+      localWorker.workerApi.invokeHook(
+        req.hook,
+        req.sessionId,
+        { text: req.text, error: req.error },
+        5_000,
+      ),
+  };
+  serveRpc(target, handlers);
+
+  return ws;
 }
 
 function startLocalProxy(
@@ -369,32 +416,7 @@ function startLocalProxy(
         const serverWs = new WebSocket(targetUrl);
         serverWs.binaryType = "arraybuffer";
 
-        serverWs.addEventListener("open", () => {
-          clientWs.addEventListener("message", (e) => {
-            if (serverWs.readyState === WebSocket.OPEN) {
-              serverWs.send(e.data);
-            }
-          });
-        });
-
-        serverWs.addEventListener("message", (e) => {
-          if (clientWs.readyState === WebSocket.OPEN) {
-            clientWs.send(e.data);
-          }
-        });
-
-        serverWs.addEventListener("close", () => {
-          if (clientWs.readyState === WebSocket.OPEN) clientWs.close();
-        });
-        clientWs.addEventListener("close", () => {
-          if (serverWs.readyState === WebSocket.OPEN) serverWs.close();
-        });
-        serverWs.addEventListener("error", () => {
-          if (clientWs.readyState === WebSocket.OPEN) clientWs.close();
-        });
-        clientWs.addEventListener("error", () => {
-          if (serverWs.readyState === WebSocket.OPEN) serverWs.close();
-        });
+        pipeWebSockets(clientWs, serverWs);
 
         return response;
       }

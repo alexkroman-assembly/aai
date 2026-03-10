@@ -46,127 +46,125 @@ export async function connectStt(
     Authorization: apiKey,
   });
 
-  const ac = new AbortController();
-  const { signal } = ac;
-
+  // Wait for connection
   try {
-    const handle = await deadline(
-      new Promise<SttHandle>((resolve, reject) => {
-        ws.addEventListener("open", () => {
-          console.info("STT WebSocket connected");
-          resolve({
-            send(audio: Uint8Array) {
-              if (ws.readyState === WebSocket.OPEN) {
-                ws.send(audio);
-              } else {
-                console.warn("STT send skipped, ws not open", {
-                  wsState: ws.readyState,
-                });
-              }
-            },
-            clear() {
-              if (ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ type: "ForceEndpoint" }));
-              }
-            },
-            close() {
-              ws.close();
-            },
-          });
-        }, { signal });
-
-        let msgCount = 0;
-        ws.addEventListener("message", (event: MessageEvent) => {
-          if (typeof event.data !== "string") {
-            console.debug("STT non-string message", {
-              dataType: typeof event.data,
-            });
-            return;
-          }
-          let json: unknown;
-          try {
-            json = JSON.parse(event.data);
-          } catch {
-            return;
-          }
-
-          const result = SttMessageSchema.safeParse(json);
-          if (!result.success) return;
-
-          const msg = result.data;
-          msgCount++;
-          console.info("STT message", {
-            msgCount,
-            type: msg.type,
-            transcript: msg.transcript?.slice(0, 100),
-            isFinal: msg.is_final,
-            turnOrder: msg.turn_order,
-            endOfTurn: msg.end_of_turn,
-            turnIsFormatted: msg.turn_is_formatted,
-          });
-          switch (msg.type) {
-            case "Termination":
-              events.onTermination(
-                msg.audio_duration_seconds ?? 0,
-                msg.session_duration_seconds ?? 0,
-              );
-              break;
-            case "Turn": {
-              const text = (msg.transcript ?? "").trim();
-              if (!text) break;
-              // Partial turns (end_of_turn=false) are shown as live transcript;
-              // only completed turns trigger the agentic loop.
-              if (msg.end_of_turn) {
-                events.onTurn(text, msg.turn_order);
-              } else {
-                events.onTranscript(text, false, msg.turn_order);
-              }
-              break;
-            }
-          }
-        }, { signal });
-
+    await deadline(
+      new Promise<void>((resolve, reject) => {
+        ws.addEventListener("open", () => resolve(), { once: true });
         ws.addEventListener("error", (event: Event) => {
-          ac.abort();
           const detail = event instanceof ErrorEvent ? event.message : "";
           const msg = apiKey
             ? `STT connection failed${detail ? `: ${detail}` : ""}`
             : "STT connection failed — ASSEMBLYAI_API_KEY is not set";
-          const err = new Error(msg);
-          events.onError(err);
-          reject(err);
-        });
-
-        ws.addEventListener("close", (event: CloseEvent) => {
-          console.info("STT WebSocket closed", {
-            code: event.code,
-            reason: event.reason ?? "",
-            msgCount,
-          });
-          ac.abort();
-          if (event.code !== 1000 && event.code !== 1005) {
-            console.error("WebSocket closed unexpectedly", {
-              code: event.code,
-              reason: event.reason ?? "",
-            });
-            events.onError(
-              new Error(
-                `STT WebSocket closed unexpectedly (code ${event.code})`,
-              ),
-            );
-          }
-          events.onClose();
-        });
+          reject(new Error(msg));
+        }, { once: true });
       }),
       STT_CONNECTION_TIMEOUT,
     );
-    return handle;
   } catch (err: unknown) {
-    ac.abort();
     ws.close();
     if (err instanceof DOMException && err.name === "TimeoutError") {
       throw new Error("STT connection timeout");
     }
     throw err;
   }
+
+  console.info("STT WebSocket connected");
+
+  // Wire up event handlers — flat, no nesting
+  let msgCount = 0;
+
+  ws.addEventListener("message", (event: MessageEvent) => {
+    if (typeof event.data !== "string") {
+      console.debug("STT non-string message", {
+        dataType: typeof event.data,
+      });
+      return;
+    }
+    let json: unknown;
+    try {
+      json = JSON.parse(event.data);
+    } catch {
+      return;
+    }
+
+    const result = SttMessageSchema.safeParse(json);
+    if (!result.success) return;
+
+    const msg = result.data;
+    msgCount++;
+    console.info("STT message", {
+      msgCount,
+      type: msg.type,
+      transcript: msg.transcript?.slice(0, 100),
+      isFinal: msg.is_final,
+      turnOrder: msg.turn_order,
+      endOfTurn: msg.end_of_turn,
+      turnIsFormatted: msg.turn_is_formatted,
+    });
+    switch (msg.type) {
+      case "Termination":
+        events.onTermination(
+          msg.audio_duration_seconds ?? 0,
+          msg.session_duration_seconds ?? 0,
+        );
+        break;
+      case "Turn": {
+        const text = (msg.transcript ?? "").trim();
+        if (!text) break;
+        if (msg.end_of_turn) {
+          events.onTurn(text, msg.turn_order);
+        } else {
+          events.onTranscript(text, false, msg.turn_order);
+        }
+        break;
+      }
+    }
+  });
+
+  ws.addEventListener("error", (event: Event) => {
+    const detail = event instanceof ErrorEvent ? event.message : "";
+    const msg = `STT error${detail ? `: ${detail}` : ""}`;
+    events.onError(new Error(msg));
+  });
+
+  ws.addEventListener("close", (event: CloseEvent) => {
+    console.info("STT WebSocket closed", {
+      code: event.code,
+      reason: event.reason ?? "",
+      msgCount,
+    });
+    if (event.code !== 1000 && event.code !== 1005) {
+      console.error("WebSocket closed unexpectedly", {
+        code: event.code,
+        reason: event.reason ?? "",
+      });
+      events.onError(
+        new Error(
+          `STT WebSocket closed unexpectedly (code ${event.code})`,
+        ),
+      );
+    }
+    events.onClose();
+  });
+
+  return {
+    send(audio: Uint8Array) {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(audio);
+      } else {
+        console.warn("STT send skipped, ws not open", {
+          wsState: ws.readyState,
+        });
+      }
+    },
+    clear() {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "ForceEndpoint" }));
+      }
+    },
+    close() {
+      ws.close();
+    },
+  };
 }

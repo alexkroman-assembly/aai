@@ -29,5 +29,5 @@ Deno.test("orchestrator returns 400 on deploy without auth", async () => {
     new Request("http://localhost/ns/agent/deploy", { method: "POST" }),
     DUMMY_INFO,
   );
-  assertEquals(res.status, 400);
+  assertEquals(res.status, 401);
 });

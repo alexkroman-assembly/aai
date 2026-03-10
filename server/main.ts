@@ -26,15 +26,16 @@ const upstashUrl = Deno.env.get("UPSTASH_REDIS_REST_URL");
 const upstashToken = Deno.env.get("UPSTASH_REDIS_REST_TOKEN");
 const scopeSecret = Deno.env.get("KV_SCOPE_SECRET");
 
+if (!scopeSecret && Deno.env.get("AWS_ENDPOINT_URL_S3")) {
+  console.error(
+    "FATAL: KV_SCOPE_SECRET must be set in production. " +
+      "Generate one with: openssl rand -base64 32",
+  );
+  Deno.exit(1);
+}
+
 let kvStore;
 if (upstashUrl && upstashToken) {
-  if (!scopeSecret) {
-    console.error(
-      "FATAL: KV_SCOPE_SECRET must be set when Upstash is configured. " +
-        "Generate one with: openssl rand -base64 32",
-    );
-    Deno.exit(1);
-  }
   kvStore = createKvStore(upstashUrl, upstashToken);
   console.info("KV storage: Upstash Redis");
 } else {
@@ -43,7 +44,7 @@ if (upstashUrl && upstashToken) {
 }
 
 const tokenSigner = await createTokenSigner(
-  scopeSecret ?? crypto.randomUUID(),
+  scopeSecret ?? "local-dev-secret",
 );
 
 const { handler } = await createOrchestrator({ store, kvStore, tokenSigner });
