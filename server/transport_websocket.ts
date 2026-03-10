@@ -12,7 +12,11 @@ import { loadPlatformConfig } from "./config.ts";
 import { getBuiltinToolSchemas } from "./builtin_tools.ts";
 import type { ServerContext } from "./types.ts";
 
-async function discoverSlot(
+export const _internals = {
+  upgradeWebSocket: (req: Request) => Deno.upgradeWebSocket(req),
+};
+
+export async function discoverSlot(
   slug: string,
   ctx: ServerContext,
 ): Promise<AgentSlot | null> {
@@ -28,7 +32,7 @@ async function discoverSlot(
   return ctx.slots.get(slug) ?? null;
 }
 
-async function resolveSlot(
+export async function resolveSlot(
   slug: string,
   ctx: ServerContext,
 ): Promise<AgentSlot | null> {
@@ -95,7 +99,7 @@ export async function handleWebSocket(
   const { executeTool, getWorkerApi } = createToolExecutor(slot, ctx.store);
 
   const resume = new URL(req.url).searchParams.has("resume");
-  const { socket, response } = Deno.upgradeWebSocket(req);
+  const { socket, response } = _internals.upgradeWebSocket(req);
   handleSessionWebSocket(socket, ctx.sessions as Map<string, Session>, {
     createSession: (sessionId, ws) =>
       createSession({

@@ -7,6 +7,10 @@ import type { AgentSlot } from "./worker_pool.ts";
 import type { ServerContext } from "./types.ts";
 import { getServerBaseUrl, hashApiKey } from "./deploy.ts";
 
+export const _internals = {
+  upgradeWebSocket: (req: Request) => Deno.upgradeWebSocket(req),
+};
+
 export function handleDevWebSocket(
   req: Request,
   slug: string,
@@ -23,7 +27,7 @@ export function handleDevWebSocket(
     return Response.json({ error: "Missing token parameter" }, { status: 401 });
   }
 
-  const { socket, response } = Deno.upgradeWebSocket(req);
+  const { socket, response } = _internals.upgradeWebSocket(req);
 
   socket.addEventListener("open", () => {
     console.info("Dev control WebSocket connected", { slug });
@@ -81,7 +85,7 @@ export function handleDevWebSocket(
   return response;
 }
 
-async function registerDevAgent(
+export async function registerDevAgent(
   ws: WebSocket,
   slug: string,
   msg: DevRegister,

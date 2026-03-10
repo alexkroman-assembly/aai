@@ -1,6 +1,10 @@
 import { join } from "@std/path";
 import { step } from "./_output.ts";
 
+export const _internals = {
+  step,
+};
+
 export type NewOptions = {
   targetDir: string;
   template: string;
@@ -41,7 +45,7 @@ export async function runNew(opts: NewOptions): Promise<string> {
 
   const src = join(templatesDir, template);
 
-  step("Create", `from template '${template}'`);
+  _internals.step("Create", `from template '${template}'`);
 
   await Deno.mkdir(targetDir, { recursive: true });
 
@@ -74,6 +78,6 @@ export async function runNew(opts: NewOptions): Promise<string> {
     );
   } catch { /* no .env.example in template */ }
 
-  step("Done", targetDir);
+  _internals.step("Done", targetDir);
   return targetDir;
 }
