@@ -1,4 +1,4 @@
-import { defineAgent, z } from "@aai/sdk";
+import { defineAgent, multiTool, z } from "@aai/sdk";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -560,21 +560,24 @@ export default defineAgent({
 
 Your role combines call-taker, dispatcher, and incident commander. You speak like an experienced dispatcher: calm, precise, and authoritative. Never panic. Use brevity codes and dispatch terminology naturally.
 
-Core capabilities and when to use each tool:
+You have three tool groups:
 
-INTAKE: When someone reports an emergency, use create_incident to log it. Ask for location first, then nature of emergency, then caller info. Speed matters for critical calls.
+INCIDENT TOOL (action: create, triage, update_status, escalate, get, add_note):
+- INTAKE: Use action "create" to log a new incident. Ask for location first, then nature of emergency, then caller info. Speed matters for critical calls.
+- TRIAGE: After creating, use action "triage" to assess severity. The system recommends severity, type, and protocols. Review and confirm or override.
+- STATUS: Use action "update_status" to move incidents through the workflow. Use action "get" for details on a specific incident.
+- ESCALATION: Use action "escalate" when an incident exceeds current capacity or severity increases.
+- NOTES: Use action "add_note" for ongoing situational updates.
 
-TRIAGE: After creating an incident, use triage_incident to assess severity. The system will recommend severity, type, and applicable protocols. Review and confirm or override the recommendations.
+RESOURCES TOOL (action: dispatch, get_available, update_status):
+- DISPATCH: Use action "dispatch" to assign units. The system recommends optimal resources based on incident type and severity. You can also manually dispatch specific units.
+- AVAILABILITY: Use action "get_available" to see what units are free.
+- STATUS: Use action "update_status" when units radio in status changes.
 
-DISPATCH: Use dispatch_resources to assign units. The system recommends optimal resources based on incident type and severity. You can also manually dispatch specific units.
-
-STATUS TRACKING: Use update_incident_status to move incidents through the workflow. Use get_incident for details on a specific incident. Use get_dashboard for the full operational picture.
-
-RESOURCE MANAGEMENT: Use get_available_resources to see what units are free. Use update_resource_status when units report status changes.
-
-PROTOCOLS: Use get_protocols to retrieve step-by-step response protocols for any incident type. Follow them precisely for critical incidents.
-
-ESCALATION: Use escalate_incident when an incident exceeds current resource capacity or severity increases.
+OPS TOOL (action: dashboard, protocols, run_scenario):
+- DASHBOARD: Use action "dashboard" for the full operational picture.
+- PROTOCOLS: Use action "protocols" to retrieve step-by-step response protocols. Follow them precisely for critical incidents.
+- SCENARIOS: Use action "run_scenario" for training exercises.
 
 SEARCH: Use web_search to look up hazmat placard numbers, drug interactions, building addresses, or other reference information during active incidents.
 
@@ -597,922 +600,940 @@ Radio style: "Medic-1, respond priority one to 400 Oak Street, report of cardiac
   state: createState,
 
   tools: {
-    create_incident: {
+    incident: multiTool({
       description:
-        "Create a new incident from an incoming emergency call. Returns incident ID and initial assessment.",
-      parameters: z.object({
-        location: z.string().describe("Address or location description"),
-        description: z.string().describe(
-          "Nature of the emergency as described by caller",
-        ),
-        callerName: z.string().describe("Caller's name").optional(),
-        callerPhone: z.string().describe("Callback number").optional(),
-        estimatedCasualties: z.number().describe(
-          "Estimated number of casualties if known",
-        ).optional(),
-        hazards: z.array(z.string()).describe(
-          "Known hazards: fire, chemical, electrical, structural, weapons",
-        ).optional(),
-      }),
-      execute: (args, ctx) => {
-        const {
-          location,
-          description,
-          callerName,
-          callerPhone,
-          estimatedCasualties,
-          hazards,
-        } = args as {
-          location: string;
-          description: string;
-          callerName?: string;
-          callerPhone?: string;
-          estimatedCasualties?: number;
-          hazards?: string[];
-        };
-        const state = ctx.state as unknown as DispatchState;
-        state.incidentCounter++;
-        const id = `INC-${String(state.incidentCounter).padStart(4, "0")}`;
+        "Manage incidents: create from incoming calls, triage, update status, escalate, get details, or add notes.",
+      actions: {
+        create: {
+          schema: z.object({
+            location: z.string().describe("Address or location description"),
+            description: z.string().describe(
+              "Nature of the emergency as described by caller",
+            ),
+            callerName: z.string().describe("Caller's name").optional(),
+            callerPhone: z.string().describe("Callback number").optional(),
+            estimatedCasualties: z.number().describe(
+              "Estimated number of casualties if known",
+            ).optional(),
+            hazards: z.array(z.string()).describe(
+              "Known hazards: fire, chemical, electrical, structural, weapons",
+            ).optional(),
+          }),
+          execute: (args, ctx) => {
+            const {
+              location,
+              description,
+              callerName,
+              callerPhone,
+              estimatedCasualties,
+              hazards,
+            } = args as {
+              location: string;
+              description: string;
+              callerName?: string;
+              callerPhone?: string;
+              estimatedCasualties?: number;
+              hazards?: string[];
+            };
+            const state = ctx.state as unknown as DispatchState;
+            state.incidentCounter++;
+            const id = `INC-${String(state.incidentCounter).padStart(4, "0")}`;
 
-        const recSeverity = recommendSeverity(description);
-        const recType = recommendType(description);
-        const triageScore = calculateTriageScore(
-          recSeverity,
-          recType,
-          estimatedCasualties || 0,
-          hazards?.length || 0,
-        );
-
-        const incident: Incident = {
-          id,
-          type: recType,
-          severity: recSeverity,
-          status: "incoming",
-          location,
-          description,
-          callerName: callerName || "Unknown",
-          callerPhone: callerPhone || "Unknown",
-          triageScore,
-          assignedResources: [],
-          timeline: [{
-            time: now(),
-            event: `Incident created: ${description}`,
-          }],
-          notes: [],
-          createdAt: now(),
-          updatedAt: now(),
-          escalationLevel: 0,
-          protocolsActivated: [],
-          casualties: {
-            confirmed: 0,
-            estimated: estimatedCasualties || 0,
-            treated: 0,
-          },
-          hazards: hazards || [],
-        };
-
-        state.incidents[id] = incident;
-        recalculateAlertLevel(state);
-
-        const protocols = getApplicableProtocols(recType, recSeverity);
-        const recommended = recommendResources(recType, recSeverity, state);
-
-        return {
-          incidentId: id,
-          recommendedSeverity: recSeverity,
-          recommendedType: recType,
-          triageScore,
-          applicableProtocols: protocols.map((p) => p.name),
-          recommendedResources: recommended.map((r) => ({
-            callsign: r.callsign,
-            type: r.type,
-            capabilities: r.capabilities,
-          })),
-          systemAlertLevel: state.alertLevel,
-          message: recSeverity === "critical"
-            ? `PRIORITY ONE — ${id} created. Immediate dispatch recommended. ${protocols.length} protocol(s) applicable.`
-            : `${id} created. Triage score ${triageScore}. ${recommended.length} resource(s) recommended.`,
-        };
-      },
-    },
-
-    triage_incident: {
-      description:
-        "Perform detailed triage on an incident. Override auto-detected severity and type if needed.",
-      parameters: z.object({
-        incidentId: z.string().describe("The incident ID"),
-        severity: z.enum(["critical", "urgent", "moderate", "minor"]).describe(
-          "Confirmed severity after triage",
-        ).optional(),
-        type: z.enum([
-          "medical",
-          "fire",
-          "hazmat",
-          "traffic",
-          "crime",
-          "natural_disaster",
-          "utility",
-          "other",
-        ]).describe("Confirmed incident type").optional(),
-        additionalHazards: z.array(z.string()).describe(
-          "Any additional hazards identified",
-        ).optional(),
-        casualtyUpdate: z.number().describe("Updated casualty count")
-          .optional(),
-        notes: z.string().describe("Triage notes").optional(),
-      }),
-      execute: (args, ctx) => {
-        const {
-          incidentId,
-          severity,
-          type,
-          additionalHazards,
-          casualtyUpdate,
-          notes,
-        } = args as {
-          incidentId: string;
-          severity?: Severity;
-          type?: IncidentType;
-          additionalHazards?: string[];
-          casualtyUpdate?: number;
-          notes?: string;
-        };
-        const state = ctx.state as unknown as DispatchState;
-        const inc = state.incidents[incidentId];
-        if (!inc) return { error: `Incident ${incidentId} not found` };
-
-        if (severity) inc.severity = severity;
-        if (type) inc.type = type;
-        if (additionalHazards) inc.hazards.push(...additionalHazards);
-        if (casualtyUpdate !== undefined) {
-          inc.casualties.estimated = casualtyUpdate;
-        }
-        if (notes) inc.notes.push(notes);
-
-        inc.triageScore = calculateTriageScore(
-          inc.severity,
-          inc.type,
-          inc.casualties.estimated,
-          inc.hazards.length,
-        );
-        inc.status = "triaged";
-        inc.updatedAt = now();
-        inc.timeline.push({
-          time: now(),
-          event:
-            `Triaged: ${inc.severity} ${inc.type}, score ${inc.triageScore}`,
-        });
-
-        recalculateAlertLevel(state);
-
-        const protocols = getApplicableProtocols(inc.type, inc.severity);
-        const recommended = recommendResources(inc.type, inc.severity, state);
-
-        return {
-          incidentId,
-          severity: inc.severity,
-          type: inc.type,
-          triageScore: inc.triageScore,
-          hazards: inc.hazards,
-          estimatedCasualties: inc.casualties.estimated,
-          protocols: protocols.map((p) => ({
-            name: p.name,
-            steps: p.steps,
-            requiredResources: p.requiredResources,
-          })),
-          recommendedResources: recommended.map((r) => ({
-            callsign: r.callsign,
-            type: r.type,
-          })),
-          systemAlertLevel: state.alertLevel,
-        };
-      },
-    },
-
-    dispatch_resources: {
-      description:
-        "Dispatch one or more resources to an incident. Can auto-dispatch recommended resources or specify by callsign.",
-      parameters: z.object({
-        incidentId: z.string().describe("The incident ID"),
-        callsigns: z.array(z.string()).describe(
-          "Resource callsigns to dispatch. Use 'auto' for system-recommended resources.",
-        ).optional(),
-        autoDispatch: z.boolean().describe(
-          "If true, automatically dispatch recommended resources",
-        ).optional(),
-        priority: z.enum(["routine", "priority", "emergency"]).describe(
-          "Dispatch priority — affects simulated ETA",
-        ).optional(),
-      }),
-      execute: (args, ctx) => {
-        const { incidentId, callsigns, autoDispatch, priority } = args as {
-          incidentId: string;
-          callsigns?: string[];
-          autoDispatch?: boolean;
-          priority?: "routine" | "priority" | "emergency";
-        };
-        const state = ctx.state as unknown as DispatchState;
-        const inc = state.incidents[incidentId];
-        if (!inc) return { error: `Incident ${incidentId} not found` };
-
-        const dispatched: { callsign: string; type: string; eta: number }[] =
-          [];
-        const failed: { callsign: string; reason: string }[] = [];
-
-        let resourcesToDispatch: Resource[] = [];
-
-        if (autoDispatch) {
-          resourcesToDispatch = recommendResources(
-            inc.type,
-            inc.severity,
-            state,
-          );
-        } else if (callsigns) {
-          for (const cs of callsigns) {
-            const r = state.resources.find((r) =>
-              r.callsign.toLowerCase() === cs.toLowerCase()
+            const recSeverity = recommendSeverity(description);
+            const recType = recommendType(description);
+            const triageScore = calculateTriageScore(
+              recSeverity,
+              recType,
+              estimatedCasualties || 0,
+              hazards?.length || 0,
             );
-            if (!r) {
-              failed.push({ callsign: cs, reason: "Not found" });
-              continue;
-            }
-            if (r.status !== "available") {
-              failed.push({ callsign: cs, reason: `Currently ${r.status}` });
-              continue;
-            }
-            resourcesToDispatch.push(r);
-          }
-        }
 
-        const etaBase = priority === "emergency"
-          ? 3
-          : priority === "priority"
-          ? 6
-          : 10;
+            const incident: Incident = {
+              id,
+              type: recType,
+              severity: recSeverity,
+              status: "incoming",
+              location,
+              description,
+              callerName: callerName || "Unknown",
+              callerPhone: callerPhone || "Unknown",
+              triageScore,
+              assignedResources: [],
+              timeline: [{
+                time: now(),
+                event: `Incident created: ${description}`,
+              }],
+              notes: [],
+              createdAt: now(),
+              updatedAt: now(),
+              escalationLevel: 0,
+              protocolsActivated: [],
+              casualties: {
+                confirmed: 0,
+                estimated: estimatedCasualties || 0,
+                treated: 0,
+              },
+              hazards: hazards || [],
+            };
 
-        for (const r of resourcesToDispatch) {
-          const eta = etaBase + Math.floor(Math.random() * 5);
-          r.status = "dispatched";
-          r.assignedIncident = incidentId;
-          r.eta = eta;
-          inc.assignedResources.push(r.id);
-          dispatched.push({ callsign: r.callsign, type: r.type, eta });
-          inc.timeline.push({
-            time: now(),
-            event: `Dispatched ${r.callsign} — ETA ${eta} min`,
-          });
-        }
+            state.incidents[id] = incident;
+            recalculateAlertLevel(state);
 
-        if (dispatched.length > 0) {
-          inc.status = "dispatched";
-          inc.updatedAt = now();
-        }
+            const protocols = getApplicableProtocols(recType, recSeverity);
+            const recommended = recommendResources(
+              recType,
+              recSeverity,
+              state,
+            );
 
-        recalculateAlertLevel(state);
-
-        const availableCount = state.resources.filter((r) =>
-          r.status === "available"
-        ).length;
-
-        return {
-          incidentId,
-          dispatched,
-          failed: failed.length > 0 ? failed : undefined,
-          totalAssignedToIncident: inc.assignedResources.length,
-          remainingAvailableResources: availableCount,
-          systemAlertLevel: state.alertLevel,
-          capacityWarning: availableCount <= 3
-            ? "WARNING: Resource capacity critically low. Consider mutual aid."
-            : undefined,
-        };
-      },
-    },
-
-    update_incident_status: {
-      description:
-        "Update the status of an incident as it progresses through the response lifecycle.",
-      parameters: z.object({
-        incidentId: z.string().describe("The incident ID"),
-        status: z.enum(["en_route", "on_scene", "resolved", "escalated"])
-          .describe("New status"),
-        notes: z.string().describe("Status update notes").optional(),
-        casualtyUpdate: z.object({
-          confirmed: z.number().optional(),
-          treated: z.number().optional(),
-        }).describe("Updated casualty numbers").optional(),
-      }),
-      execute: (args, ctx) => {
-        const { incidentId, status, notes, casualtyUpdate } = args as {
-          incidentId: string;
-          status: Status;
-          notes?: string;
-          casualtyUpdate?: { confirmed?: number; treated?: number };
-        };
-        const state = ctx.state as unknown as DispatchState;
-        const inc = state.incidents[incidentId];
-        if (!inc) return { error: `Incident ${incidentId} not found` };
-
-        inc.status = status;
-        inc.updatedAt = now();
-        inc.timeline.push({
-          time: now(),
-          event: `Status → ${status}${notes ? `: ${notes}` : ""}`,
-        });
-        if (notes) inc.notes.push(notes);
-
-        if (casualtyUpdate) {
-          if (casualtyUpdate.confirmed !== undefined) {
-            inc.casualties
-              .confirmed = casualtyUpdate.confirmed;
-          }
-          if (casualtyUpdate.treated !== undefined) {
-            inc.casualties.treated = casualtyUpdate.treated;
-          }
-        }
-
-        // Release resources on resolution
-        if (status === "resolved") {
-          for (const rId of inc.assignedResources) {
-            const r = state.resources.find((r) => r.id === rId);
-            if (r) {
-              r.status = "returning";
-              r.assignedIncident = null;
-              r.eta = null;
-              // Auto-return to available after a delay (simulated)
-              setTimeout(() => {
-                r.status = "available";
-              }, 2000);
-            }
-          }
-          inc.timeline.push({
-            time: now(),
-            event: "All resources released — incident closed",
-          });
-        }
-
-        // Update resource statuses for en_route/on_scene
-        if (status === "en_route" || status === "on_scene") {
-          for (const rId of inc.assignedResources) {
-            const r = state.resources.find((r) => r.id === rId);
-            if (r) r.status = status;
-          }
-        }
-
-        recalculateAlertLevel(state);
-
-        return {
-          incidentId,
-          newStatus: status,
-          timeline: inc.timeline.slice(-5).map((t) => t.event),
-          casualties: inc.casualties,
-          systemAlertLevel: state.alertLevel,
-        };
-      },
-    },
-
-    escalate_incident: {
-      description:
-        "Escalate an incident — increases priority, requests additional resources, activates higher-level protocols.",
-      parameters: z.object({
-        incidentId: z.string().describe("The incident ID"),
-        reason: z.string().describe("Reason for escalation"),
-        requestMutualAid: z.boolean().describe(
-          "Whether to request mutual aid from neighboring jurisdictions",
-        ).optional(),
-        newSeverity: z.enum(["critical", "urgent"]).describe(
-          "Escalated severity level",
-        ).optional(),
-      }),
-      execute: (args, ctx) => {
-        const { incidentId, reason, requestMutualAid, newSeverity } = args as {
-          incidentId: string;
-          reason: string;
-          requestMutualAid?: boolean;
-          newSeverity?: "critical" | "urgent";
-        };
-        const state = ctx.state as unknown as DispatchState;
-        const inc = state.incidents[incidentId];
-        if (!inc) return { error: `Incident ${incidentId} not found` };
-
-        inc.escalationLevel++;
-        if (newSeverity) inc.severity = newSeverity;
-        inc.status = "escalated";
-        inc.updatedAt = now();
-        inc.timeline.push({
-          time: now(),
-          event: `ESCALATED (Level ${inc.escalationLevel}): ${reason}`,
-        });
-        inc.notes.push(`Escalation: ${reason}`);
-
-        if (requestMutualAid) {
-          state.mutualAidRequested = true;
-          inc.timeline.push({
-            time: now(),
-            event: "Mutual aid requested from neighboring jurisdictions",
-          });
-          // Simulate mutual aid resources arriving
-          state.resources.push(
-            {
-              id: `MA-${Date.now()}-1`,
-              type: "ambulance",
-              callsign: "Mutual-Aid-Medic",
-              status: "available",
-              assignedIncident: null,
-              eta: null,
-              capabilities: ["als"],
-            },
-            {
-              id: `MA-${Date.now()}-2`,
-              type: "fire_engine",
-              callsign: "Mutual-Aid-Engine",
-              status: "available",
-              assignedIncident: null,
-              eta: null,
-              capabilities: ["structural"],
-            },
-          );
-        }
-
-        inc.triageScore = calculateTriageScore(
-          inc.severity,
-          inc.type,
-          inc.casualties.estimated,
-          inc.hazards.length,
-        );
-        recalculateAlertLevel(state);
-
-        const additionalResources = recommendResources(
-          inc.type,
-          inc.severity,
-          state,
-        ).filter(
-          (r) => !inc.assignedResources.includes(r.id),
-        );
-
-        return {
-          incidentId,
-          escalationLevel: inc.escalationLevel,
-          newSeverity: inc.severity,
-          newTriageScore: inc.triageScore,
-          mutualAidRequested: requestMutualAid || false,
-          additionalResourcesAvailable: additionalResources.map((r) => ({
-            callsign: r.callsign,
-            type: r.type,
-          })),
-          systemAlertLevel: state.alertLevel,
-          message:
-            `ESCALATION CONFIRMED — ${incidentId} now Level ${inc.escalationLevel}. ${additionalResources.length} additional resource(s) available for dispatch.`,
-        };
-      },
-    },
-
-    get_incident: {
-      description:
-        "Get full details on a specific incident including timeline, resources, and protocols.",
-      parameters: z.object({
-        incidentId: z.string().describe("The incident ID"),
-      }),
-      execute: (args, ctx) => {
-        const { incidentId } = args as { incidentId: string };
-        const state = ctx.state as unknown as DispatchState;
-        const inc = state.incidents[incidentId];
-        if (!inc) return { error: `Incident ${incidentId} not found` };
-
-        const assignedResourceDetails = inc.assignedResources.map((rId) => {
-          const r = state.resources.find((r) => r.id === rId);
-          return r
-            ? {
-              callsign: r.callsign,
-              type: r.type,
-              status: r.status,
-              eta: r.eta,
-            }
-            : null;
-        }).filter(Boolean);
-
-        const ageMinutes = Math.round((now() - inc.createdAt) / 60000);
-
-        return {
-          ...inc,
-          ageMinutes,
-          assignedResourceDetails,
-          applicableProtocols: getApplicableProtocols(inc.type, inc.severity)
-            .map((p) => p.name),
-        };
-      },
-    },
-
-    get_dashboard: {
-      description:
-        "Get the full operational dashboard — all active incidents, resource status, and system metrics.",
-      execute: (_args, ctx) => {
-        const state = ctx.state as unknown as DispatchState;
-
-        const activeIncidents = Object.values(state.incidents)
-          .filter((i) => i.status !== "resolved")
-          .sort((a, b) => b.triageScore - a.triageScore);
-
-        const resolvedCount =
-          Object.values(state.incidents).filter((i) => i.status === "resolved")
-            .length;
-
-        const resourceSummary = {
-          total: state.resources.length,
-          available:
-            state.resources.filter((r) => r.status === "available").length,
-          dispatched:
-            state.resources.filter((r) => r.status === "dispatched").length,
-          enRoute:
-            state.resources.filter((r) => r.status === "en_route").length,
-          onScene:
-            state.resources.filter((r) => r.status === "on_scene").length,
-          returning:
-            state.resources.filter((r) => r.status === "returning").length,
-        };
-
-        const utilization = Math.round(
-          (1 - resourceSummary.available / resourceSummary.total) * 100,
-        );
-
-        return {
-          systemAlertLevel: state.alertLevel,
-          mutualAidActive: state.mutualAidRequested,
-          resourceUtilization: `${utilization}%`,
-          resourceSummary,
-          activeIncidentCount: activeIncidents.length,
-          resolvedIncidentCount: resolvedCount,
-          activeIncidents: activeIncidents.map((i) => ({
-            id: i.id,
-            type: i.type,
-            severity: i.severity,
-            status: i.status,
-            location: i.location,
-            triageScore: i.triageScore,
-            assignedResourceCount: i.assignedResources.length,
-            ageMinutes: Math.round((now() - i.createdAt) / 60000),
-            casualties: i.casualties,
-          })),
-          availableResources: state.resources.filter((r) =>
-            r.status === "available"
-          ).map((r) => ({
-            callsign: r.callsign,
-            type: r.type,
-            capabilities: r.capabilities,
-          })),
-        };
-      },
-    },
-
-    get_available_resources: {
-      description:
-        "List all available resources with their capabilities, optionally filtered by type.",
-      parameters: z.object({
-        type: z.enum([
-          "ambulance",
-          "fire_engine",
-          "police",
-          "hazmat_team",
-          "helicopter",
-          "k9_unit",
-          "swat",
-          "ems_supervisor",
-          "all",
-        ]).describe("Filter by resource type, or 'all'").optional(),
-      }),
-      execute: (args, ctx) => {
-        const { type } = args as { type?: string };
-        const state = ctx.state as unknown as DispatchState;
-        let resources = state.resources;
-        if (type && type !== "all") {
-          resources = resources.filter((r) => r.type === type);
-        }
-
-        return {
-          resources: resources.map((r) => ({
-            callsign: r.callsign,
-            type: r.type,
-            status: r.status,
-            assignedIncident: r.assignedIncident,
-            eta: r.eta,
-            capabilities: r.capabilities,
-          })),
-          summary: {
-            total: resources.length,
-            available: resources.filter((r) => r.status === "available").length,
-            committed: resources.filter((r) => r.status !== "available").length,
+            return {
+              incidentId: id,
+              recommendedSeverity: recSeverity,
+              recommendedType: recType,
+              triageScore,
+              applicableProtocols: protocols.map((p) => p.name),
+              recommendedResources: recommended.map((r) => ({
+                callsign: r.callsign,
+                type: r.type,
+                capabilities: r.capabilities,
+              })),
+              systemAlertLevel: state.alertLevel,
+              message: recSeverity === "critical"
+                ? `PRIORITY ONE — ${id} created. Immediate dispatch recommended. ${protocols.length} protocol(s) applicable.`
+                : `${id} created. Triage score ${triageScore}. ${recommended.length} resource(s) recommended.`,
+            };
           },
-        };
-      },
-    },
+        },
+        triage: {
+          schema: z.object({
+            incidentId: z.string().describe("The incident ID"),
+            severity: z.enum(["critical", "urgent", "moderate", "minor"])
+              .describe("Confirmed severity after triage").optional(),
+            type: z.enum([
+              "medical",
+              "fire",
+              "hazmat",
+              "traffic",
+              "crime",
+              "natural_disaster",
+              "utility",
+              "other",
+            ]).describe("Confirmed incident type").optional(),
+            additionalHazards: z.array(z.string()).describe(
+              "Any additional hazards identified",
+            ).optional(),
+            casualtyUpdate: z.number().describe("Updated casualty count")
+              .optional(),
+            notes: z.string().describe("Triage notes").optional(),
+          }),
+          execute: (args, ctx) => {
+            const {
+              incidentId,
+              severity,
+              type,
+              additionalHazards,
+              casualtyUpdate,
+              notes,
+            } = args as {
+              incidentId: string;
+              severity?: Severity;
+              type?: IncidentType;
+              additionalHazards?: string[];
+              casualtyUpdate?: number;
+              notes?: string;
+            };
+            const state = ctx.state as unknown as DispatchState;
+            const inc = state.incidents[incidentId];
+            if (!inc) return { error: `Incident ${incidentId} not found` };
 
-    update_resource_status: {
-      description:
-        "Update a resource's operational status — used when units radio in status changes.",
-      parameters: z.object({
-        callsign: z.string().describe("The resource callsign"),
-        status: z.enum([
-          "available",
-          "dispatched",
-          "en_route",
-          "on_scene",
-          "returning",
-        ]).describe("New status"),
-        notes: z.string().describe("Status notes").optional(),
-      }),
-      execute: (args, ctx) => {
-        const { callsign, status, notes } = args as {
-          callsign: string;
-          status: Resource["status"];
-          notes?: string;
-        };
-        const state = ctx.state as unknown as DispatchState;
-        const resource = state.resources.find((r) =>
-          r.callsign.toLowerCase() === callsign.toLowerCase()
-        );
-        if (!resource) return { error: `Resource ${callsign} not found` };
+            if (severity) inc.severity = severity;
+            if (type) inc.type = type;
+            if (additionalHazards) inc.hazards.push(...additionalHazards);
+            if (casualtyUpdate !== undefined) {
+              inc.casualties.estimated = casualtyUpdate;
+            }
+            if (notes) inc.notes.push(notes);
 
-        const previousStatus = resource.status;
-        resource.status = status;
-
-        if (status === "available") {
-          resource.assignedIncident = null;
-          resource.eta = null;
-        }
-
-        // Log to incident timeline if assigned
-        if (resource.assignedIncident) {
-          const inc = state.incidents[resource.assignedIncident];
-          if (inc) {
+            inc.triageScore = calculateTriageScore(
+              inc.severity,
+              inc.type,
+              inc.casualties.estimated,
+              inc.hazards.length,
+            );
+            inc.status = "triaged";
+            inc.updatedAt = now();
             inc.timeline.push({
               time: now(),
-              event: `${callsign}: ${previousStatus} → ${status}${
-                notes ? ` (${notes})` : ""
-              }`,
+              event:
+                `Triaged: ${inc.severity} ${inc.type}, score ${inc.triageScore}`,
             });
+
+            recalculateAlertLevel(state);
+
+            const protocols = getApplicableProtocols(inc.type, inc.severity);
+            const recommended = recommendResources(
+              inc.type,
+              inc.severity,
+              state,
+            );
+
+            return {
+              incidentId,
+              severity: inc.severity,
+              type: inc.type,
+              triageScore: inc.triageScore,
+              hazards: inc.hazards,
+              estimatedCasualties: inc.casualties.estimated,
+              protocols: protocols.map((p) => ({
+                name: p.name,
+                steps: p.steps,
+                requiredResources: p.requiredResources,
+              })),
+              recommendedResources: recommended.map((r) => ({
+                callsign: r.callsign,
+                type: r.type,
+              })),
+              systemAlertLevel: state.alertLevel,
+            };
+          },
+        },
+        update_status: {
+          schema: z.object({
+            incidentId: z.string().describe("The incident ID"),
+            status: z.enum(["en_route", "on_scene", "resolved", "escalated"])
+              .describe("New status"),
+            notes: z.string().describe("Status update notes").optional(),
+            casualtyUpdate: z.object({
+              confirmed: z.number().optional(),
+              treated: z.number().optional(),
+            }).describe("Updated casualty numbers").optional(),
+          }),
+          execute: (args, ctx) => {
+            const { incidentId, status, notes, casualtyUpdate } = args as {
+              incidentId: string;
+              status: Status;
+              notes?: string;
+              casualtyUpdate?: { confirmed?: number; treated?: number };
+            };
+            const state = ctx.state as unknown as DispatchState;
+            const inc = state.incidents[incidentId];
+            if (!inc) return { error: `Incident ${incidentId} not found` };
+
+            inc.status = status;
             inc.updatedAt = now();
-          }
-        }
+            inc.timeline.push({
+              time: now(),
+              event: `Status → ${status}${notes ? `: ${notes}` : ""}`,
+            });
+            if (notes) inc.notes.push(notes);
 
-        recalculateAlertLevel(state);
+            if (casualtyUpdate) {
+              if (casualtyUpdate.confirmed !== undefined) {
+                inc.casualties.confirmed = casualtyUpdate.confirmed;
+              }
+              if (casualtyUpdate.treated !== undefined) {
+                inc.casualties.treated = casualtyUpdate.treated;
+              }
+            }
 
-        return {
-          callsign: resource.callsign,
-          previousStatus,
-          newStatus: status,
-          assignedIncident: resource.assignedIncident,
-          systemAlertLevel: state.alertLevel,
-        };
+            // Release resources on resolution
+            if (status === "resolved") {
+              for (const rId of inc.assignedResources) {
+                const r = state.resources.find((r) => r.id === rId);
+                if (r) {
+                  r.status = "returning";
+                  r.assignedIncident = null;
+                  r.eta = null;
+                  // Auto-return to available after a delay (simulated)
+                  setTimeout(() => {
+                    r.status = "available";
+                  }, 2000);
+                }
+              }
+              inc.timeline.push({
+                time: now(),
+                event: "All resources released — incident closed",
+              });
+            }
+
+            // Update resource statuses for en_route/on_scene
+            if (status === "en_route" || status === "on_scene") {
+              for (const rId of inc.assignedResources) {
+                const r = state.resources.find((r) => r.id === rId);
+                if (r) r.status = status;
+              }
+            }
+
+            recalculateAlertLevel(state);
+
+            return {
+              incidentId,
+              newStatus: status,
+              timeline: inc.timeline.slice(-5).map((t) => t.event),
+              casualties: inc.casualties,
+              systemAlertLevel: state.alertLevel,
+            };
+          },
+        },
+        escalate: {
+          schema: z.object({
+            incidentId: z.string().describe("The incident ID"),
+            reason: z.string().describe("Reason for escalation"),
+            requestMutualAid: z.boolean().describe(
+              "Whether to request mutual aid from neighboring jurisdictions",
+            ).optional(),
+            newSeverity: z.enum(["critical", "urgent"]).describe(
+              "Escalated severity level",
+            ).optional(),
+          }),
+          execute: (args, ctx) => {
+            const { incidentId, reason, requestMutualAid, newSeverity } =
+              args as {
+                incidentId: string;
+                reason: string;
+                requestMutualAid?: boolean;
+                newSeverity?: "critical" | "urgent";
+              };
+            const state = ctx.state as unknown as DispatchState;
+            const inc = state.incidents[incidentId];
+            if (!inc) return { error: `Incident ${incidentId} not found` };
+
+            inc.escalationLevel++;
+            if (newSeverity) inc.severity = newSeverity;
+            inc.status = "escalated";
+            inc.updatedAt = now();
+            inc.timeline.push({
+              time: now(),
+              event: `ESCALATED (Level ${inc.escalationLevel}): ${reason}`,
+            });
+            inc.notes.push(`Escalation: ${reason}`);
+
+            if (requestMutualAid) {
+              state.mutualAidRequested = true;
+              inc.timeline.push({
+                time: now(),
+                event: "Mutual aid requested from neighboring jurisdictions",
+              });
+              // Simulate mutual aid resources arriving
+              state.resources.push(
+                {
+                  id: `MA-${Date.now()}-1`,
+                  type: "ambulance",
+                  callsign: "Mutual-Aid-Medic",
+                  status: "available",
+                  assignedIncident: null,
+                  eta: null,
+                  capabilities: ["als"],
+                },
+                {
+                  id: `MA-${Date.now()}-2`,
+                  type: "fire_engine",
+                  callsign: "Mutual-Aid-Engine",
+                  status: "available",
+                  assignedIncident: null,
+                  eta: null,
+                  capabilities: ["structural"],
+                },
+              );
+            }
+
+            inc.triageScore = calculateTriageScore(
+              inc.severity,
+              inc.type,
+              inc.casualties.estimated,
+              inc.hazards.length,
+            );
+            recalculateAlertLevel(state);
+
+            const additionalResources = recommendResources(
+              inc.type,
+              inc.severity,
+              state,
+            ).filter(
+              (r) => !inc.assignedResources.includes(r.id),
+            );
+
+            return {
+              incidentId,
+              escalationLevel: inc.escalationLevel,
+              newSeverity: inc.severity,
+              newTriageScore: inc.triageScore,
+              mutualAidRequested: requestMutualAid || false,
+              additionalResourcesAvailable: additionalResources.map((r) => ({
+                callsign: r.callsign,
+                type: r.type,
+              })),
+              systemAlertLevel: state.alertLevel,
+              message:
+                `ESCALATION CONFIRMED — ${incidentId} now Level ${inc.escalationLevel}. ${additionalResources.length} additional resource(s) available for dispatch.`,
+            };
+          },
+        },
+        get: {
+          schema: z.object({
+            incidentId: z.string().describe("The incident ID"),
+          }),
+          execute: (args, ctx) => {
+            const { incidentId } = args as { incidentId: string };
+            const state = ctx.state as unknown as DispatchState;
+            const inc = state.incidents[incidentId];
+            if (!inc) return { error: `Incident ${incidentId} not found` };
+
+            const assignedResourceDetails = inc.assignedResources.map(
+              (rId) => {
+                const r = state.resources.find((r) => r.id === rId);
+                return r
+                  ? {
+                    callsign: r.callsign,
+                    type: r.type,
+                    status: r.status,
+                    eta: r.eta,
+                  }
+                  : null;
+              },
+            ).filter(Boolean);
+
+            const ageMinutes = Math.round((now() - inc.createdAt) / 60000);
+
+            return {
+              ...inc,
+              ageMinutes,
+              assignedResourceDetails,
+              applicableProtocols: getApplicableProtocols(
+                inc.type,
+                inc.severity,
+              )
+                .map((p) => p.name),
+            };
+          },
+        },
+        add_note: {
+          schema: z.object({
+            incidentId: z.string().describe("The incident ID"),
+            note: z.string().describe("The note to add"),
+            source: z.string().describe(
+              "Who reported this — unit callsign or caller",
+            ).optional(),
+          }),
+          execute: (args, ctx) => {
+            const { incidentId, note, source } = args as {
+              incidentId: string;
+              note: string;
+              source?: string;
+            };
+            const state = ctx.state as unknown as DispatchState;
+            const inc = state.incidents[incidentId];
+            if (!inc) return { error: `Incident ${incidentId} not found` };
+
+            const entry = source ? `[${source}] ${note}` : note;
+            inc.notes.push(entry);
+            inc.timeline.push({ time: now(), event: entry });
+            inc.updatedAt = now();
+
+            return {
+              incidentId,
+              noteAdded: entry,
+              totalNotes: inc.notes.length,
+            };
+          },
+        },
       },
-    },
+    }),
 
-    get_protocols: {
+    resources: multiTool({
       description:
-        "Get detailed response protocols for a given incident type and severity level.",
-      parameters: z.object({
-        incidentType: z.enum([
-          "medical",
-          "fire",
-          "hazmat",
-          "traffic",
-          "crime",
-          "natural_disaster",
-          "utility",
-          "other",
-        ]).describe("Type of incident"),
-        severity: z.enum(["critical", "urgent", "moderate", "minor"]).describe(
-          "Severity level",
-        ),
-      }),
-      execute: (args) => {
-        const { incidentType, severity } = args as {
-          incidentType: string;
-          severity: string;
-        };
-        const protocols = getApplicableProtocols(
-          incidentType as IncidentType,
-          severity as Severity,
-        );
-        if (protocols.length === 0) {
-          return {
-            message:
-              "No specific protocols for this combination. Use standard operating procedures.",
-            protocols: [],
-          };
-        }
-        return {
-          protocols: protocols.map((p) => ({
-            name: p.name,
-            steps: p.steps,
-            requiredResources: p.requiredResources,
-          })),
-        };
-      },
-    },
+        "Manage resources: dispatch units to incidents, list available resources, or update unit status.",
+      actions: {
+        dispatch: {
+          schema: z.object({
+            incidentId: z.string().describe("The incident ID"),
+            callsigns: z.array(z.string()).describe(
+              "Resource callsigns to dispatch. Use 'auto' for system-recommended resources.",
+            ).optional(),
+            autoDispatch: z.boolean().describe(
+              "If true, automatically dispatch recommended resources",
+            ).optional(),
+            priority: z.enum(["routine", "priority", "emergency"]).describe(
+              "Dispatch priority — affects simulated ETA",
+            ).optional(),
+          }),
+          execute: (args, ctx) => {
+            const { incidentId, callsigns, autoDispatch, priority } = args as {
+              incidentId: string;
+              callsigns?: string[];
+              autoDispatch?: boolean;
+              priority?: "routine" | "priority" | "emergency";
+            };
+            const state = ctx.state as unknown as DispatchState;
+            const inc = state.incidents[incidentId];
+            if (!inc) return { error: `Incident ${incidentId} not found` };
 
-    add_incident_note: {
+            const dispatched: {
+              callsign: string;
+              type: string;
+              eta: number;
+            }[] = [];
+            const failed: { callsign: string; reason: string }[] = [];
+
+            let resourcesToDispatch: Resource[] = [];
+
+            if (autoDispatch) {
+              resourcesToDispatch = recommendResources(
+                inc.type,
+                inc.severity,
+                state,
+              );
+            } else if (callsigns) {
+              for (const cs of callsigns) {
+                const r = state.resources.find((r) =>
+                  r.callsign.toLowerCase() === cs.toLowerCase()
+                );
+                if (!r) {
+                  failed.push({ callsign: cs, reason: "Not found" });
+                  continue;
+                }
+                if (r.status !== "available") {
+                  failed.push({
+                    callsign: cs,
+                    reason: `Currently ${r.status}`,
+                  });
+                  continue;
+                }
+                resourcesToDispatch.push(r);
+              }
+            }
+
+            const etaBase = priority === "emergency"
+              ? 3
+              : priority === "priority"
+              ? 6
+              : 10;
+
+            for (const r of resourcesToDispatch) {
+              const eta = etaBase + Math.floor(Math.random() * 5);
+              r.status = "dispatched";
+              r.assignedIncident = incidentId;
+              r.eta = eta;
+              inc.assignedResources.push(r.id);
+              dispatched.push({ callsign: r.callsign, type: r.type, eta });
+              inc.timeline.push({
+                time: now(),
+                event: `Dispatched ${r.callsign} — ETA ${eta} min`,
+              });
+            }
+
+            if (dispatched.length > 0) {
+              inc.status = "dispatched";
+              inc.updatedAt = now();
+            }
+
+            recalculateAlertLevel(state);
+
+            const availableCount = state.resources.filter((r) =>
+              r.status === "available"
+            ).length;
+
+            return {
+              incidentId,
+              dispatched,
+              failed: failed.length > 0 ? failed : undefined,
+              totalAssignedToIncident: inc.assignedResources.length,
+              remainingAvailableResources: availableCount,
+              systemAlertLevel: state.alertLevel,
+              capacityWarning: availableCount <= 3
+                ? "WARNING: Resource capacity critically low. Consider mutual aid."
+                : undefined,
+            };
+          },
+        },
+        get_available: {
+          schema: z.object({
+            type: z.enum([
+              "ambulance",
+              "fire_engine",
+              "police",
+              "hazmat_team",
+              "helicopter",
+              "k9_unit",
+              "swat",
+              "ems_supervisor",
+              "all",
+            ]).describe("Filter by resource type, or 'all'").optional(),
+          }),
+          execute: (args, ctx) => {
+            const { type } = args as { type?: string };
+            const state = ctx.state as unknown as DispatchState;
+            let resources = state.resources;
+            if (type && type !== "all") {
+              resources = resources.filter((r) => r.type === type);
+            }
+
+            return {
+              resources: resources.map((r) => ({
+                callsign: r.callsign,
+                type: r.type,
+                status: r.status,
+                assignedIncident: r.assignedIncident,
+                eta: r.eta,
+                capabilities: r.capabilities,
+              })),
+              summary: {
+                total: resources.length,
+                available: resources.filter((r) => r.status === "available")
+                  .length,
+                committed: resources.filter((r) => r.status !== "available")
+                  .length,
+              },
+            };
+          },
+        },
+        update_status: {
+          schema: z.object({
+            callsign: z.string().describe("The resource callsign"),
+            status: z.enum([
+              "available",
+              "dispatched",
+              "en_route",
+              "on_scene",
+              "returning",
+            ]).describe("New status"),
+            notes: z.string().describe("Status notes").optional(),
+          }),
+          execute: (args, ctx) => {
+            const { callsign, status, notes } = args as {
+              callsign: string;
+              status: Resource["status"];
+              notes?: string;
+            };
+            const state = ctx.state as unknown as DispatchState;
+            const resource = state.resources.find((r) =>
+              r.callsign.toLowerCase() === callsign.toLowerCase()
+            );
+            if (!resource) {
+              return { error: `Resource ${callsign} not found` };
+            }
+
+            const previousStatus = resource.status;
+            resource.status = status;
+
+            if (status === "available") {
+              resource.assignedIncident = null;
+              resource.eta = null;
+            }
+
+            // Log to incident timeline if assigned
+            if (resource.assignedIncident) {
+              const inc = state.incidents[resource.assignedIncident];
+              if (inc) {
+                inc.timeline.push({
+                  time: now(),
+                  event: `${callsign}: ${previousStatus} → ${status}${
+                    notes ? ` (${notes})` : ""
+                  }`,
+                });
+                inc.updatedAt = now();
+              }
+            }
+
+            recalculateAlertLevel(state);
+
+            return {
+              callsign: resource.callsign,
+              previousStatus,
+              newStatus: status,
+              assignedIncident: resource.assignedIncident,
+              systemAlertLevel: state.alertLevel,
+            };
+          },
+        },
+      },
+    }),
+
+    ops: multiTool({
       description:
-        "Add a note or update to an incident log — for ongoing situational awareness.",
-      parameters: z.object({
-        incidentId: z.string().describe("The incident ID"),
-        note: z.string().describe("The note to add"),
-        source: z.string().describe(
-          "Who reported this — unit callsign or caller",
-        ).optional(),
-      }),
-      execute: (args, ctx) => {
-        const { incidentId, note, source } = args as {
-          incidentId: string;
-          note: string;
-          source?: string;
-        };
-        const state = ctx.state as unknown as DispatchState;
-        const inc = state.incidents[incidentId];
-        if (!inc) return { error: `Incident ${incidentId} not found` };
+        "Operational tools: view the dashboard, look up response protocols, or run training scenarios.",
+      actions: {
+        dashboard: {
+          execute: (_args, ctx) => {
+            const state = ctx.state as unknown as DispatchState;
 
-        const entry = source ? `[${source}] ${note}` : note;
-        inc.notes.push(entry);
-        inc.timeline.push({ time: now(), event: entry });
-        inc.updatedAt = now();
+            const activeIncidents = Object.values(state.incidents)
+              .filter((i) => i.status !== "resolved")
+              .sort((a, b) => b.triageScore - a.triageScore);
 
-        return { incidentId, noteAdded: entry, totalNotes: inc.notes.length };
+            const resolvedCount = Object.values(state.incidents).filter((i) =>
+              i.status === "resolved"
+            ).length;
+
+            const resourceSummary = {
+              total: state.resources.length,
+              available: state.resources.filter((r) =>
+                r.status === "available"
+              ).length,
+              dispatched: state.resources.filter((r) =>
+                r.status === "dispatched"
+              ).length,
+              enRoute: state.resources.filter((r) =>
+                r.status === "en_route"
+              ).length,
+              onScene:
+                state.resources.filter((r) => r.status === "on_scene").length,
+              returning:
+                state.resources.filter((r) => r.status === "returning").length,
+            };
+
+            const utilization = Math.round(
+              (1 - resourceSummary.available / resourceSummary.total) * 100,
+            );
+
+            return {
+              systemAlertLevel: state.alertLevel,
+              mutualAidActive: state.mutualAidRequested,
+              resourceUtilization: `${utilization}%`,
+              resourceSummary,
+              activeIncidentCount: activeIncidents.length,
+              resolvedIncidentCount: resolvedCount,
+              activeIncidents: activeIncidents.map((i) => ({
+                id: i.id,
+                type: i.type,
+                severity: i.severity,
+                status: i.status,
+                location: i.location,
+                triageScore: i.triageScore,
+                assignedResourceCount: i.assignedResources.length,
+                ageMinutes: Math.round((now() - i.createdAt) / 60000),
+                casualties: i.casualties,
+              })),
+              availableResources: state.resources.filter((r) =>
+                r.status === "available"
+              ).map((r) => ({
+                callsign: r.callsign,
+                type: r.type,
+                capabilities: r.capabilities,
+              })),
+            };
+          },
+        },
+        protocols: {
+          schema: z.object({
+            incidentType: z.enum([
+              "medical",
+              "fire",
+              "hazmat",
+              "traffic",
+              "crime",
+              "natural_disaster",
+              "utility",
+              "other",
+            ]).describe("Type of incident"),
+            severity: z.enum(["critical", "urgent", "moderate", "minor"])
+              .describe("Severity level"),
+          }),
+          execute: (args) => {
+            const { incidentType, severity } = args as {
+              incidentType: string;
+              severity: string;
+            };
+            const protocols = getApplicableProtocols(
+              incidentType as IncidentType,
+              severity as Severity,
+            );
+            if (protocols.length === 0) {
+              return {
+                message:
+                  "No specific protocols for this combination. Use standard operating procedures.",
+                protocols: [],
+              };
+            }
+            return {
+              protocols: protocols.map((p) => ({
+                name: p.name,
+                steps: p.steps,
+                requiredResources: p.requiredResources,
+              })),
+            };
+          },
+        },
+        run_scenario: {
+          schema: z.object({
+            scenario: z.enum([
+              "mass_casualty",
+              "multi_alarm_fire",
+              "active_shooter",
+              "natural_disaster",
+              "highway_pileup",
+            ]).describe("Scenario type to simulate"),
+          }),
+          execute: (args, ctx) => {
+            const { scenario } = args as { scenario: string };
+            const state = ctx.state as unknown as DispatchState;
+            const scenarios: Record<
+              string,
+              { incidents: Partial<Incident>[]; narrative: string }
+            > = {
+              mass_casualty: {
+                narrative:
+                  "Bus crash at Main and 5th. School bus vs delivery truck. Multiple pediatric patients. Fuel spill on roadway.",
+                incidents: [
+                  {
+                    location: "Main St and 5th Ave intersection",
+                    description:
+                      "School bus collision with delivery truck, multiple children injured, bus on its side, fuel leaking",
+                    type: "traffic",
+                    severity: "critical",
+                  },
+                  {
+                    location: "Main St and 5th Ave — fuel spill",
+                    description:
+                      "Diesel fuel spill from delivery truck spreading toward storm drain, approximately 50 gallons",
+                    type: "hazmat",
+                    severity: "urgent",
+                  },
+                ],
+              },
+              multi_alarm_fire: {
+                narrative:
+                  "Working structure fire at 200 Industrial Parkway. 3-story warehouse, heavy smoke showing. Reports of workers possibly trapped on upper floors.",
+                incidents: [
+                  {
+                    location: "200 Industrial Parkway",
+                    description:
+                      "3-story warehouse fully involved, heavy fire showing from all floors, possible trapped occupants on 2nd and 3rd floor, exposure buildings within 50 feet",
+                    type: "fire",
+                    severity: "critical",
+                  },
+                  {
+                    location: "200 Industrial Parkway — medical",
+                    description:
+                      "2 workers with smoke inhalation evacuated from ground floor, one with burns to hands and arms",
+                    type: "medical",
+                    severity: "urgent",
+                  },
+                ],
+              },
+              active_shooter: {
+                narrative:
+                  "Reports of active shooter at Riverside Mall. Multiple shots fired, crowds fleeing. At least 3 victims reported down in food court area.",
+                incidents: [
+                  {
+                    location: "Riverside Mall, 1500 River Road — food court",
+                    description:
+                      "Active shooter in food court area, multiple shots fired, at least 3 victims down, shooter last seen moving toward west entrance",
+                    type: "crime",
+                    severity: "critical",
+                  },
+                  {
+                    location: "Riverside Mall parking lot",
+                    description:
+                      "Crowd crush injuries as people fled the building, several people trampled near east exit",
+                    type: "medical",
+                    severity: "urgent",
+                  },
+                ],
+              },
+              natural_disaster: {
+                narrative:
+                  "EF-3 tornado touched down in residential area. Path of destruction along Oak Street corridor. Multiple structures collapsed. Power lines down.",
+                incidents: [
+                  {
+                    location: "Oak Street between 10th and 15th",
+                    description:
+                      "Tornado damage, multiple homes collapsed, people trapped in rubble, gas lines ruptured",
+                    type: "natural_disaster",
+                    severity: "critical",
+                  },
+                  {
+                    location: "Oak Street Elementary School",
+                    description:
+                      "School roof partially collapsed, staff sheltering students in interior rooms, requesting welfare check",
+                    type: "natural_disaster",
+                    severity: "critical",
+                  },
+                  {
+                    location: "Oak Street and 12th — utility",
+                    description:
+                      "Multiple downed power lines sparking, gas main rupture, area needs immediate isolation",
+                    type: "utility",
+                    severity: "urgent",
+                  },
+                ],
+              },
+              highway_pileup: {
+                narrative:
+                  "20-plus vehicle pileup on Interstate 95 southbound near mile marker 42. Fog conditions. Multiple entrapments. Tanker truck involved.",
+                incidents: [
+                  {
+                    location: "I-95 southbound mile marker 42",
+                    description:
+                      "Multi-vehicle pileup, 20-plus vehicles, multiple entrapments, tanker truck involved with unknown cargo, heavy fog limiting visibility",
+                    type: "traffic",
+                    severity: "critical",
+                  },
+                  {
+                    location: "I-95 southbound — hazmat",
+                    description:
+                      "Tanker truck leaking unknown liquid, placards not yet visible due to fog, setting up exclusion zone",
+                    type: "hazmat",
+                    severity: "critical",
+                  },
+                ],
+              },
+            };
+
+            const s = scenarios[scenario];
+            if (!s) return { error: "Unknown scenario" };
+
+            const created: string[] = [];
+            for (const inc of s.incidents) {
+              state.incidentCounter++;
+              const id = `INC-${
+                String(state.incidentCounter).padStart(4, "0")
+              }`;
+              const fullInc: Incident = {
+                id,
+                type: inc.type || "other",
+                severity: inc.severity || "moderate",
+                status: "incoming",
+                location: inc.location || "Unknown",
+                description: inc.description || "",
+                callerName: "Scenario",
+                callerPhone: "N/A",
+                triageScore: calculateTriageScore(
+                  (inc.severity || "moderate") as Severity,
+                  (inc.type || "other") as IncidentType,
+                  0,
+                  0,
+                ),
+                assignedResources: [],
+                timeline: [{
+                  time: now(),
+                  event: `SCENARIO: ${inc.description}`,
+                }],
+                notes: [],
+                createdAt: now(),
+                updatedAt: now(),
+                escalationLevel: 0,
+                protocolsActivated: [],
+                casualties: { confirmed: 0, estimated: 0, treated: 0 },
+                hazards: [],
+              };
+              state.incidents[id] = fullInc;
+              created.push(id);
+            }
+
+            recalculateAlertLevel(state);
+
+            return {
+              scenario,
+              narrative: s.narrative,
+              incidentsCreated: created,
+              systemAlertLevel: state.alertLevel,
+              message:
+                `SCENARIO ACTIVE: ${s.narrative}. ${created.length} incidents created. Awaiting dispatch orders.`,
+            };
+          },
+        },
       },
-    },
-
-    run_scenario: {
-      description:
-        "Simulate a complex multi-incident scenario for training or stress-testing dispatch operations.",
-      parameters: z.object({
-        scenario: z.enum([
-          "mass_casualty",
-          "multi_alarm_fire",
-          "active_shooter",
-          "natural_disaster",
-          "highway_pileup",
-        ]).describe("Scenario type to simulate"),
-      }),
-      execute: (args, ctx) => {
-        const { scenario } = args as { scenario: string };
-        const state = ctx.state as unknown as DispatchState;
-        const scenarios: Record<
-          string,
-          { incidents: Partial<Incident>[]; narrative: string }
-        > = {
-          mass_casualty: {
-            narrative:
-              "Bus crash at Main and 5th. School bus vs delivery truck. Multiple pediatric patients. Fuel spill on roadway.",
-            incidents: [
-              {
-                location: "Main St and 5th Ave intersection",
-                description:
-                  "School bus collision with delivery truck, multiple children injured, bus on its side, fuel leaking",
-                type: "traffic",
-                severity: "critical",
-              },
-              {
-                location: "Main St and 5th Ave — fuel spill",
-                description:
-                  "Diesel fuel spill from delivery truck spreading toward storm drain, approximately 50 gallons",
-                type: "hazmat",
-                severity: "urgent",
-              },
-            ],
-          },
-          multi_alarm_fire: {
-            narrative:
-              "Working structure fire at 200 Industrial Parkway. 3-story warehouse, heavy smoke showing. Reports of workers possibly trapped on upper floors.",
-            incidents: [
-              {
-                location: "200 Industrial Parkway",
-                description:
-                  "3-story warehouse fully involved, heavy fire showing from all floors, possible trapped occupants on 2nd and 3rd floor, exposure buildings within 50 feet",
-                type: "fire",
-                severity: "critical",
-              },
-              {
-                location: "200 Industrial Parkway — medical",
-                description:
-                  "2 workers with smoke inhalation evacuated from ground floor, one with burns to hands and arms",
-                type: "medical",
-                severity: "urgent",
-              },
-            ],
-          },
-          active_shooter: {
-            narrative:
-              "Reports of active shooter at Riverside Mall. Multiple shots fired, crowds fleeing. At least 3 victims reported down in food court area.",
-            incidents: [
-              {
-                location: "Riverside Mall, 1500 River Road — food court",
-                description:
-                  "Active shooter in food court area, multiple shots fired, at least 3 victims down, shooter last seen moving toward west entrance",
-                type: "crime",
-                severity: "critical",
-              },
-              {
-                location: "Riverside Mall parking lot",
-                description:
-                  "Crowd crush injuries as people fled the building, several people trampled near east exit",
-                type: "medical",
-                severity: "urgent",
-              },
-            ],
-          },
-          natural_disaster: {
-            narrative:
-              "EF-3 tornado touched down in residential area. Path of destruction along Oak Street corridor. Multiple structures collapsed. Power lines down.",
-            incidents: [
-              {
-                location: "Oak Street between 10th and 15th",
-                description:
-                  "Tornado damage, multiple homes collapsed, people trapped in rubble, gas lines ruptured",
-                type: "natural_disaster",
-                severity: "critical",
-              },
-              {
-                location: "Oak Street Elementary School",
-                description:
-                  "School roof partially collapsed, staff sheltering students in interior rooms, requesting welfare check",
-                type: "natural_disaster",
-                severity: "critical",
-              },
-              {
-                location: "Oak Street and 12th — utility",
-                description:
-                  "Multiple downed power lines sparking, gas main rupture, area needs immediate isolation",
-                type: "utility",
-                severity: "urgent",
-              },
-            ],
-          },
-          highway_pileup: {
-            narrative:
-              "20-plus vehicle pileup on Interstate 95 southbound near mile marker 42. Fog conditions. Multiple entrapments. Tanker truck involved.",
-            incidents: [
-              {
-                location: "I-95 southbound mile marker 42",
-                description:
-                  "Multi-vehicle pileup, 20-plus vehicles, multiple entrapments, tanker truck involved with unknown cargo, heavy fog limiting visibility",
-                type: "traffic",
-                severity: "critical",
-              },
-              {
-                location: "I-95 southbound — hazmat",
-                description:
-                  "Tanker truck leaking unknown liquid, placards not yet visible due to fog, setting up exclusion zone",
-                type: "hazmat",
-                severity: "critical",
-              },
-            ],
-          },
-        };
-
-        const s = scenarios[scenario];
-        if (!s) return { error: "Unknown scenario" };
-
-        const created: string[] = [];
-        for (const inc of s.incidents) {
-          state.incidentCounter++;
-          const id = `INC-${String(state.incidentCounter).padStart(4, "0")}`;
-          const fullInc: Incident = {
-            id,
-            type: inc.type || "other",
-            severity: inc.severity || "moderate",
-            status: "incoming",
-            location: inc.location || "Unknown",
-            description: inc.description || "",
-            callerName: "Scenario",
-            callerPhone: "N/A",
-            triageScore: calculateTriageScore(
-              (inc.severity || "moderate") as Severity,
-              (inc.type || "other") as IncidentType,
-              0,
-              0,
-            ),
-            assignedResources: [],
-            timeline: [{ time: now(), event: `SCENARIO: ${inc.description}` }],
-            notes: [],
-            createdAt: now(),
-            updatedAt: now(),
-            escalationLevel: 0,
-            protocolsActivated: [],
-            casualties: { confirmed: 0, estimated: 0, treated: 0 },
-            hazards: [],
-          };
-          state.incidents[id] = fullInc;
-          created.push(id);
-        }
-
-        recalculateAlertLevel(state);
-
-        return {
-          scenario,
-          narrative: s.narrative,
-          incidentsCreated: created,
-          systemAlertLevel: state.alertLevel,
-          message:
-            `SCENARIO ACTIVE: ${s.narrative}. ${created.length} incidents created. Awaiting dispatch orders.`,
-        };
-      },
-    },
+    }),
   },
 });

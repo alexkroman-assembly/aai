@@ -1,4 +1,4 @@
-import { defineAgent, z } from "@aai/sdk";
+import { defineAgent, multiTool, z } from "@aai/sdk";
 import knowledge from "./knowledge.json" with { type: "json" };
 
 type FaqEntry = { question: string; answer: string };
@@ -21,25 +21,28 @@ Rules:
     "Hi! I'm your FAQ assistant. Ask me anything about the AAI agent framework and I'll look it up in my knowledge base.",
   voice: "luna",
   tools: {
-    search_faq: {
+    knowledge_base: multiTool({
       description:
-        "Search the embedded knowledge base for a question. Returns the closest matching FAQ entry.",
-      parameters: z.object({
-        query: z.string().describe("The user's question to search for"),
-      }),
-      execute: ({ query }) => {
-        const q = (query as string).toLowerCase();
-        const match = faqs.find((f) =>
-          f.question.toLowerCase().includes(q) ||
-          q.includes(f.question.toLowerCase()) ||
-          f.answer.toLowerCase().includes(q)
-        );
-        return match ?? { result: "No matching FAQ found." };
+        "Search or browse the embedded FAQ knowledge base. Use 'search' to find answers, 'list' to see all topics.",
+      actions: {
+        search: {
+          schema: z.object({
+            query: z.string().describe("The user's question to search for"),
+          }),
+          execute: ({ query }) => {
+            const q = (query as string).toLowerCase();
+            const match = faqs.find((f) =>
+              f.question.toLowerCase().includes(q) ||
+              q.includes(f.question.toLowerCase()) ||
+              f.answer.toLowerCase().includes(q)
+            );
+            return match ?? { result: "No matching FAQ found." };
+          },
+        },
+        list: {
+          execute: () => faqs.map((f) => f.question),
+        },
       },
-    },
-    list_topics: {
-      description: "List all available FAQ topics in the knowledge base.",
-      execute: () => faqs.map((f) => f.question),
-    },
+    }),
   },
 });

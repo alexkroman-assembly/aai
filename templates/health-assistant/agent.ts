@@ -1,4 +1,4 @@
-import { defineAgent, fetchJSON, z } from "@aai/sdk";
+import { defineAgent, fetchJSON, multiTool, z } from "@aai/sdk";
 
 function first(field: unknown): string | undefined {
   return Array.isArray(field) ? field[0] : undefined;
@@ -118,25 +118,27 @@ Use run_code for health calculations:
     "Hey, I'm Dr. Sage. Try asking me something like, what are the side effects of ibuprofen, can I take aspirin and warfarin together, or calculate my BMI. Just remember, I'm not a real doctor, so always check with your healthcare provider.",
   builtinTools: ["web_search", "run_code"],
   tools: {
-    drug_info: {
+    medication: multiTool({
       description:
-        "Look up detailed information about a medication from the FDA database including usage, warnings, and side effects.",
-      parameters: z.object({
-        name: z.string().describe(
-          "Medication name (generic or brand, e.g. 'ibuprofen' or 'Advil')",
-        ),
-      }),
-      execute: ({ name }) => lookupDrug(name as string),
-    },
-    check_interaction: {
-      description:
-        "Check for known interactions between two or more medications using the NIH database.",
-      parameters: z.object({
-        drugs: z.string().describe(
-          "Comma-separated medication names (e.g. 'ibuprofen, warfarin')",
-        ),
-      }),
-      execute: ({ drugs }) => checkInteractions(drugs as string),
-    },
+        "Look up medication info or check drug interactions. Use 'lookup' for details on a single drug, 'check_interaction' to check interactions between multiple drugs.",
+      actions: {
+        lookup: {
+          schema: z.object({
+            name: z.string().describe(
+              "Medication name (generic or brand, e.g. 'ibuprofen' or 'Advil')",
+            ),
+          }),
+          execute: ({ name }) => lookupDrug(name as string),
+        },
+        check_interaction: {
+          schema: z.object({
+            drugs: z.string().describe(
+              "Comma-separated medication names (e.g. 'ibuprofen, warfarin')",
+            ),
+          }),
+          execute: ({ drugs }) => checkInteractions(drugs as string),
+        },
+      },
+    }),
   },
 });
