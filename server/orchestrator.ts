@@ -127,6 +127,13 @@ export function createOrchestrator(opts: {
   agent.get("/client.js", etag(), handleStaticFile);
   agent.get("/client.js.map", etag(), handleStaticFile);
 
+  // Redirect trailing-slash to canonical URL without it
+  app.get("/:namespace/:slug/", (c) => {
+    const url = new URL(c.req.url);
+    url.pathname = url.pathname.replace(/\/+$/, "");
+    return c.redirect(url.toString(), 301);
+  });
+
   // Agent page
   agent.get("/", handleAgentPage);
 
