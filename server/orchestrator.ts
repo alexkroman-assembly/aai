@@ -1,5 +1,4 @@
 import { type Context, Hono } from "hono";
-import { cache } from "hono/cache";
 import { compress } from "hono/compress";
 import { etag } from "hono/etag";
 import { HTTPException } from "hono/http-exception";
@@ -125,18 +124,8 @@ export function createOrchestrator(opts: {
   });
   agent.get("/health", handleAgentHealth);
   agent.all("/websocket", requireUpgrade, handleWebSocket);
-  agent.get(
-    "/client.js",
-    etag(),
-    cache({ cacheName: "static", cacheControl: "no-cache" }),
-    handleStaticFile,
-  );
-  agent.get(
-    "/client.js.map",
-    etag(),
-    cache({ cacheName: "static", cacheControl: "no-cache" }),
-    handleStaticFile,
-  );
+  agent.get("/client.js", etag(), handleStaticFile);
+  agent.get("/client.js.map", etag(), handleStaticFile);
 
   // Agent page
   agent.get("/", handleAgentPage);

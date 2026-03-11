@@ -1,16 +1,3 @@
-// Polyfill CacheStorage — the AWS SDK tries to use it for credential caching,
-// but it's not available in Deno on Fly.io.
-if (typeof globalThis.caches === "undefined") {
-  // deno-lint-ignore no-explicit-any
-  (globalThis as any).caches = {
-    open: () =>
-      Promise.resolve({
-        match: () => Promise.resolve(undefined),
-        put: () => Promise.resolve(),
-      }),
-  };
-}
-
 import { deadline } from "@std/async/deadline";
 import { createOrchestrator } from "./orchestrator.ts";
 import { createBundleStore, createS3Client } from "./bundle_store_tigris.ts";
