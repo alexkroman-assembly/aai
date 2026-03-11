@@ -271,6 +271,31 @@ Deno.test("static file serves client.js after deploy", async () => {
   assertStringIncludes(await res.text(), "console.log");
 });
 
+Deno.test("client.js sets Cache-Control no-cache without server-side caching", async () => {
+  // Regression: Hono's cache() middleware called caches.open() which throws
+  // on Fly.io where CacheStorage is unavailable. Verify the response uses
+  // etag + Cache-Control: no-cache without depending on CacheStorage.
+  const { handler } = await createTestOrchestrator();
+  await deployAgent(handler);
+  const res = await handler(req("/ns/agent/client.js"), DUMMY_INFO);
+  assertEquals(res.status, 200);
+  assertEquals(res.headers.get("Cache-Control"), "no-cache");
+  // ETag should be present for conditional requests
+  expect(res.headers.get("ETag")).toBeTruthy();
+});
+
+// =============================================================================
+// Trailing-slash redirect
+// =============================================================================
+
+Deno.test("trailing slash on agent page redirects to canonical URL", async () => {
+  const { handler } = await createTestOrchestrator();
+  const res = await handler(req("/ns/agent/"), DUMMY_INFO);
+  assertEquals(res.status, 301);
+  const location = res.headers.get("Location");
+  assertEquals(location, "http://localhost/ns/agent");
+});
+
 // =============================================================================
 // WebSocket
 // =============================================================================

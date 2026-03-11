@@ -103,6 +103,21 @@ Deno.test("VoiceSession", async (t) => {
         session.disconnect();
       }),
     );
+
+    await t.step(
+      "preserves full path in WebSocket URL",
+      withSessionEnv(async (mock) => {
+        // Regression: new URL(".", href) without trailing slash resolves to
+        // parent path, e.g. /ns/slug → /ns/, losing the slug segment.
+        const { session, ws } = await connectSession(mock, {
+          platformUrl: "https://aai-agent.fly.dev/alex/ai-takes",
+        });
+        expect(ws.url.toString()).toBe(
+          "wss://aai-agent.fly.dev/alex/ai-takes/websocket",
+        );
+        session.disconnect();
+      }),
+    );
   });
 
   await t.step("handleServerMessage", async (t) => {
