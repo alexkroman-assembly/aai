@@ -4,7 +4,7 @@ snapshot[`cli help and version output > help 1`] = `
 stdout:
 "
 Usage:   aai   
-Version: 0.1.66
+Version: 0.1.67
 
 Description:
 
@@ -30,7 +30,7 @@ stderr:
 
 snapshot[`cli help and version output > version 1`] = `
 stdout:
-"aai 0.1.66
+"aai 0.1.67
 "
 stderr:
 ""
@@ -40,7 +40,7 @@ snapshot[`cli help and version output > newHelp 1`] = `
 stdout:
 "
 Usage:   aai new [dir]
-Version: 0.1.66       
+Version: 0.1.67       
 
 Description:
 
@@ -62,7 +62,7 @@ snapshot[`cli help and version output > devHelp 1`] = `
 stdout:
 '
 Usage:   aai dev
-Version: 0.1.66 
+Version: 0.1.67 
 
 Description:
 
@@ -83,7 +83,7 @@ snapshot[`cli help and version output > deployHelp 1`] = `
 stdout:
 "
 Usage:   aai deploy
-Version: 0.1.66    
+Version: 0.1.67    
 
 Description:
 
@@ -104,7 +104,7 @@ snapshot[`cli help and version output > buildHelp 1`] = `
 stdout:
 "
 Usage:   aai build
-Version: 0.1.66   
+Version: 0.1.67   
 
 Description:
 
@@ -123,7 +123,7 @@ snapshot[`cli help and version output > typesHelp 1`] = `
 stdout:
 "
 Usage:   aai types
-Version: 0.1.66   
+Version: 0.1.67   
 
 Description:
 

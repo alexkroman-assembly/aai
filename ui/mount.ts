@@ -44,8 +44,12 @@ export function mount(
   const theme = { ...defaultTheme, ...options?.theme };
   applyTheme(container, theme);
 
+  // deno-lint-ignore no-explicit-any
+  const injectedBase = (globalThis as any).__AAI_BASE__ as string | undefined;
   const platformUrl = options?.platformUrl ??
-    new URL(".", globalThis.location.href).href.replace(/\/$/, "");
+    (injectedBase
+      ? globalThis.location.origin + injectedBase
+      : globalThis.location.origin + globalThis.location.pathname);
   const session = createVoiceSession({ platformUrl });
   const signals = createSessionControls(session);
   const styleEl = injectBodyStyle(theme);

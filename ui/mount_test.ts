@@ -137,4 +137,31 @@ Deno.test("mount()", async (t) => {
       expect(el.textContent).toBe("");
     }),
   );
+
+  await t.step(
+    "reads __AAI_BASE__ for platformUrl when not explicitly provided",
+    withMountEnv(async (mock) => {
+      // deno-lint-ignore no-explicit-any
+      const g = globalThis as any;
+      g.__AAI_BASE__ = "/alex/ai-takes";
+      g.location = { origin: "https://aai-agent.fly.dev", pathname: "/" };
+      const App = () =>
+        html`
+          <div />
+        `;
+      try {
+        const handle = mount(App);
+        // Session connects on start — trigger it and flush microtasks
+        handle.session.connect();
+        await new Promise<void>((r) => setTimeout(r, 0));
+        const ws = mock.lastWs!;
+        expect(ws.url.toString()).toBe(
+          "wss://aai-agent.fly.dev/alex/ai-takes/websocket",
+        );
+        handle.dispose();
+      } finally {
+        delete g.__AAI_BASE__;
+      }
+    }),
+  );
 });
