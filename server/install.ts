@@ -1,4 +1,4 @@
-const INSTALL_SCRIPT = `#!/bin/sh
+export const INSTALL_SCRIPT = `#!/bin/sh
 set -e
 
 REPO="alexkroman/aai"
@@ -79,7 +79,3 @@ esac
 
 echo "Run 'aai' to get started"
 `;
-
-export function handleInstall(_req: Request): Response {
-  return new Response(INSTALL_SCRIPT);
-}

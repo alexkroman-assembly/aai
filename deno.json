@@ -7,12 +7,12 @@
     "new": "deno run --allow-net --allow-env --allow-read --allow-write --allow-run cli/cli.ts new",
     "serve": "deno run --allow-net --allow-env --allow-read --allow-write --unstable-worker-options server/main.ts",
     "test": "deno test --allow-net --allow-read --allow-write --allow-env --allow-run --unstable-worker-options",
-    "check": "deno check server/**/*.ts ui/**/*.ts ui/**/*.tsx cli/**/*.ts sdk/**/*.ts core/**/*.ts $(find templates -name '*.ts' ! -path 'templates/npm-tools/*' ! -path 'templates/memory-agent/*') && deno lint && deno fmt --check && deno run -A npm:markdownlint-cli CLAUDE.md README.md cli/claude.md && deno task check:boundaries && deno task publish && deno test --quiet --allow-net --allow-read --allow-write --allow-env --allow-run --unstable-worker-options && deno task test:templates",
+    "check": "deno check server/**/*.ts ui/**/*.ts cli/**/*.ts sdk/**/*.ts core/**/*.ts $(find templates -name '*.ts' ! -path 'templates/memory-agent/*') && deno lint && deno fmt --check && deno run -A npm:markdownlint-cli CLAUDE.md README.md cli/claude.md && deno task check:boundaries && deno task publish && deno test --quiet --allow-net --allow-read --allow-write --allow-env --allow-run --unstable-worker-options && deno task test:templates",
     "check:boundaries": "deno run --allow-read scripts/check_boundaries.ts",
     "bump": "deno run --allow-read --allow-write --allow-run scripts/bump_versions.ts",
     "test:templates": "deno run --allow-all --unstable-worker-options cli/test_templates.ts",
     "install-dev": "echo '#!/bin/sh\nINIT_CWD=\"$(pwd)\" exec deno run --allow-all --unstable-worker-options '\"$(pwd)/cli/cli.ts\"' \"$@\"' > \"$HOME/.deno/bin/aai\" && chmod +x \"$HOME/.deno/bin/aai\" && echo 'Installed aai to ~/.deno/bin/aai'",
-    "publish": "cd sdk && deno publish --allow-dirty --dry-run && cd ../core && deno publish --allow-dirty --dry-run && cd ../ui && deno publish --allow-dirty --dry-run && echo 'Dry run OK. Run deno task publish:live to publish.'",
+    "publish": "cd sdk && deno publish --allow-dirty --dry-run && cd ../core && deno publish --allow-dirty --dry-run && cd ../ui && deno publish --allow-dirty --dry-run && cd ../cli && deno publish --allow-dirty --dry-run && cd ../server && deno publish --allow-dirty --dry-run && echo 'Dry run OK. Run deno task publish:live to publish.'",
     "publish:live": "cd sdk && deno publish --allow-dirty && cd ../core && deno publish --allow-dirty && cd ../ui && deno publish --allow-dirty"
   },
   "imports": {
@@ -35,14 +35,13 @@
     "@astral/astral": "jsr:@astral/astral@^0.5.5",
 "preact": "npm:preact@^10.28.4",
     "preact/hooks": "npm:preact@^10.28.4/hooks",
-    "preact/compat": "npm:preact@^10.28.4/compat",
     "@preact/signals": "npm:@preact/signals@^2.8.1",
-    "goober": "npm:goober@^2.1.18",
+    "htm": "npm:htm@^3.1.1",
     "zod": "jsr:@zod/zod@^4.3.6",
     "esbuild": "npm:esbuild-wasm@^0.27.3",
-    "lodash-es": "npm:lodash-es@^4",
     "markdownlint-cli": "npm:markdownlint-cli@^0.44.0",
-    "comlink": "npm:comlink@^4.4.2"
+    "comlink": "npm:comlink@^4.4.2",
+    "turndown": "npm:turndown@^7.2.2"
   },
   "nodeModulesDir": "auto",
   "compilerOptions": {

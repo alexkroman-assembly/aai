@@ -1,6 +1,5 @@
-import { h } from "preact";
 import type * as preact from "preact";
-import { createContext } from "preact";
+import { createContext, h } from "preact";
 import { useContext } from "preact/hooks";
 import type { ComponentChildren } from "preact";
 import { batch, effect, type Signal, signal } from "@preact/signals";

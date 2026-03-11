@@ -93,11 +93,11 @@ const WORKSPACE_ALIASES: Record<string, string> = {
   "@aai/ui/signals": resolve(AAI_ROOT, "ui/signals.ts"),
   "@aai/ui/theme": resolve(AAI_ROOT, "ui/theme.ts"),
   "@aai/ui/mount": resolve(AAI_ROOT, "ui/mount.ts"),
-  "@aai/ui/components": resolve(AAI_ROOT, "ui/_components.tsx"),
+  "@aai/ui/components": resolve(AAI_ROOT, "ui/_components.ts"),
   "@aai/ui/audio": resolve(AAI_ROOT, "ui/audio.ts"),
   "@aai/ui/resample": resolve(AAI_ROOT, "ui/resample.ts"),
-  "@aai/ui/styles": resolve(AAI_ROOT, "ui/styles.ts"),
-  "@aai/ui/client": resolve(AAI_ROOT, "ui/client.tsx"),
+  "@aai/ui/html": resolve(AAI_ROOT, "ui/_html.ts"),
+  "@aai/ui/client": resolve(AAI_ROOT, "ui/client.ts"),
 };
 
 /**
@@ -150,10 +150,8 @@ function resolveNpmPackage(
 const NPM_PACKAGE_NAMES = [
   "preact",
   "preact/hooks",
-  "preact/compat",
   "@preact/signals",
-  "goober",
-  "lodash-es",
+  "htm",
   "comlink",
 ];
 
@@ -189,7 +187,7 @@ function workspaceAliasPlugin(): Plugin {
       // This avoids relying on the deno plugin's npm resolver, which fails in
       // compiled binaries where node_modules aren't fully available.
       build.onResolve(
-        { filter: /^(preact|@preact\/signals|goober|lodash-es|comlink)/ },
+        { filter: /^(preact|@preact\/signals|htm|comlink)/ },
         (args) => {
           const resolved = npmAliases![args.path];
           if (resolved) return { path: resolved, namespace: "file" };

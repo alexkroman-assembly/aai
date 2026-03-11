@@ -1,255 +1,10 @@
 import { expect } from "@std/expect";
-import { stub } from "@std/testing/mock";
-import {
-  _internals,
-  handleDevWebSocket,
-  registerDevAgent,
-} from "./dev_session.ts";
+import { registerDevAgent } from "./dev_session.ts";
 import type { DevRegister } from "@aai/core/protocol";
-import type { ServerContext } from "./types.ts";
-import {
-  createTestKvStore,
-  createTestScopeKey,
-  createTestStore,
-} from "./_test_utils.ts";
+import type { AgentSlot } from "./worker_pool.ts";
+import { createTestScopeKey, createTestStore, flush } from "./_test_utils.ts";
 import { MockWebSocket } from "./_mock_ws.ts";
-import { hashApiKey } from "./deploy.ts";
-import { flush } from "./_test_utils.ts";
-
-async function setup(): Promise<ServerContext> {
-  return {
-    slots: new Map(),
-    devSlots: new Map(),
-    sessions: new Map(),
-    store: createTestStore(),
-    scopeKey: await createTestScopeKey(),
-    kvStore: createTestKvStore(),
-  };
-}
-
-function upgradeStub(mockSocket: MockWebSocket) {
-  return stub(
-    _internals,
-    "upgradeWebSocket",
-    () => ({
-      socket: mockSocket as unknown as WebSocket,
-      response: new Response(null, { status: 101 }),
-    }),
-  );
-}
-
-// --- handleDevWebSocket ---
-
-Deno.test("handleDevWebSocket returns 400 without upgrade header", async () => {
-  const ctx = await setup();
-  const req = new Request("http://localhost/dev/test");
-  const res = handleDevWebSocket(req, "test", ctx);
-  expect(res.status).toBe(400);
-  const body = await res.json();
-  expect(body.error).toBe("Expected WebSocket upgrade");
-});
-
-Deno.test("handleDevWebSocket upgrades WebSocket connection", async () => {
-  const ctx = await setup();
-  const req = new Request("http://localhost/dev/test", {
-    headers: { upgrade: "websocket" },
-  });
-
-  const mockSocket = new MockWebSocket("ws://test");
-  const s = upgradeStub(mockSocket);
-  try {
-    const res = handleDevWebSocket(req, "test", ctx);
-    expect(res.status).toBe(101);
-  } finally {
-    s.restore();
-  }
-});
-
-Deno.test("handleDevWebSocket rejects invalid first message", async () => {
-  const ctx = await setup();
-  const req = new Request("http://localhost/dev/test", {
-    headers: { upgrade: "websocket" },
-  });
-
-  const mockSocket = new MockWebSocket("ws://test");
-  const s = upgradeStub(mockSocket);
-  try {
-    handleDevWebSocket(req, "test", ctx);
-  } finally {
-    s.restore();
-  }
-
-  await flush();
-
-  // Send a dev_register without the required token field — should be rejected
-  mockSocket.simulateMessage(JSON.stringify({
-    type: "dev_register",
-    config: {
-      name: "Agent",
-      instructions: "test",
-      greeting: "hi",
-      voice: "luna",
-    },
-    toolSchemas: [],
-    env: {},
-    transport: ["websocket"],
-    client: "",
-  }));
-
-  await flush();
-
-  const sent = mockSocket.sentJson();
-  const errorMsg = sent.find((m) => m.type === "dev_error");
-  expect(errorMsg).toBeDefined();
-  expect(errorMsg!.message).toContain("dev_register");
-});
-
-Deno.test("handleDevWebSocket authenticates and registers via protocol", async () => {
-  const ctx = await setup();
-  const req = new Request("http://localhost/dev/ns/agent", {
-    headers: { upgrade: "websocket" },
-  });
-
-  const mockSocket = new MockWebSocket("ws://test");
-  const s = upgradeStub(mockSocket);
-  try {
-    handleDevWebSocket(req, "ns/agent", ctx);
-  } finally {
-    s.restore();
-  }
-
-  await flush();
-
-  // Single message: dev_register with token
-  mockSocket.simulateMessage(JSON.stringify({
-    type: "dev_register",
-    token: "my-api-key",
-    config: {
-      name: "Test Agent",
-      instructions: "test",
-      greeting: "hi",
-      voice: "luna",
-    },
-    toolSchemas: [],
-    env: {},
-    transport: ["websocket"],
-    client: "console.log('client');",
-  }));
-
-  // Multiple flushes needed for the async chain:
-  // parse → verifyOwner (crypto) → claimNamespace → registerDevAgent (signScopeToken)
-  for (let i = 0; i < 10; i++) await flush();
-
-  const sent = mockSocket.sentJson();
-  const regMsg = sent.find((m) => m.type === "dev_registered");
-  expect(regMsg).toBeDefined();
-  expect(ctx.devSlots.has("ns/agent")).toBe(true);
-  expect(ctx.devSlots.get("ns/agent")!._dev).toBe(true);
-});
-
-Deno.test("handleDevWebSocket cleans up dev slot on close", async () => {
-  const ctx = await setup();
-  const req = new Request("http://localhost/dev/test", {
-    headers: { upgrade: "websocket" },
-  });
-
-  const mockSocket = new MockWebSocket("ws://test");
-  const s = upgradeStub(mockSocket);
-  try {
-    handleDevWebSocket(req, "test", ctx);
-  } finally {
-    s.restore();
-  }
-
-  // Simulate a dev slot existing
-  ctx.devSlots.set("test", {
-    slug: "test",
-    env: {},
-    transport: ["websocket"],
-    activeSessions: 0,
-    _dev: true,
-  });
-
-  // Simulate close
-  mockSocket.dispatchEvent(new CloseEvent("close", { code: 1000 }));
-  expect(ctx.devSlots.has("test")).toBe(false);
-});
-
-Deno.test("handleDevWebSocket does not affect production slots on close", async () => {
-  const ctx = await setup();
-  const req = new Request("http://localhost/dev/test", {
-    headers: { upgrade: "websocket" },
-  });
-
-  const mockSocket = new MockWebSocket("ws://test");
-  const s = upgradeStub(mockSocket);
-  try {
-    handleDevWebSocket(req, "test", ctx);
-  } finally {
-    s.restore();
-  }
-
-  // Production slot with same slug should not be affected
-  ctx.slots.set("test", {
-    slug: "test",
-    env: {},
-    transport: ["websocket"],
-    activeSessions: 0,
-  });
-
-  mockSocket.dispatchEvent(new CloseEvent("close", { code: 1000 }));
-  expect(ctx.slots.has("test")).toBe(true);
-});
-
-Deno.test("handleDevWebSocket rejects different owner for claimed namespace", async () => {
-  const ctx = await setup();
-
-  // First owner claims the namespace
-  await ctx.store.putNamespaceOwner("ns", await hashApiKey("owner-key"));
-
-  const req = new Request("http://localhost/dev/ns/agent", {
-    headers: { upgrade: "websocket" },
-  });
-
-  const mockSocket = new MockWebSocket("ws://test");
-  const s = upgradeStub(mockSocket);
-  try {
-    handleDevWebSocket(req, "ns/agent", ctx);
-  } finally {
-    s.restore();
-  }
-
-  // Wait for MockWebSocket open event (queued microtask)
-  await flush();
-
-  // Attacker sends dev_register with their key
-  mockSocket.simulateMessage(JSON.stringify({
-    type: "dev_register",
-    token: "attacker-key",
-    config: {
-      name: "Agent",
-      instructions: "test",
-      greeting: "hi",
-      voice: "luna",
-    },
-    toolSchemas: [],
-    env: {},
-    transport: ["websocket"],
-  }));
-
-  // Wait for async namespace ownership check to complete
-  await flush();
-  await flush();
-
-  // Should have sent a dev_error and no slot created
-  const sent = mockSocket.sentJson();
-  const errorMsg = sent.find((m) => m.type === "dev_error");
-  expect(errorMsg).toBeDefined();
-  expect(errorMsg!.message).toContain("owned by another user");
-  expect(ctx.devSlots.has("ns/agent")).toBe(false);
-});
-
-// --- registerDevAgent ---
+import { hashApiKey } from "./auth.ts";
 
 function makeDevRegister(
   overrides?: Partial<DevRegister>,
@@ -272,7 +27,9 @@ function makeDevRegister(
 }
 
 Deno.test("registerDevAgent creates dev slot without persisting to store", async () => {
-  const ctx = await setup();
+  const store = createTestStore();
+  const scopeKey = await createTestScopeKey();
+  const devSlots = new Map<string, AgentSlot>();
   const ws = new MockWebSocket("ws://test");
   await flush();
 
@@ -284,17 +41,15 @@ Deno.test("registerDevAgent creates dev slot without persisting to store", async
     "ns/dev-agent",
     msg,
     ownerHash,
-    ctx,
+    devSlots,
+    scopeKey,
   );
 
   // Dev slot should be created
-  const slot = ctx.devSlots.get("ns/dev-agent");
+  const slot = devSlots.get("ns/dev-agent");
   expect(slot).toBeDefined();
   expect(slot!.name).toBe("Dev Agent");
   expect(slot!._dev).toBe(true);
-
-  // Production slots should not be affected
-  expect(ctx.slots.has("ns/dev-agent")).toBe(false);
 
   // Should have sent dev_registered
   const sent = ws.sentJson();
@@ -304,17 +59,18 @@ Deno.test("registerDevAgent creates dev slot without persisting to store", async
   expect(regMsg!.slug).toBe("ns/dev-agent");
 
   // Should NOT be stored
-  const manifest = await ctx.store.getManifest("ns/dev-agent");
+  const manifest = await store.getManifest("ns/dev-agent");
   expect(manifest).toBe(null);
 });
 
 Deno.test("registerDevAgent terminates existing worker", async () => {
-  const ctx = await setup();
+  const scopeKey = await createTestScopeKey();
+  const devSlots = new Map<string, AgentSlot>();
   const ws = new MockWebSocket("ws://test");
   await flush();
 
   let terminated = false;
-  ctx.devSlots.set("ns/dev-agent", {
+  devSlots.set("ns/dev-agent", {
     slug: "ns/dev-agent",
     env: {},
     transport: ["websocket"],
@@ -339,16 +95,18 @@ Deno.test("registerDevAgent terminates existing worker", async () => {
     "ns/dev-agent",
     msg,
     ownerHash,
-    ctx,
+    devSlots,
+    scopeKey,
   );
 
   expect(terminated).toBe(true);
   // Should preserve activeSessions count
-  expect(ctx.devSlots.get("ns/dev-agent")!.activeSessions).toBe(2);
+  expect(devSlots.get("ns/dev-agent")!.activeSessions).toBe(2);
 });
 
 Deno.test("registerDevAgent includes builtin tools in log", async () => {
-  const ctx = await setup();
+  const scopeKey = await createTestScopeKey();
+  const devSlots = new Map<string, AgentSlot>();
   const ws = new MockWebSocket("ws://test");
   await flush();
 
@@ -374,10 +132,11 @@ Deno.test("registerDevAgent includes builtin tools in log", async () => {
     "ns/tool-agent",
     msg,
     await hashApiKey("key"),
-    ctx,
+    devSlots,
+    scopeKey,
   );
 
-  const slot = ctx.devSlots.get("ns/tool-agent");
+  const slot = devSlots.get("ns/tool-agent");
   expect(slot).toBeDefined();
   expect(slot!.toolSchemas).toEqual(msg.toolSchemas);
 });

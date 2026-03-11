@@ -1,29 +1,27 @@
 {
   "name": "@aai/ui",
-  "version": "0.1.35",
+  "version": "0.1.44",
   "exports": "./mod.ts",
   "publish": {
     "exclude": [
       "*_test.ts",
       "*_test.tsx",
-      "_*.ts"
+      "_test_utils.ts",
+      "_dom_shim.ts"
     ]
   },
   "tasks": {
     "test": "deno test --allow-net --allow-read --allow-write --allow-env",
-    "check": "deno check ./**/*.ts ./**/*.tsx"
+    "check": "deno check ./**/*.ts"
   },
   "imports": {
     "preact": "npm:preact@10.28.4",
-    "preact/compat": "npm:preact@10.28.4/compat",
     "preact/hooks": "npm:preact@10.28.4/hooks",
     "@preact/signals": "npm:@preact/signals@2.8.1",
-    "goober": "npm:goober@2.1.18",
+    "htm": "npm:htm@3.1.1",
     "@b-fuze/deno-dom": "jsr:@b-fuze/deno-dom@^0.1.56"
   },
   "compilerOptions": {
-    "jsx": "react-jsx",
-    "jsxImportSource": "preact",
     "lib": [
       "deno.ns",
       "dom",

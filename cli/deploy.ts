@@ -62,7 +62,7 @@ export async function runDeploy(
   if (opts.dryRun) {
     const fullPath = `${namespace}/${slug}`;
     stepInfo("Dry run", "would deploy:");
-    info(`${fullPath} -> ${opts.url}/${fullPath}/`);
+    info(`${fullPath} -> ${opts.url}/${fullPath}`);
     return { namespace, slug };
   }
 
@@ -83,10 +83,10 @@ export async function runDeploy(
       const transport = manifest.transport ?? ["websocket"];
       const urls: string[] = [];
       if (transport.includes("websocket")) {
-        urls.push(`${opts.url}/${fullPath}/`);
+        urls.push(`${opts.url}/${fullPath}`);
       }
       if (transport.includes("twilio")) {
-        urls.push(`${opts.url}/${fullPath}/twilio/voice`);
+        urls.push(`${opts.url}/${fullPath}/voice`);
       }
       step("Deploy", `${fullPath} -> ${urls[0] ?? opts.url}`);
       for (const url of urls.slice(1)) {

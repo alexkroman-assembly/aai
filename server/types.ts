@@ -3,9 +3,6 @@ import {
   DEFAULT_STT_SAMPLE_RATE,
   DEFAULT_TTS_SAMPLE_RATE,
 } from "@aai/core/protocol";
-import type { AgentSlot } from "./worker_pool.ts";
-import type { BundleStore } from "./bundle_store_tigris.ts";
-import type { KvStore } from "./kv.ts";
 
 export type STTConfig = {
   sampleRate: number;
@@ -54,33 +51,6 @@ export const DEFAULT_TTS_CONFIG: TTSConfig = {
 
 export const DEFAULT_MODEL = "claude-haiku-4-5-20251001";
 
-export type SttMessage = {
-  type: string;
-  transcript?: string;
-  is_final?: boolean;
-  turn_is_formatted?: boolean;
-  turn_order?: number;
-  end_of_turn?: boolean;
-  timestamp?: number;
-  audio_duration_seconds?: number;
-  session_duration_seconds?: number;
-  [key: string]: unknown;
-};
-
-export const SttMessageSchema: z.ZodType<SttMessage> = z
-  .object({
-    type: z.string(),
-    transcript: z.string().optional(),
-    is_final: z.boolean().optional(),
-    turn_is_formatted: z.boolean().optional(),
-    turn_order: z.number().optional(),
-    end_of_turn: z.boolean().optional(),
-    timestamp: z.number().optional(),
-    audio_duration_seconds: z.number().optional(),
-    session_duration_seconds: z.number().optional(),
-  })
-  .passthrough();
-
 export type ChatMessage = {
   role: "system" | "user" | "assistant" | "tool";
   content: string | null;
@@ -118,22 +88,11 @@ export type LLMResponse = {
   [key: string]: unknown;
 };
 
-export const LLMResponseSchema: z.ZodType<LLMResponse> = z
-  .object({
-    id: z.string().optional(),
-    choices: z.array(z.object({
-      index: z.number().optional(),
-      message: ChatMessageSchema,
-      finish_reason: z.string(),
-    })).nullable().transform((v) => v ?? []),
-  })
-  .passthrough();
-
-export type ServerContext = {
-  slots: Map<string, AgentSlot>;
-  devSlots: Map<string, AgentSlot>;
-  sessions: Map<string, unknown>;
-  store: BundleStore;
-  scopeKey: CryptoKey;
-  kvStore: KvStore;
-};
+export const LLMResponseSchema: z.ZodType<LLMResponse> = z.object({
+  id: z.string().optional(),
+  choices: z.array(z.object({
+    index: z.number().optional(),
+    message: ChatMessageSchema,
+    finish_reason: z.string(),
+  })).nullable().transform((v) => v ?? []),
+}).passthrough();

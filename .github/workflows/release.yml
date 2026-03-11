@@ -67,7 +67,7 @@ jobs:
         run: |
           # Discover npm package dirs needed by the bundler at runtime
           npm_includes=""
-          for pkg in preact @preact+signals @preact+signals-core goober lodash-es esbuild-wasm; do
+          for pkg in preact @preact+signals @preact+signals-core goober esbuild-wasm; do
             dir=$(ls -d node_modules/.deno/${pkg}@* 2>/dev/null | head -1)
             [ -n "$dir" ] && npm_includes="$npm_includes --include $dir"
           done

@@ -1,6 +1,6 @@
 /**
- * Re-exports from _components.tsx with explicit type annotations so JSR can
- * generate .d.ts without needing to analyze JSX source files.
+ * Re-exports from _components.ts with explicit type annotations so JSR can
+ * generate .d.ts without needing to analyze source files.
  */
 
 import type * as preact from "preact";
@@ -15,7 +15,7 @@ import {
   StateIndicator as _StateIndicator,
   ThinkingIndicator as _ThinkingIndicator,
   Transcript as _Transcript,
-} from "./_components.tsx";
+} from "./_components.ts";
 
 export const StateIndicator: (
   props: { state: Signal<AgentState> },

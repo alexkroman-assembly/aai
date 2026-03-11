@@ -1,3 +1,4 @@
+import { Input, Secret } from "@cliffy/prompt";
 import { parse as parseDotenv } from "@std/dotenv/parse";
 import { exists } from "@std/fs/exists";
 import { basename, join, resolve } from "@std/path";
@@ -57,10 +58,10 @@ export async function getApiKey(): Promise<string> {
 
   step("Setup", "AssemblyAI API key required for speech-to-text");
   console.log("Get one at https://www.assemblyai.com/dashboard/signup\n");
-  const key = prompt("Enter your ASSEMBLYAI_API_KEY:")?.trim();
-  if (!key) {
-    throw new Error("ASSEMBLYAI_API_KEY is required");
-  }
+  const key = await Secret.prompt({
+    message: "ASSEMBLYAI_API_KEY",
+    minLength: 1,
+  });
 
   config.assemblyai_api_key = key;
   Deno.env.set("ASSEMBLYAI_API_KEY", key);
@@ -78,15 +79,13 @@ export async function getNamespace(): Promise<string> {
       "Agents deploy to https://aai-agent.fly.dev/<namespace>/\n",
   );
 
-  const ns = prompt("Namespace:")?.trim();
-  if (!ns) {
-    throw new Error("Namespace is required");
-  }
-
+  const ns = await Input.prompt({
+    message: "Namespace",
+    minLength: 1,
+    transform: (v) => slugify(v),
+    validate: (v) => slugify(v) ? true : "Must contain alphanumeric characters",
+  });
   const slug = slugify(ns);
-  if (!slug) {
-    throw new Error("Invalid namespace — must contain alphanumeric characters");
-  }
 
   config.namespace = slug;
   await writeConfig(config);
@@ -233,9 +232,11 @@ export async function loadAgent(dir: string): Promise<AgentEntry | null> {
     );
   }
 
-  const clientEntry = await exists(join(dir, "client.tsx"))
+  const clientEntry = await exists(join(dir, "client.ts"))
+    ? join(dir, "client.ts")
+    : await exists(join(dir, "client.tsx"))
     ? join(dir, "client.tsx")
-    : resolve(AAI_ROOT, "ui/client.tsx");
+    : resolve(AAI_ROOT, "ui/client.ts");
 
   const config: AgentConfig | undefined = def
     ? {
@@ -307,7 +308,8 @@ export async function ensureTypescriptSetup(
   let needsInstall = false;
   if (!await exists(pkgPath)) {
     const dirName = basename(resolve(targetDir));
-    const hasClient = await exists(join(targetDir, "client.tsx"));
+    const hasClient = await exists(join(targetDir, "client.ts")) ||
+      await exists(join(targetDir, "client.tsx"));
     const pkg: Record<string, unknown> = {
       private: true,
       name: slugify(dirName) || "agent",
@@ -330,7 +332,8 @@ export async function ensureTypescriptSetup(
 
   const tsconfigPath = join(targetDir, "tsconfig.json");
   if (!await exists(tsconfigPath)) {
-    const hasClient = await exists(join(targetDir, "client.tsx"));
+    const hasClient = await exists(join(targetDir, "client.ts")) ||
+      await exists(join(targetDir, "client.tsx"));
     const tsconfig: Record<string, unknown> = {
       compilerOptions: {
         strict: true,
@@ -349,7 +352,9 @@ export async function ensureTypescriptSetup(
         },
         ...(hasClient ? { jsx: "react-jsx", jsxImportSource: "preact" } : {}),
       },
-      include: hasClient ? ["agent.ts", "client.tsx"] : ["agent.ts"],
+      include: hasClient
+        ? ["agent.ts", "client.ts", "client.tsx"]
+        : ["agent.ts"],
       exclude: ["node_modules"],
     };
     await Deno.writeTextFile(

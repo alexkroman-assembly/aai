@@ -435,44 +435,50 @@ spoken conversation:
 
 ---
 
-## Custom UI (`client.tsx`)
+## Custom UI (`client.ts`)
 
-Add a `client.tsx` file alongside `agent.ts`. Export a default Preact component
-— the framework auto-mounts it:
+Add a `client.ts` file alongside `agent.ts`. Export a default Preact component —
+the framework auto-mounts it. Use `htm` tagged templates instead of JSX:
 
-```tsx
-import { useSession } from "@aai/ui";
+```ts
+import { html, useSession } from "@aai/ui";
 
 export default function App() {
   const session = useSession();
   const msgs = session.messages.value;
   const tx = session.transcript.value;
-  return (
+  return html`
     <div>
-      {msgs.map((m, i) => <p key={i}>{m.text}</p>)}
-      {tx && <p>{tx}</p>}
-      <button onClick={() => session.toggle()}>Toggle</button>
-      <button onClick={() => session.reset()}>Reset</button>
+      ${msgs.map((m, i) =>
+        html`
+          <p key="${i}">${m.text}</p>
+        `
+      )} ${tx && html`
+        <p>${tx}</p>
+      `}
+      <button onClick="${() => session.toggle()}">Toggle</button>
+      <button onClick="${() => session.reset()}">Reset</button>
     </div>
-  );
+  `;
 }
 ```
 
 **Rules:**
 
 - Export a default function component — do not call `mount()` yourself
+- Import `html` from `@aai/ui` for tagged template rendering (no JSX needed)
 - Import hooks from `preact/hooks` (`useEffect`, `useRef`, `useState`, etc.)
 - Import UI utilities from `@aai/ui`
 
-**Styling (powered by goober):**
+**Styling:**
 
-- `css` — tagged template for class names: `` css`color: red` ``
-- `keyframes` — tagged template for animations
-- `styled` — styled-components API: `` styled('div')`...` ``
+- Use Preact's built-in `style` prop with objects: `style=${{ color: "red" }}`
+- For CSS that requires selectors, pseudo-elements, keyframes, or media queries,
+  inject a `<style>` element: `` html`<style>${CSS}</style>` ``
 
 **Built-in components from `@aai/ui`:**
 
-- `ErrorBanner` — `<ErrorBanner error={session.error} />`
+- `ErrorBanner` — `` html`<${ErrorBanner} error=${session.error} />` ``
 - `StateIndicator` — colored dot showing agent state
 - `Transcript` — live speech-to-text transcript
 - `ChatView` — default chat message list
@@ -500,7 +506,7 @@ export default function App() {
 ## Using npm/jsr packages
 
 ```sh
-npm install lodash-es
+npm install some-package
 ```
 
 For JSR packages, add a `.npmrc`:
@@ -514,7 +520,7 @@ Then `npm install @jsr/scope__package-name`.
 Import as bare specifiers — the bundler resolves from `node_modules`:
 
 ```ts
-import { capitalize } from "lodash-es";
+import { someFunction } from "some-package";
 ```
 
 ---

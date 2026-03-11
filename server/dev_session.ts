@@ -1,3 +1,5 @@
+import type { Context } from "hono";
+import { HTTPException } from "hono/http-exception";
 import { type DevRegister, DevRegisterSchema } from "@aai/core/protocol";
 import { createWebSocketEndpoint } from "@aai/core/ws-endpoint";
 import { createWorkerApi } from "@aai/core/worker-entry";
@@ -5,16 +7,17 @@ import type { AgentConfig, ToolSchema } from "@aai/sdk/types";
 import { getBuiltinToolSchemas } from "./builtin_tools.ts";
 import {
   type AgentSlot,
-  createToolExecutor,
   trackSessionClose,
   trackSessionOpen,
 } from "./worker_pool.ts";
-import type { ServerContext } from "./types.ts";
+import type { HonoEnv } from "./hono_env.ts";
 import { claimNamespace, verifyOwner } from "./auth.ts";
 import { signScopeToken, verifyScopeToken } from "./scope_token.ts";
-import { loadPlatformConfig } from "./config.ts";
-import { createSession, type Session } from "./session.ts";
+import { createSession } from "./session.ts";
+import { prepareSession } from "./session_setup.ts";
 import { handleSessionWebSocket } from "./ws_handler.ts";
+import type { BundleStore } from "./bundle_store_tigris.ts";
+import type { ScopeKey } from "./scope_token.ts";
 
 export const _internals = {
   upgradeWebSocket: (req: Request) => Deno.upgradeWebSocket(req),
@@ -39,18 +42,10 @@ function sendError(socket: WebSocket, message: string) {
   socket.send(JSON.stringify({ type: "dev_error", message }));
 }
 
-export function handleDevWebSocket(
-  req: Request,
-  slug: string,
-  ctx: ServerContext,
-): Response {
-  if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") {
-    return Response.json({ error: "Expected WebSocket upgrade" }, {
-      status: 400,
-    });
-  }
+export function handleDevWebSocket(c: Context<HonoEnv>) {
+  const { slug, slots: _slots, devSlots, store, scopeKey } = c.var;
 
-  const { socket, response } = _internals.upgradeWebSocket(req);
+  const { socket, response } = _internals.upgradeWebSocket(c.req.raw);
 
   socket.addEventListener("open", () => {
     console.info("Dev control WebSocket connected", { slug });
@@ -58,7 +53,7 @@ export function handleDevWebSocket(
 
   socket.addEventListener("close", () => {
     console.info("Dev control WebSocket disconnected", { slug });
-    ctx.devSlots.delete(slug);
+    devSlots.delete(slug);
     console.info("Removed dev slot", { slug });
   });
 
@@ -67,7 +62,7 @@ export function handleDevWebSocket(
     console.error("Dev control WebSocket error", { slug, error: msg });
   });
 
-  runDevSession(socket, slug, ctx);
+  runDevSession(socket, slug, devSlots, store, scopeKey);
 
   return response;
 }
@@ -75,7 +70,9 @@ export function handleDevWebSocket(
 async function runDevSession(
   socket: WebSocket,
   slug: string,
-  ctx: ServerContext,
+  devSlots: Map<string, AgentSlot>,
+  store: BundleStore,
+  scopeKey: ScopeKey,
 ): Promise<void> {
   const msg = await nextJsonMessage(socket);
   if (!msg) return;
@@ -88,19 +85,22 @@ async function runDevSession(
   }
 
   const namespace = slug.split("/")[0];
-  const ownerHash = await verifyOwner(
-    parsed.data.token,
-    namespace,
-    ctx.store,
-  );
+  const ownerHash = await verifyOwner(parsed.data.token, namespace, store);
   if (!ownerHash) {
     sendError(socket, `Namespace "${namespace}" is owned by another user.`);
     socket.close();
     return;
   }
 
-  await claimNamespace(namespace, ownerHash, ctx.store);
-  await registerDevAgent(socket, slug, parsed.data, ownerHash, ctx);
+  await claimNamespace(namespace, ownerHash, store);
+  await registerDevAgent(
+    socket,
+    slug,
+    parsed.data,
+    ownerHash,
+    devSlots,
+    scopeKey,
+  );
 }
 
 export async function registerDevAgent(
@@ -108,7 +108,8 @@ export async function registerDevAgent(
   slug: string,
   msg: DevRegister,
   ownerHash: string,
-  ctx: ServerContext,
+  devSlots: Map<string, AgentSlot>,
+  scopeKey: ScopeKey,
 ): Promise<void> {
   const workerApi = createWorkerApi(createWebSocketEndpoint(ws));
 
@@ -127,12 +128,12 @@ export async function registerDevAgent(
     ...getBuiltinToolSchemas(agentConfig.builtinTools ?? []),
   ];
 
-  const existing = ctx.devSlots.get(slug);
+  const existing = devSlots.get(slug);
   if (existing?.worker) {
     existing.worker.handle.terminate();
   }
 
-  const devToken = await signScopeToken(ctx.scopeKey, { ownerHash, slug });
+  const devToken = await signScopeToken(scopeKey, { ownerHash, slug });
 
   const slot: AgentSlot = {
     slug,
@@ -149,7 +150,7 @@ export async function registerDevAgent(
     },
     _dev: true,
   };
-  ctx.devSlots.set(slug, slot);
+  devSlots.set(slug, slot);
 
   console.info("Dev agent registered", {
     slug,
@@ -160,59 +161,36 @@ export async function registerDevAgent(
   ws.send(JSON.stringify({ type: "dev_registered", slug, devToken }));
 }
 
-export async function handleDevSessionWebSocket(
-  req: Request,
-  slug: string,
-  ctx: ServerContext,
-): Promise<Response> {
-  const slot = ctx.devSlots.get(slug);
+export async function handleDevSessionWebSocket(c: Context<HonoEnv>) {
+  const { slug, devSlots, store, kvStore, scopeKey, sessions } = c.var;
+  const slot = devSlots.get(slug);
   if (!slot) {
-    return Response.json({ error: "No dev session for this agent" }, {
-      status: 404,
-    });
+    throw new HTTPException(404, { message: "No dev session for this agent" });
   }
 
-  const token = new URL(req.url).searchParams.get("token");
-  if (!token) {
-    return Response.json({ error: "Missing token" }, { status: 401 });
-  }
-  const scope = await verifyScopeToken(ctx.scopeKey, token);
+  const token = c.req.query("token");
+  if (!token) throw new HTTPException(401, { message: "Missing token" });
+
+  const scope = await verifyScopeToken(scopeKey, token);
   if (!scope || scope.slug !== slug) {
-    return Response.json({ error: "Invalid dev token" }, { status: 403 });
+    throw new HTTPException(403, { message: "Invalid dev token" });
   }
 
-  if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") {
-    return Response.json({ error: "Expected WebSocket upgrade" }, {
-      status: 400,
-    });
+  if (c.req.header("upgrade")?.toLowerCase() !== "websocket") {
+    throw new HTTPException(400, { message: "Expected WebSocket upgrade" });
   }
 
-  const config = slot.config!;
-  const builtinTools = getBuiltinToolSchemas(config.builtinTools ?? []);
-  const toolSchemas = [...(slot.toolSchemas ?? []), ...builtinTools];
-  const kvCtx = slot.ownerHash
-    ? { kvStore: ctx.kvStore, scope: { ownerHash: slot.ownerHash, slug } }
-    : undefined;
-  const { executeTool, getWorkerApi } = createToolExecutor(
-    slot,
-    ctx.store,
-    kvCtx,
-  );
+  const setup = prepareSession(slot, slug, store, kvStore);
 
-  const resume = new URL(req.url).searchParams.has("resume");
-  const { socket, response } = _internals.upgradeWebSocket(req);
-  handleSessionWebSocket(socket, ctx.sessions as Map<string, Session>, {
+  const resume = c.req.query("resume") !== undefined;
+  const { socket, response } = _internals.upgradeWebSocket(c.req.raw);
+  handleSessionWebSocket(socket, sessions, {
     createSession: (sessionId, ws) =>
       createSession({
         id: sessionId,
         agent: slug,
         transport: ws,
-        agentConfig: config,
-        toolSchemas,
-        platformConfig: loadPlatformConfig(slot.env),
-        executeTool,
-        getWorkerApi,
-        env: slot.env,
+        ...setup,
         skipGreeting: resume,
       }),
     logContext: { slug, dev: "true" },

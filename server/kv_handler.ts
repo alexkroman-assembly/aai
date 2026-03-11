@@ -1,7 +1,7 @@
+import type { Context } from "hono";
+import { validator } from "hono/validator";
 import { z } from "zod";
-import type { KvStore } from "./kv.ts";
-import { verifyScopeToken } from "./scope_token.ts";
-import { bearerToken } from "./auth.ts";
+import type { HonoEnv } from "./hono_env.ts";
 
 const KvRequestSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("get"), key: z.string() }),
@@ -21,68 +21,40 @@ const KvRequestSchema = z.discriminatedUnion("op", [
   }),
 ]);
 
-export async function handleKv(
-  req: Request,
-  ctx: { kvStore: KvStore; scopeKey: CryptoKey },
-): Promise<Response> {
-  const token = bearerToken(req);
-  if (!token) {
-    return Response.json(
-      { error: "Missing Authorization header" },
-      { status: 401 },
-    );
-  }
-
-  const scope = await verifyScopeToken(ctx.scopeKey, token);
-  if (!scope) {
-    return Response.json(
-      { error: "Invalid or tampered scope token" },
-      { status: 403 },
-    );
-  }
-
-  let json: unknown;
-  try {
-    json = await req.json();
-  } catch {
-    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
-
-  const parsed = KvRequestSchema.safeParse(json);
+export const validateKvRequest = validator("json", (value, c) => {
+  const parsed = KvRequestSchema.safeParse(value);
   if (!parsed.success) {
-    return Response.json(
+    return c.json(
       { error: `Invalid request: ${parsed.error.message}` },
-      { status: 400 },
+      400,
     );
   }
+  return parsed.data;
+});
 
-  const msg = parsed.data;
+export async function handleKv(c: Context<HonoEnv>) {
+  const { scope, kvStore } = c.var;
+  const msg = c.req.valid("json" as never) as z.infer<typeof KvRequestSchema>;
 
   try {
     switch (msg.op) {
-      case "get": {
-        const result = await ctx.kvStore.get(scope, msg.key);
-        return Response.json({ result });
-      }
-      case "set": {
-        await ctx.kvStore.set(scope, msg.key, msg.value, msg.ttl);
-        return Response.json({ result: "OK" });
-      }
-      case "del": {
-        await ctx.kvStore.del(scope, msg.key);
-        return Response.json({ result: "OK" });
-      }
-      case "keys": {
-        const result = await ctx.kvStore.keys(scope, msg.pattern);
-        return Response.json({ result });
-      }
-      case "list": {
-        const result = await ctx.kvStore.list(scope, msg.prefix, {
-          limit: msg.limit,
-          reverse: msg.reverse,
+      case "get":
+        return c.json({ result: await kvStore.get(scope, msg.key) });
+      case "set":
+        await kvStore.set(scope, msg.key, msg.value, msg.ttl);
+        return c.json({ result: "OK" });
+      case "del":
+        await kvStore.del(scope, msg.key);
+        return c.json({ result: "OK" });
+      case "keys":
+        return c.json({ result: await kvStore.keys(scope, msg.pattern) });
+      case "list":
+        return c.json({
+          result: await kvStore.list(scope, msg.prefix, {
+            limit: msg.limit,
+            reverse: msg.reverse,
+          }),
         });
-        return Response.json({ result });
-      }
     }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
@@ -91,9 +63,6 @@ export async function handleKv(
       slug: scope.slug,
       error: message,
     });
-    return Response.json(
-      { error: `KV operation failed: ${message}` },
-      { status: 500 },
-    );
+    return c.json({ error: `KV operation failed: ${message}` }, 500);
   }
 }

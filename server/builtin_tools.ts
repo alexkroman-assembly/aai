@@ -1,12 +1,20 @@
 import { z } from "zod";
 import * as Comlink from "comlink";
 import type { ToolSchema } from "@aai/sdk/types";
-import { htmlToMarkdown } from "./html.ts";
+import TurndownService from "turndown";
 import { createDenoWorker } from "@aai/core/deno-worker";
 import { matchSubnets } from "@std/net/unstable-ip";
 
+const turndown = new TurndownService({ headingStyle: "atx" });
+turndown.remove(["script", "style", "head"]);
+
+function htmlToMarkdown(html: string): string {
+  return turndown.turndown(html);
+}
+
 export const _internals = {
   fetch: globalThis.fetch,
+  htmlToMarkdown,
 };
 
 const BLOCKED_CIDRS = [

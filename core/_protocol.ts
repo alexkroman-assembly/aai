@@ -1,5 +1,6 @@
 // WebSocket wire-format types shared by server/ and ui/.
-// Zod schemas are the source of truth; TypeScript types are derived via z.infer.
+// Types are defined first; Zod schemas are annotated with z.ZodType<T> to
+// satisfy JSR's no-slow-types rule for published packages.
 
 import { z } from "zod";
 import {

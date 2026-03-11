@@ -1,7 +1,5 @@
 import { h, render } from "preact";
 import type { ComponentType } from "preact";
-import { createPortal } from "preact/compat";
-import { setup } from "goober";
 import { createVoiceSession, type VoiceSession } from "./session.ts";
 import {
   createSessionControls,
@@ -10,11 +8,11 @@ import {
 } from "./signals.ts";
 import { applyTheme, defaultTheme, type Theme } from "./theme.ts";
 
-function BodyStyle({ theme }: { theme: Theme }): ReturnType<typeof h> {
-  return createPortal(
-    h("style", null, `body { margin: 0; background: ${theme.bg}; }`),
-    document.head,
-  );
+function injectBodyStyle(theme: Theme): HTMLStyleElement {
+  const style = document.createElement("style");
+  style.textContent = `body { margin: 0; background: ${theme.bg}; }`;
+  document.head.appendChild(style);
+  return style;
 }
 
 export type MountOptions = {
@@ -30,14 +28,6 @@ export type MountHandle = {
   [Symbol.dispose](): void;
 };
 
-let gooberReady = false;
-
-function ensureGoober(): void {
-  if (gooberReady) return;
-  gooberReady = true;
-  setup(h);
-}
-
 function resolveContainer(target: string | HTMLElement = "#app"): HTMLElement {
   const el = typeof target === "string"
     ? document.querySelector(target)
@@ -50,7 +40,6 @@ export function mount(
   Component: ComponentType,
   options?: MountOptions,
 ): MountHandle {
-  ensureGoober();
   const container = resolveContainer(options?.target);
   const theme = { ...defaultTheme, ...options?.theme };
   applyTheme(container, theme);
@@ -59,11 +48,12 @@ export function mount(
     new URL(".", globalThis.location.href).href.replace(/\/$/, "");
   const session = createVoiceSession({ platformUrl });
   const signals = createSessionControls(session);
+  const styleEl = injectBodyStyle(theme);
 
   render(
     h(SessionProvider, {
       value: signals,
-      children: [h(BodyStyle, { theme }), h(Component, null)],
+      children: [h(Component, null)],
     }),
     container,
   );
@@ -73,6 +63,7 @@ export function mount(
     signals,
     dispose() {
       render(null, container);
+      styleEl.remove();
       signals.dispose();
       session.disconnect();
     },

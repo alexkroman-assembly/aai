@@ -6,6 +6,44 @@ import {
   getBuiltinToolSchemas,
 } from "./builtin_tools.ts";
 
+// --- htmlToMarkdown ---
+
+const HTML_TO_MD_CASES: [string, string, string][] = [
+  [
+    "strips script and style tags",
+    '<p>Hello</p><script>alert("x")</script><style>.a{}</style><p>World</p>',
+    "Hello",
+  ],
+  ["converts headings", "<h1>Title</h1>", "# Title"],
+  ["converts h2", "<h2>Sub</h2>", "## Sub"],
+  ["converts h3", "<h3>Deep</h3>", "### Deep"],
+  ["converts bold", "<b>bold</b>", "**bold**"],
+  ["converts strong", "<strong>bold</strong>", "**bold**"],
+  ["converts italic", "<i>italic</i>", "_italic_"],
+  ["converts em", "<em>italic</em>", "_italic_"],
+  [
+    "converts links",
+    '<a href="https://example.com">click</a>',
+    "[click](https://example.com)",
+  ],
+  ["converts list items", "<ul><li>one</li><li>two</li></ul>", "*   one"],
+  ["decodes HTML entities", "<p>&amp; &lt; &gt; &quot;</p>", '& < > "'],
+  ["strips remaining tags", "<div><span>text</span></div>", "text"],
+  [
+    "strips head section",
+    "<head><title>T</title></head><body>content</body>",
+    "content",
+  ],
+];
+
+for (const [name, input, expected] of HTML_TO_MD_CASES) {
+  Deno.test(`htmlToMarkdown: ${name}`, () => {
+    expect(_internals.htmlToMarkdown(input)).toContain(expected);
+  });
+}
+
+// --- helpers ---
+
 function mockFetch(body: string, status = 200, statusText = "OK") {
   return (() =>
     Promise.resolve(

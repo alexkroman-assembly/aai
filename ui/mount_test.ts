@@ -3,6 +3,7 @@ import { render } from "preact";
 import { installMockWebSocket, setupDOM } from "./_test_utils.ts";
 import { mount } from "./mount.ts";
 import { defaultTheme } from "./theme.ts";
+import { html } from "./_html.ts";
 
 function withMountEnv(
   fn: (mock: ReturnType<typeof installMockWebSocket>) => void | Promise<void>,
@@ -27,7 +28,9 @@ Deno.test("mount()", async (t) => {
     "throws when target selector does not match",
     withMountEnv(() => {
       function App() {
-        return <div>test</div>;
+        return html`
+          <div>test</div>
+        `;
       }
       expect(() =>
         mount(App, {
@@ -44,7 +47,9 @@ Deno.test("mount()", async (t) => {
     "renders a component into the default #app element",
     withMountEnv(() => {
       function App() {
-        return <div class="hello">Hello Mount</div>;
+        return html`
+          <div class="hello">Hello Mount</div>
+        `;
       }
       mount(App, { platformUrl: "http://localhost:3000" });
 
@@ -57,7 +62,9 @@ Deno.test("mount()", async (t) => {
     "returns session, signals, and dispose",
     withMountEnv(() => {
       function App() {
-        return <div />;
+        return html`
+          <div />
+        `;
       }
       const handle = mount(App, { platformUrl: "http://localhost:3000" });
 
@@ -71,7 +78,9 @@ Deno.test("mount()", async (t) => {
     "applies theme CSS variables to the container",
     withMountEnv(() => {
       function App() {
-        return <div />;
+        return html`
+          <div />
+        `;
       }
       mount(App, { platformUrl: "http://localhost:3000" });
 
@@ -89,7 +98,9 @@ Deno.test("mount()", async (t) => {
     "merges custom theme with defaults",
     withMountEnv(() => {
       function App() {
-        return <div />;
+        return html`
+          <div />
+        `;
       }
       mount(App, {
         platformUrl: "http://localhost:3000",
@@ -113,7 +124,9 @@ Deno.test("mount()", async (t) => {
     "dispose tears down render and disconnects session",
     withMountEnv(() => {
       function App() {
-        return <div>content</div>;
+        return html`
+          <div>content</div>
+        `;
       }
       const handle = mount(App, { platformUrl: "http://localhost:3000" });
 

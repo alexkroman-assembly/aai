@@ -9,6 +9,7 @@ import {
 } from "./_test_utils.ts";
 import { createSessionControls, useSession } from "./signals.ts";
 import { createVoiceSession, type VoiceSession } from "./session.ts";
+import { html } from "./_html.ts";
 
 function withSignalsEnv(
   fn: (ctx: {
@@ -123,12 +124,19 @@ Deno.test("useSession", async (t) => {
 
     function Orphan() {
       useSession();
-      return <div />;
+      return html`
+        <div />
+      `;
     }
 
     let caught: Error | null = null;
     try {
-      render(<Orphan />, container);
+      render(
+        html`
+          <${Orphan} />
+        `,
+        container,
+      );
     } catch (e) {
       caught = e as Error;
     }

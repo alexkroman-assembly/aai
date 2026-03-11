@@ -1,15 +1,15 @@
+import type { Context } from "hono";
+import { HTTPException } from "hono/http-exception";
 import { concat } from "@std/bytes/concat";
 import { decodeBase64, encodeBase64 } from "@std/encoding/base64";
 import {
   type AgentSlot,
-  createToolExecutor,
   trackSessionClose,
   trackSessionOpen,
 } from "./worker_pool.ts";
-import { loadPlatformConfig } from "./config.ts";
-import { getBuiltinToolSchemas } from "./builtin_tools.ts";
 import { createSession, type SessionTransport } from "./session.ts";
-import type { ServerContext } from "./types.ts";
+import { prepareSession } from "./session_setup.ts";
+import type { HonoEnv } from "./hono_env.ts";
 import {
   DEFAULT_STT_SAMPLE_RATE,
   DEFAULT_TTS_SAMPLE_RATE,
@@ -114,73 +114,46 @@ export function decodeTwilioFrame(payload: string): Uint8Array {
 
 function getTwilioSlot(
   slug: string,
-  ctx: ServerContext,
+  slots: Map<string, AgentSlot>,
 ): AgentSlot | null {
-  const slot = ctx.slots.get(slug);
+  const slot = slots.get(slug);
   return slot?.transport.includes("twilio") ? slot : null;
 }
 
-export function handleTwilioVoice(
-  req: Request,
-  slug: string,
-  ctx: ServerContext,
-): Response {
-  const slot = getTwilioSlot(slug, ctx);
+export function handleTwilioVoice(c: Context<HonoEnv>) {
+  const { slug, slots } = c.var;
+  const slot = getTwilioSlot(slug, slots);
   if (!slot) {
-    return new Response(
+    c.header("Content-Type", "text/xml");
+    return c.body(
       `${TWIML_PREFIX}<Say>Agent not found. Goodbye.</Say>${TWIML_SUFFIX}`,
-      { headers: { "Content-Type": "text/xml" } },
     );
   }
 
-  const host = req.headers.get("host") ?? "localhost";
-  const streamUrl = `wss://${host}/${slug}/twilio/stream`;
+  const host = c.req.header("host") ?? "localhost";
+  const streamUrl = `wss://${host}/${slug}/stream`;
   console.info("Incoming call, connecting media stream", { slug, streamUrl });
-  return new Response(
+  c.header("Content-Type", "text/xml");
+  return c.body(
     `${TWIML_PREFIX}<Connect><Stream url="${streamUrl}" /></Connect>${TWIML_SUFFIX}`,
-    { headers: { "Content-Type": "text/xml" } },
   );
 }
 
-export function handleTwilioStream(
-  req: Request,
-  slug: string,
-  ctx: ServerContext,
-): Response {
-  const slot = getTwilioSlot(slug, ctx);
-  if (!slot) return Response.json({ error: "Not found" }, { status: 404 });
+export function handleTwilioStream(c: Context<HonoEnv>) {
+  const { slug, slots, store, kvStore } = c.var;
+  const slot = getTwilioSlot(slug, slots);
+  if (!slot) throw new HTTPException(404, { message: "Not found" });
 
-  if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") {
-    return Response.json({ error: "Expected WebSocket upgrade" }, {
-      status: 400,
-    });
-  }
+  const setup = prepareSession(slot, slug, store, kvStore);
 
-  const config = slot.config!;
-  const builtinTools = getBuiltinToolSchemas(config.builtinTools ?? []);
-  const toolSchemas = [...(slot.toolSchemas ?? []), ...builtinTools];
-  const kvCtx = slot.ownerHash
-    ? { kvStore: ctx.kvStore, scope: { ownerHash: slot.ownerHash, slug } }
-    : undefined;
-  const { executeTool, getWorkerApi } = createToolExecutor(
-    slot,
-    ctx.store,
-    kvCtx,
-  );
-
-  const { socket, response } = Deno.upgradeWebSocket(req);
+  const { socket, response } = Deno.upgradeWebSocket(c.req.raw);
   const transport = createTwilioTransport(socket);
 
   const session = createSession({
     id: `twilio-${crypto.randomUUID().slice(0, 8)}`,
     agent: slug,
     transport,
-    agentConfig: config,
-    toolSchemas,
-    platformConfig: loadPlatformConfig(slot.env),
-    executeTool,
-    getWorkerApi,
-    env: slot.env,
+    ...setup,
   });
 
   trackSessionOpen(slot);

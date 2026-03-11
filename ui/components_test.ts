@@ -1,6 +1,6 @@
 import { expect } from "@std/expect";
 import { FakeTime } from "@std/testing/time";
-import { render } from "preact";
+import { h, render } from "preact";
 import { signal } from "@preact/signals";
 import { createMockSignals, getContainer, setupDOM } from "./_test_utils.ts";
 import { SessionProvider } from "./signals.ts";
@@ -11,7 +11,8 @@ import {
   MessageBubble,
   StateIndicator,
   Transcript,
-} from "./_components.tsx";
+} from "./_components.ts";
+import { html } from "./_html.ts";
 import type { SessionSignals } from "./signals.ts";
 import type { AgentState, Message } from "./types.ts";
 
@@ -41,7 +42,7 @@ function renderWithProvider(
   signals: SessionSignals,
 ) {
   render(
-    <SessionProvider value={signals}>{vnode}</SessionProvider>,
+    h(SessionProvider, { value: signals, children: vnode }),
     container,
   );
 }
@@ -51,7 +52,9 @@ Deno.test("StateIndicator", async (t) => {
     "renders the state label",
     withDOM((container) => {
       render(
-        <StateIndicator state={signal<AgentState>("listening")} />,
+        html`
+          <${StateIndicator} state="${signal<AgentState>("listening")}" />
+        `,
         container,
       );
       expect(container.textContent).toContain("listening");
@@ -64,12 +67,14 @@ Deno.test("ErrorBanner", async (t) => {
     "renders error message",
     withDOM((container) => {
       render(
-        <ErrorBanner
-          error={signal({
-            code: "connection" as const,
-            message: "Connection lost",
-          })}
-        />,
+        html`
+          <${ErrorBanner}
+            error="${signal({
+              code: "connection" as const,
+              message: "Connection lost",
+            })}"
+          />
+        `,
         container,
       );
       expect(container.textContent).toContain("Connection lost");
@@ -79,7 +84,12 @@ Deno.test("ErrorBanner", async (t) => {
   await t.step(
     "renders nothing when null",
     withDOM((container) => {
-      render(<ErrorBanner error={signal(null)} />, container);
+      render(
+        html`
+          <${ErrorBanner} error="${signal(null)}" />
+        `,
+        container,
+      );
       expect(container.innerHTML).toBe("");
     }),
   );
@@ -90,7 +100,12 @@ Deno.test("MessageBubble", async (t) => {
     "renders message text",
     withDOM((container) => {
       const msg: Message = { role: "user", text: "Hello there" };
-      render(<MessageBubble message={msg} />, container);
+      render(
+        html`
+          <${MessageBubble} message="${msg}" />
+        `,
+        container,
+      );
       expect(container.textContent).toContain("Hello there");
     }),
   );
@@ -99,7 +114,12 @@ Deno.test("MessageBubble", async (t) => {
     "renders assistant message text",
     withDOM((container) => {
       const msg: Message = { role: "assistant", text: "Simple reply" };
-      render(<MessageBubble message={msg} />, container);
+      render(
+        html`
+          <${MessageBubble} message="${msg}" />
+        `,
+        container,
+      );
       expect(container.textContent).toBe("Simple reply");
     }),
   );
@@ -109,7 +129,12 @@ Deno.test("Transcript", async (t) => {
   await t.step(
     "renders transcript text",
     withDOM((container) => {
-      render(<Transcript text={signal("hello wor")} />, container);
+      render(
+        html`
+          <${Transcript} text="${signal("hello wor")}" />
+        `,
+        container,
+      );
       expect(container.textContent).toContain("hello wor");
     }),
   );
@@ -117,7 +142,12 @@ Deno.test("Transcript", async (t) => {
   await t.step(
     "renders nothing when empty",
     withDOM((container) => {
-      render(<Transcript text={signal("")} />, container);
+      render(
+        html`
+          <${Transcript} text="${signal("")}" />
+        `,
+        container,
+      );
       expect(container.innerHTML).toBe("");
     }),
   );
@@ -128,7 +158,13 @@ Deno.test("App", async (t) => {
     "shows start button when not started",
     withDOM((container) => {
       const signals = createMockSignals({ started: false });
-      renderWithProvider(container, <App />, signals);
+      renderWithProvider(
+        container,
+        html`
+          <${App} />
+        `,
+        signals,
+      );
       expect(container.querySelector("button")!.textContent).toBe(
         "Start Conversation",
       );
@@ -143,7 +179,13 @@ Deno.test("App", async (t) => {
         state: "listening",
         running: true,
       });
-      renderWithProvider(container, <App />, signals);
+      renderWithProvider(
+        container,
+        html`
+          <${App} />
+        `,
+        signals,
+      );
       expect(container.textContent).toContain("listening");
       expect(container.textContent).toContain("Stop");
     }),
@@ -153,14 +195,26 @@ Deno.test("App", async (t) => {
     "transitions from start screen to chat",
     withDOM((container) => {
       const signals = createMockSignals({ started: false });
-      renderWithProvider(container, <App />, signals);
+      renderWithProvider(
+        container,
+        html`
+          <${App} />
+        `,
+        signals,
+      );
       expect(container.querySelector("button")!.textContent).toBe(
         "Start Conversation",
       );
 
       signals.started.value = true;
       signals.state.value = "listening";
-      renderWithProvider(container, <App />, signals);
+      renderWithProvider(
+        container,
+        html`
+          <${App} />
+        `,
+        signals,
+      );
 
       expect(container.textContent).toContain("listening");
       expect(container.textContent).not.toContain("Start Conversation");
@@ -181,7 +235,13 @@ Deno.test("ChatView", async (t) => {
           { role: "assistant", text: "AI stands for..." },
         ],
       });
-      renderWithProvider(container, <ChatView />, signals);
+      renderWithProvider(
+        container,
+        html`
+          <${ChatView} />
+        `,
+        signals,
+      );
 
       expect(container.textContent).toContain("thinking");
       expect(container.textContent).toContain("What is AI?");
@@ -199,7 +259,13 @@ Deno.test("ChatView", async (t) => {
         transcript: "hello wor",
         error: { code: "connection", message: "Connection failed" },
       });
-      renderWithProvider(container, <ChatView />, signals);
+      renderWithProvider(
+        container,
+        html`
+          <${ChatView} />
+        `,
+        signals,
+      );
 
       expect(container.textContent).toContain("hello wor");
       expect(container.textContent).toContain("Connection failed");
@@ -214,7 +280,13 @@ Deno.test("ChatView", async (t) => {
         state: "listening",
         running: true,
       });
-      renderWithProvider(container, <ChatView />, signals);
+      renderWithProvider(
+        container,
+        html`
+          <${ChatView} />
+        `,
+        signals,
+      );
 
       const buttons = () =>
         Array.from(container.querySelectorAll("button")).map((b) =>
@@ -226,7 +298,13 @@ Deno.test("ChatView", async (t) => {
 
       signals.running.value = false;
       render(null, container);
-      renderWithProvider(container, <ChatView />, signals);
+      renderWithProvider(
+        container,
+        html`
+          <${ChatView} />
+        `,
+        signals,
+      );
       expect(buttons()).toContain("Resume");
     }),
   );
@@ -244,7 +322,13 @@ Deno.test("ChatView", async (t) => {
           { role: "user", text: "Third" },
         ],
       });
-      renderWithProvider(container, <ChatView />, signals);
+      renderWithProvider(
+        container,
+        html`
+          <${ChatView} />
+        `,
+        signals,
+      );
 
       const text = container.textContent!;
       expect(text.indexOf("First")).toBeLessThan(text.indexOf("Second"));

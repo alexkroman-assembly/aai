@@ -1,9 +1,7 @@
-import { deadline } from "@std/async/deadline";
-import { type STTConfig, SttMessageSchema } from "./types.ts";
-import { createWebSocketWithHeaders } from "./_deno_ws.ts";
+import { StreamingTranscriber } from "assemblyai";
+import type { TurnEvent } from "assemblyai";
+import type { STTConfig } from "./types.ts";
 import * as metrics from "./metrics.ts";
-
-const STT_CONNECTION_TIMEOUT = 10_000;
 
 export type SttEvents = {
   onTranscript: (text: string, isFinal: boolean, turnOrder?: number) => void;
@@ -24,154 +22,103 @@ export async function connectStt(
   config: STTConfig,
   events: SttEvents,
 ): Promise<SttHandle> {
-  const params = new URLSearchParams({
-    sample_rate: String(config.sampleRate),
-    speech_model: config.speechModel,
-    format_turns: String(config.formatTurns),
-    min_end_of_turn_silence_when_confident: String(
-      config.minEndOfTurnSilenceWhenConfident,
-    ),
-    max_turn_silence: String(config.maxTurnSilence),
-    vad_threshold: String(config.vadThreshold),
-  });
-  if (config.prompt) {
-    params.set("prompt", config.prompt);
-  }
-
   const sttStart = performance.now();
-  const url = `${config.wssBase}?${params}`;
+
   console.info("Connecting to STT", {
     url: config.wssBase,
-    params: Object.fromEntries(params),
-  });
-  const ws = createWebSocketWithHeaders(url, {
-    Authorization: apiKey,
+    speechModel: config.speechModel,
+    sampleRate: config.sampleRate,
   });
 
-  // Wait for connection
-  try {
-    await deadline(
-      new Promise<void>((resolve, reject) => {
-        ws.addEventListener("open", () => resolve(), { once: true });
-        ws.addEventListener("error", (event: Event) => {
-          const detail = event instanceof ErrorEvent ? event.message : "";
-          const msg = apiKey
-            ? `STT connection failed${detail ? `: ${detail}` : ""}`
-            : "STT connection failed — ASSEMBLYAI_API_KEY is not set";
-          reject(new Error(msg));
-        }, { once: true });
-      }),
-      STT_CONNECTION_TIMEOUT,
-    );
-  } catch (err: unknown) {
-    metrics.sttConnectDuration.observe(
-      (performance.now() - sttStart) / 1000,
-    );
-    metrics.errorsTotal.inc({ component: "stt" });
-    ws.close();
-    if (err instanceof DOMException && err.name === "TimeoutError") {
-      throw new Error("STT connection timeout");
-    }
-    throw err;
-  }
+  const transcriber = new StreamingTranscriber({
+    apiKey,
+    websocketBaseUrl: config.wssBase,
+    sampleRate: config.sampleRate,
+    speechModel: config.speechModel as
+      | "u3-pro"
+      | "u3-rt-pro"
+      | "whisper-rt"
+      | "universal-streaming-english"
+      | "universal-streaming-multilingual",
+    formatTurns: config.formatTurns,
+    minEndOfTurnSilenceWhenConfident: config.minEndOfTurnSilenceWhenConfident,
+    maxTurnSilence: config.maxTurnSilence,
+    vadThreshold: config.vadThreshold,
+    ...(config.prompt ? { prompt: config.prompt } : {}),
+  });
 
-  metrics.sttConnectDuration.observe((performance.now() - sttStart) / 1000);
-  console.info("STT WebSocket connected");
-
-  // Wire up event handlers — flat, no nesting
   let msgCount = 0;
 
-  ws.addEventListener("message", (event: MessageEvent) => {
-    if (typeof event.data !== "string") {
-      console.debug("STT non-string message", {
-        dataType: typeof event.data,
-      });
-      return;
-    }
-    let json: unknown;
-    try {
-      json = JSON.parse(event.data);
-    } catch {
-      return;
-    }
-
-    const result = SttMessageSchema.safeParse(json);
-    if (!result.success) return;
-
-    const msg = result.data;
+  transcriber.on("turn", (turn: TurnEvent) => {
     msgCount++;
+    const text = (turn.transcript ?? "").trim();
     console.info("STT message", {
       msgCount,
-      type: msg.type,
-      transcript: msg.transcript?.slice(0, 100),
-      isFinal: msg.is_final,
-      turnOrder: msg.turn_order,
-      endOfTurn: msg.end_of_turn,
-      turnIsFormatted: msg.turn_is_formatted,
+      type: "Turn",
+      transcript: text.slice(0, 100),
+      turnOrder: turn.turn_order,
+      endOfTurn: turn.end_of_turn,
+      turnIsFormatted: turn.turn_is_formatted,
     });
-    switch (msg.type) {
-      case "Termination":
-        events.onTermination(
-          msg.audio_duration_seconds ?? 0,
-          msg.session_duration_seconds ?? 0,
-        );
-        break;
-      case "Turn": {
-        const text = (msg.transcript ?? "").trim();
-        if (!text) break;
-        if (msg.end_of_turn) {
-          events.onTurn(text, msg.turn_order);
-        } else {
-          events.onTranscript(text, false, msg.turn_order);
-        }
-        break;
-      }
+
+    if (!text) return;
+
+    if (turn.end_of_turn) {
+      events.onTurn(text, turn.turn_order);
+    } else {
+      events.onTranscript(text, false, turn.turn_order);
     }
   });
 
-  ws.addEventListener("error", (event: Event) => {
-    const detail = event instanceof ErrorEvent ? event.message : "";
-    const msg = `STT error${detail ? `: ${detail}` : ""}`;
-    events.onError(new Error(msg));
+  transcriber.on("error", (err: Error) => {
+    metrics.errorsTotal.inc({ component: "stt" });
+    events.onError(err);
   });
 
-  ws.addEventListener("close", (event: CloseEvent) => {
-    console.info("STT WebSocket closed", {
-      code: event.code,
-      reason: event.reason ?? "",
-      msgCount,
-    });
-    if (event.code !== 1000 && event.code !== 1005) {
-      console.error("WebSocket closed unexpectedly", {
-        code: event.code,
-        reason: event.reason ?? "",
-      });
+  transcriber.on("close", (code: number, reason: string) => {
+    console.info("STT WebSocket closed", { code, reason, msgCount });
+    if (code !== 1000 && code !== 1005) {
+      console.error("WebSocket closed unexpectedly", { code, reason });
       events.onError(
-        new Error(
-          `STT WebSocket closed unexpectedly (code ${event.code})`,
-        ),
+        new Error(`STT WebSocket closed unexpectedly (code ${code})`),
       );
     }
     events.onClose();
   });
 
+  try {
+    await transcriber.connect();
+  } catch (err: unknown) {
+    metrics.sttConnectDuration.observe(
+      (performance.now() - sttStart) / 1000,
+    );
+    metrics.errorsTotal.inc({ component: "stt" });
+    const msg = apiKey
+      ? err instanceof Error ? err.message : String(err)
+      : "STT connection failed — ASSEMBLYAI_API_KEY is not set";
+    throw new Error(msg);
+  }
+
+  metrics.sttConnectDuration.observe((performance.now() - sttStart) / 1000);
+  console.info("STT WebSocket connected");
+
   return {
     send(audio: Uint8Array) {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(audio);
-      } else {
-        console.warn("STT send skipped, ws not open", {
-          wsState: ws.readyState,
-        });
+      try {
+        transcriber.sendAudio(audio.buffer as ArrayBuffer);
+      } catch {
+        console.warn("STT send skipped, ws not open");
       }
     },
     clear() {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "ForceEndpoint" }));
+      try {
+        transcriber.forceEndpoint();
+      } catch {
+        // socket may already be closed
       }
     },
     close() {
-      ws.close();
+      transcriber.close(false).catch(() => {});
     },
   };
 }

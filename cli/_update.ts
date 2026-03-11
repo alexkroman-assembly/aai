@@ -1,3 +1,4 @@
+import { Confirm } from "@cliffy/prompt";
 import { deadline } from "@std/async/deadline";
 import { bold, cyan, dim, yellow } from "@std/fmt/colors";
 import { greaterThan, parse } from "@std/semver";
@@ -83,8 +84,11 @@ export async function promptUpgradeIfAvailable(
       bold(cyan(newVersion))
     }`,
   );
-  const answer = prompt("Upgrade now? (Y/n)");
-  if (answer === null || (answer !== "" && answer.toLowerCase() !== "y")) {
+  const confirmed = await Confirm.prompt({
+    message: "Upgrade now?",
+    default: true,
+  });
+  if (!confirmed) {
     console.log(dim(`Run aai again to upgrade later.\n`));
     return;
   }

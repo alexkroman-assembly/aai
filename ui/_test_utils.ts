@@ -21,7 +21,7 @@ export function getContainer(): Element {
   return globalThis.document.querySelector("#app")!;
 }
 
-// Ensure document exists at import time for modules using goober css``.
+// Ensure document exists at import time for modules that need DOM globals.
 setupDOM();
 
 // ── Mock WebSocket (local copy to avoid pulling server/ into the binary) ──

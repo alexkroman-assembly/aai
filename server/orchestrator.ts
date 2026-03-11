@@ -1,12 +1,14 @@
-import { type Route, route } from "@std/http/unstable-route";
-import { handleFavicon, renderLandingPage } from "./html.ts";
-import { handleInstall } from "./install.ts";
-import { handleDeploy } from "./deploy.ts";
-import { requireOwner } from "./auth.ts";
+import { type Context, Hono } from "hono";
+import { cache } from "hono/cache";
+import { compress } from "hono/compress";
+import { etag } from "hono/etag";
+import { HTTPException } from "hono/http-exception";
+import { FAVICON_SVG, renderLandingPage } from "./html.ts";
+import { INSTALL_SCRIPT } from "./install.ts";
+import { handleDeploy, validateDeployBody } from "./deploy.ts";
 import {
   handleAgentHealth,
   handleAgentPage,
-  handleAgentRedirect,
   handleStaticFile,
   handleWebSocket,
 } from "./transport_websocket.ts";
@@ -14,206 +16,134 @@ import type { AgentSlot } from "./worker_pool.ts";
 import type { BundleStore } from "./bundle_store_tigris.ts";
 import type { Session } from "./session.ts";
 import { handleTwilioStream, handleTwilioVoice } from "./transport_twilio.ts";
-import type { ServerContext } from "./types.ts";
 import {
   handleDevSessionWebSocket,
   handleDevWebSocket,
 } from "./dev_session.ts";
-import { handleKv } from "./kv_handler.ts";
+import { handleKv, validateKvRequest } from "./kv_handler.ts";
 import { createMemoryKvStore, type KvStore } from "./kv.ts";
+import type { ScopeKey } from "./scope_token.ts";
 import { serialize as serializeMetrics, serializeForAgent } from "./metrics.ts";
-
-type Params = Record<string, string>;
-
-function groups(match: URLPatternResult): Params {
-  return (match.pathname.groups ?? {}) as Params;
-}
-
-const VALID_SLUG_PART = /^[a-z0-9][a-z0-9_-]{0,62}[a-z0-9]$/;
-const BAD_SLUG = Response.json({ error: "Invalid slug" }, { status: 400 });
-
-function slug(match: URLPatternResult): string | null {
-  const p = groups(match);
-  if (!VALID_SLUG_PART.test(p.namespace) || !VALID_SLUG_PART.test(p.slug)) {
-    return null;
-  }
-  return `${p.namespace}/${p.slug}`;
-}
-
-function withSlug(
-  fn: (req: Request, s: string) => Response | Promise<Response>,
-): (req: Request, match: URLPatternResult) => Response | Promise<Response> {
-  return (req, match) => {
-    const s = slug(match);
-    if (!s) return BAD_SLUG;
-    return fn(req, s);
-  };
-}
-
-const CORS_HEADERS: [string, string][] = [
-  ["Access-Control-Allow-Origin", "*"],
-  ["Access-Control-Allow-Methods", "*"],
-  ["Access-Control-Allow-Headers", "*"],
-  ["Cross-Origin-Opener-Policy", "same-origin"],
-  ["Cross-Origin-Embedder-Policy", "credentialless"],
-];
-
-function withCors(
-  inner: Deno.ServeHandler,
-): Deno.ServeHandler {
-  return async (req, info) => {
-    if (req.method === "OPTIONS") {
-      const res = new Response(null, { status: 204 });
-      for (const [k, v] of CORS_HEADERS) res.headers.set(k, v);
-      return res;
-    }
-    const res = await inner(req, info);
-    for (const [k, v] of CORS_HEADERS) res.headers.set(k, v);
-    return res;
-  };
-}
+import type { HonoEnv } from "./hono_env.ts";
+import {
+  corsMiddleware,
+  requireOwnerMiddleware,
+  requireScopeTokenMiddleware,
+  requireUpgrade,
+  securityHeaders,
+  slugValidation,
+} from "./middleware.ts";
 
 export function createOrchestrator(opts: {
   store: BundleStore;
   kvStore?: KvStore;
-  scopeKey: CryptoKey;
+  scopeKey: ScopeKey;
 }): Deno.ServeHandler {
   const { store } = opts;
-
   const kvStore = opts.kvStore ?? createMemoryKvStore();
   const scopeKey = opts.scopeKey;
 
   const slots = new Map<string, AgentSlot>();
   const devSlots = new Map<string, AgentSlot>();
   const sessions = new Map<string, Session>();
-  const ctx: ServerContext = {
-    slots,
-    devSlots,
-    sessions,
-    store,
-    scopeKey,
-    kvStore,
-  };
 
-  const routes: Route[] = [
-    {
-      pattern: new URLPattern({ pathname: "/favicon.ico" }),
-      method: ["GET"],
-      handler: () => handleFavicon(),
-    },
-    {
-      pattern: new URLPattern({ pathname: "/favicon.svg" }),
-      method: ["GET"],
-      handler: () => handleFavicon(),
-    },
-    {
-      pattern: new URLPattern({ pathname: "/install" }),
-      method: ["GET"],
-      handler: (req) => handleInstall(req),
-    },
-    {
-      pattern: new URLPattern({ pathname: "/health" }),
-      method: ["GET"],
-      handler: () => Response.json({ status: "ok" }),
-    },
-    {
-      pattern: new URLPattern({ pathname: "/metrics" }),
-      method: ["GET"],
-      handler: () =>
-        new Response(serializeMetrics(), {
-          headers: { "Content-Type": "text/plain; version=0.0.4" },
-        }),
-    },
+  const app = new Hono<HonoEnv>();
 
-    {
-      pattern: new URLPattern({ pathname: "/kv" }),
-      method: ["POST"],
-      handler: (req) => handleKv(req, { kvStore, scopeKey }),
-    },
+  // --- Global middleware ---
+  app.use("*", corsMiddleware);
+  app.use("*", securityHeaders);
+  app.use("*", compress());
 
-    {
-      pattern: new URLPattern({ pathname: "/:namespace/:slug/deploy" }),
-      method: ["POST"],
-      handler: withSlug(async (req, s) => {
-        const owner = await requireOwner(req, s, ctx);
-        if (owner instanceof Response) return owner;
-        return handleDeploy(req, s, owner, ctx);
-      }),
-    },
+  // --- Error handler ---
+  app.onError((err, c) => {
+    if (err instanceof HTTPException) {
+      return c.json({ error: err.message }, err.status);
+    }
+    console.error("Unhandled error", { error: err.message, path: c.req.path });
+    return c.json({ error: "Internal server error" }, 500);
+  });
 
-    {
-      pattern: new URLPattern({ pathname: "/:namespace/:slug/twilio/voice" }),
-      method: ["POST"],
-      handler: withSlug((req, s) => handleTwilioVoice(req, s, ctx)),
-    },
-    {
-      pattern: new URLPattern({ pathname: "/:namespace/:slug/twilio/stream" }),
-      handler: withSlug((req, s) => handleTwilioStream(req, s, ctx)),
-    },
+  // --- Public routes ---
+  const serveFavicon = (c: Context<HonoEnv>) =>
+    c.body(FAVICON_SVG, {
+      headers: {
+        "Content-Type": "image/svg+xml",
+        "Cache-Control": "public, max-age=86400",
+      },
+    });
+  app.get("/favicon.ico", serveFavicon);
+  app.get("/favicon.svg", serveFavicon);
+  app.get("/install", (c) => c.text(INSTALL_SCRIPT));
+  app.get("/health", (c) => c.json({ status: "ok" }));
+  app.get("/metrics", (c) => {
+    c.header("Content-Type", "text/plain; version=0.0.4");
+    return c.body(serializeMetrics());
+  });
+  app.get("/", (c) => c.html(renderLandingPage()));
 
-    {
-      pattern: new URLPattern({ pathname: "/:namespace/:slug/dev" }),
-      handler: withSlug((req, s) => handleDevWebSocket(req, s, ctx)),
-    },
-    {
-      pattern: new URLPattern({ pathname: "/:namespace/:slug/dev/websocket" }),
-      handler: withSlug((req, s) => handleDevSessionWebSocket(req, s, ctx)),
-    },
+  // --- Agent routes (require valid slug + inject shared state) ---
+  const agent = new Hono<HonoEnv>();
+  agent.use("*", slugValidation);
+  agent.use("*", async (c, next) => {
+    c.set("slots", slots);
+    c.set("devSlots", devSlots);
+    c.set("sessions", sessions);
+    c.set("store", store);
+    c.set("scopeKey", scopeKey);
+    c.set("kvStore", kvStore);
+    await next();
+  });
 
-    {
-      pattern: new URLPattern({ pathname: "/:namespace/:slug/metrics" }),
-      method: ["GET"],
-      handler: withSlug((_req, s) =>
-        new Response(serializeForAgent(s), {
-          headers: { "Content-Type": "text/plain; version=0.0.4" },
-        })
-      ),
-    },
-    {
-      pattern: new URLPattern({ pathname: "/:namespace/:slug/health" }),
-      method: ["GET"],
-      handler: withSlug((req, s) => handleAgentHealth(req, s, ctx)),
-    },
-    {
-      pattern: new URLPattern({ pathname: "/:namespace/:slug/websocket" }),
-      handler: withSlug((req, s) => handleWebSocket(req, s, ctx)),
-    },
-    {
-      pattern: new URLPattern({ pathname: "/:namespace/:slug/client.js" }),
-      method: ["GET"],
-      handler: withSlug((req, s) => handleStaticFile(req, s, "client.js", ctx)),
-    },
-    {
-      pattern: new URLPattern({ pathname: "/:namespace/:slug/client.js.map" }),
-      method: ["GET"],
-      handler: withSlug((req, s) =>
-        handleStaticFile(req, s, "client.js.map", ctx)
-      ),
-    },
-    {
-      pattern: new URLPattern({ pathname: "/:namespace/:slug/" }),
-      method: ["GET"],
-      handler: withSlug((req, s) => handleAgentPage(req, s, ctx)),
-    },
-    {
-      pattern: new URLPattern({ pathname: "/:namespace/:slug" }),
-      method: ["GET"],
-      handler: withSlug((req, s) => handleAgentRedirect(req, s, ctx)),
-    },
-
-    {
-      pattern: new URLPattern({ pathname: "/" }),
-      method: ["GET"],
-      handler: () =>
-        new Response(renderLandingPage(), {
-          headers: { "Content-Type": "text/html; charset=UTF-8" },
-        }),
-    },
-  ];
-
-  const handler = withCors(
-    route(routes, () => Response.json({ error: "Not found" }, { status: 404 })),
+  // Owner-authenticated
+  agent.post(
+    "/deploy",
+    requireOwnerMiddleware(store),
+    validateDeployBody,
+    handleDeploy,
   );
 
-  return handler;
+  // Scope-token-authenticated
+  agent.post(
+    "/kv",
+    requireScopeTokenMiddleware(scopeKey),
+    validateKvRequest,
+    handleKv,
+  );
+
+  // Twilio
+  agent.post("/voice", handleTwilioVoice);
+  agent.all("/stream", requireUpgrade, handleTwilioStream);
+
+  // Dev mode
+  agent.all("/dev", requireUpgrade, handleDevWebSocket);
+  agent.all("/dev/websocket", handleDevSessionWebSocket);
+
+  // Agent public endpoints
+  agent.get("/metrics", (c) => {
+    c.header("Content-Type", "text/plain; version=0.0.4");
+    return c.body(serializeForAgent(c.var.slug));
+  });
+  agent.get("/health", handleAgentHealth);
+  agent.all("/websocket", requireUpgrade, handleWebSocket);
+  agent.get(
+    "/client.js",
+    etag(),
+    cache({ cacheName: "static", cacheControl: "no-cache" }),
+    handleStaticFile,
+  );
+  agent.get(
+    "/client.js.map",
+    etag(),
+    cache({ cacheName: "static", cacheControl: "no-cache" }),
+    handleStaticFile,
+  );
+
+  // Agent page
+  agent.get("/", handleAgentPage);
+
+  app.route("/:namespace/:slug", agent);
+
+  app.notFound((c) => c.json({ error: "Not found" }, 404));
+
+  return (req, info) => app.fetch(req, { ...info });
 }

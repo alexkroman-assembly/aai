@@ -1,12 +1,21 @@
 {
   "name": "@aai/cli",
-  "version": "0.1.56",
+  "version": "0.1.65",
   "exports": "./cli.ts",
   "imports": {
     "@aai/sdk": "workspace:@aai/sdk",
     "@aai/core": "workspace:@aai/core",
     "esbuild": "npm:esbuild-wasm@^0.27.3/esm/browser.js",
     "esbuild-wasm-types": "npm:esbuild-wasm@^0.27.3",
-    "@deno/esbuild-plugin": "jsr:@deno/esbuild-plugin@^1.2.1"
+    "@deno/esbuild-plugin": "jsr:@deno/esbuild-plugin@^1.2.1",
+    "@cliffy/command": "jsr:@cliffy/command@^1.0.0-rc.7",
+    "@cliffy/prompt": "jsr:@cliffy/prompt@^1.0.0-rc.7",
+    "@cliffy/testing": "jsr:@cliffy/testing@^1.0.0-rc.7"
+  },
+  "publish": {
+    "exclude": [
+      "*_test.ts",
+      "__snapshots__/"
+    ]
   }
 }

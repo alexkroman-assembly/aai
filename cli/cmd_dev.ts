@@ -1,17 +1,24 @@
-import { parseArgs } from "@std/cli/parse-args";
+import { Command } from "@cliffy/command";
 import { debounce } from "@std/async/debounce";
 import { encodeBase64 } from "@std/encoding/base64";
-import { bold, cyan, dim, green } from "@std/fmt/colors";
+import { bold, green } from "@std/fmt/colors";
 import { error, stepInfo } from "./_output.ts";
 import { runBuild } from "./build.ts";
-import type { AgentEntry } from "./_discover.ts";
+import {
+  type AgentEntry,
+  DEFAULT_SERVER,
+  ensureClaudeMd,
+  ensureTypescriptSetup,
+  getApiKey,
+  getNamespace,
+  resolveSlug,
+  saveAgentLink,
+} from "./_discover.ts";
 import * as Comlink from "comlink";
 import type { ExposedWorkerApi } from "@aai/core/worker-entry";
 import { createWebSocketEndpoint } from "@aai/core/ws-endpoint";
 import { createDenoWorker } from "@aai/core/deno-worker";
 import { createWorkerApi } from "@aai/core/worker-entry";
-
-import { DEFAULT_SERVER } from "./_discover.ts";
 
 function spawnLocalWorker(
   workerCode: string,
@@ -42,187 +49,150 @@ function toWsUrl(httpUrl: string): string {
   return u.toString().replace(/\/$/, "");
 }
 
-export async function runDevCommand(args: string[]): Promise<number> {
-  const flags = parseArgs(args, {
-    string: ["port", "server", "local"],
-    alias: { h: "help", p: "port", s: "server" },
-    boolean: ["help"],
-    default: { local: undefined },
-  });
+export const devCommand: Command = new Command()
+  .description("Run local dev server with file watching")
+  .option("-p, --port <port:number>", "Port for local proxy server", {
+    default: 3000,
+  })
+  .option("-s, --server <url:string>", `Production server URL`, {
+    default: DEFAULT_SERVER,
+  })
+  .option("--local [url:string]", "Use local server", { hidden: true })
+  .action(async ({ port, server, local }) => {
+    const cwd = Deno.env.get("INIT_CWD") || Deno.cwd();
+    const serverUrl = local !== undefined
+      ? (typeof local === "string" ? local : "http://localhost:3100")
+      : server;
 
-  if (flags.help) {
-    console.log(
-      `${green(bold("aai dev"))} — Run local dev server with file watching
+    const apiKey = await getApiKey();
+    const namespace = await getNamespace();
 
-${bold("USAGE:")}
-  ${cyan("aai dev")}
+    await ensureClaudeMd(cwd);
+    await ensureTypescriptSetup(cwd);
 
-${bold("OPTIONS:")}
-  ${cyan("-p, --port")} ${
-        dim("<number>")
-      }   Port for local proxy server (default: 3000)
-  ${cyan("-s, --server")} ${
-        dim("<url>")
-      } Production server URL (default: ${DEFAULT_SERVER})
-  ${cyan("-h, --help")}             Show this help message
-`,
+    const result = await runBuild({ agentDir: cwd });
+
+    const slug = await resolveSlug(cwd, namespace, result.agent.slug);
+    const fullPath = `${namespace}/${slug}`;
+
+    await saveAgentLink(cwd, { namespace, slug, apiKey });
+
+    let localWorker = spawnLocalWorker(
+      result.bundle.worker,
+      slug,
     );
-    return 0;
-  }
 
-  const cwd = Deno.env.get("INIT_CWD") || Deno.cwd();
-  const port = parseInt(flags.port ?? "3000");
-  const serverUrl = flags.local !== undefined
-    ? (flags.local || "http://localhost:3100")
-    : (flags.server ?? DEFAULT_SERVER);
+    let manifest = JSON.parse(result.bundle.manifest);
+    let clientCode = result.bundle.client;
 
-  const {
-    ensureClaudeMd,
-    ensureTypescriptSetup,
-    getApiKey,
-    getNamespace,
-    resolveSlug,
-    saveAgentLink,
-  } = await import(
-    "./_discover.ts"
-  );
-  const apiKey = await getApiKey();
-  const namespace = await getNamespace();
+    const wsUrl = toWsUrl(serverUrl);
+    let reg = await connectAndRegister(
+      wsUrl,
+      apiKey,
+      namespace,
+      result.agent,
+      manifest,
+      localWorker,
+    );
+    let devToken = reg.devToken;
 
-  await ensureClaudeMd(cwd);
-  await ensureTypescriptSetup(cwd);
+    const proxyServer = startLocalProxy(
+      port,
+      fullPath,
+      manifest.config?.name ?? slug,
+      serverUrl,
+      () => clientCode,
+      () => devToken,
+    );
 
-  let result;
-  try {
-    result = await runBuild({ agentDir: cwd });
-  } catch (err) {
-    error(err instanceof Error ? err.message : String(err));
-    return 1;
-  }
+    printReady(result.agent, namespace, port);
 
-  const slug = await resolveSlug(cwd, namespace, result.agent.slug);
-  const fullPath = `${namespace}/${slug}`;
+    const ac = new AbortController();
+    const watcher = Deno.watchFs([cwd], { recursive: true });
 
-  await saveAgentLink(cwd, { namespace, slug, apiKey });
+    const WATCHED_EXTENSIONS = [
+      ".ts",
+      ".tsx",
+      ".json",
+      ".md",
+      ".csv",
+      ".txt",
+      ".html",
+    ];
 
-  let localWorker = spawnLocalWorker(
-    result.bundle.worker,
-    slug,
-  );
+    let building = false;
+    let pendingRebuild = false;
 
-  let manifest = JSON.parse(result.bundle.manifest);
-  let clientCode = result.bundle.client;
-
-  const wsUrl = toWsUrl(serverUrl);
-  let reg = await connectAndRegister(
-    wsUrl,
-    apiKey,
-    namespace,
-    result.agent,
-    manifest,
-    localWorker,
-  );
-  let devToken = reg.devToken;
-
-  const proxyServer = startLocalProxy(
-    port,
-    fullPath,
-    manifest.config?.name ?? slug,
-    serverUrl,
-    () => clientCode,
-    () => devToken,
-  );
-
-  printReady(result.agent, namespace, port);
-
-  const ac = new AbortController();
-  const watcher = Deno.watchFs([cwd], { recursive: true });
-
-  const WATCHED_EXTENSIONS = [
-    ".ts",
-    ".tsx",
-    ".json",
-    ".md",
-    ".csv",
-    ".txt",
-    ".html",
-  ];
-
-  let building = false;
-  let pendingRebuild = false;
-
-  const rebuild = debounce(async () => {
-    if (building) {
-      pendingRebuild = true;
-      return;
-    }
-    building = true;
-    try {
-      const freshResult = await runBuild({ agentDir: cwd });
-
-      localWorker.terminate();
-      localWorker = spawnLocalWorker(
-        freshResult.bundle.worker,
-        slug,
-      );
-      manifest = JSON.parse(freshResult.bundle.manifest);
-      clientCode = freshResult.bundle.client;
-
-      reg.ws.close();
-      reg = await connectAndRegister(
-        wsUrl,
-        apiKey,
-        namespace,
-        freshResult.agent,
-        manifest,
-        localWorker,
-      );
-      devToken = reg.devToken;
-
-      printReady(freshResult.agent, namespace, port);
-    } catch (err: unknown) {
-      error(err instanceof Error ? err.message : String(err));
-      stepInfo(
-        "Dev",
-        "still serving previous version — fix errors and save again",
-      );
-    } finally {
-      building = false;
-      if (pendingRebuild) {
-        pendingRebuild = false;
-        rebuild();
+    const rebuild = debounce(async () => {
+      if (building) {
+        pendingRebuild = true;
+        return;
       }
+      building = true;
+      try {
+        const freshResult = await runBuild({ agentDir: cwd });
+
+        localWorker.terminate();
+        localWorker = spawnLocalWorker(
+          freshResult.bundle.worker,
+          slug,
+        );
+        manifest = JSON.parse(freshResult.bundle.manifest);
+        clientCode = freshResult.bundle.client;
+
+        reg.ws.close();
+        reg = await connectAndRegister(
+          wsUrl,
+          apiKey,
+          namespace,
+          freshResult.agent,
+          manifest,
+          localWorker,
+        );
+        devToken = reg.devToken;
+
+        printReady(freshResult.agent, namespace, port);
+      } catch (err: unknown) {
+        error(err instanceof Error ? err.message : String(err));
+        stepInfo(
+          "Dev",
+          "still serving previous version — fix errors and save again",
+        );
+      } finally {
+        building = false;
+        if (pendingRebuild) {
+          pendingRebuild = false;
+          rebuild();
+        }
+      }
+    }, 300);
+
+    const cleanup = () => {
+      ac.abort();
+      try {
+        watcher.close();
+      } catch { /* already closed */ }
+      localWorker.terminate();
+      try {
+        reg.ws.close();
+      } catch { /* already closed */ }
+      proxyServer.shutdown();
+      Deno.exit(0);
+    };
+
+    Deno.addSignalListener("SIGINT", cleanup);
+    Deno.addSignalListener("SIGTERM", cleanup);
+
+    for await (const event of watcher) {
+      if (ac.signal.aborted) break;
+      const hasRelevantChange = event.paths.some((p) =>
+        WATCHED_EXTENSIONS.some((ext) => p.endsWith(ext))
+      );
+      if (!hasRelevantChange) continue;
+      if (event.paths.every((p) => p.includes("_test.ts"))) continue;
+      rebuild();
     }
-  }, 300);
-
-  const cleanup = () => {
-    ac.abort();
-    try {
-      watcher.close();
-    } catch { /* already closed */ }
-    localWorker.terminate();
-    try {
-      reg.ws.close();
-    } catch { /* already closed */ }
-    proxyServer.shutdown();
-    Deno.exit(0);
-  };
-
-  Deno.addSignalListener("SIGINT", cleanup);
-  Deno.addSignalListener("SIGTERM", cleanup);
-
-  for await (const event of watcher) {
-    if (ac.signal.aborted) break;
-    const hasRelevantChange = event.paths.some((p) =>
-      WATCHED_EXTENSIONS.some((ext) => p.endsWith(ext))
-    );
-    if (!hasRelevantChange) continue;
-    if (event.paths.every((p) => p.includes("_test.ts"))) continue;
-    rebuild();
-  }
-
-  return 0;
-}
+  }) as unknown as Command;
 
 /** Bidirectional WebSocket proxy — flat listeners, no nesting. */
 function pipeWebSockets(clientWs: WebSocket, serverWs: WebSocket): void {
@@ -382,13 +352,7 @@ function startLocalProxy(
       const url = new URL(req.url);
       const path = url.pathname;
 
-      if (path === `/${fullPath}`) {
-        return Response.redirect(
-          `http://localhost:${port}/${fullPath}/`,
-          301,
-        );
-      }
-      if (path === `/${fullPath}/`) {
+      if (path === `/${fullPath}` || path === `/${fullPath}/`) {
         return new Response(renderDevPage(agentName, `/${fullPath}`), {
           headers: { "Content-Type": "text/html; charset=utf-8" },
         });
@@ -462,7 +426,7 @@ function printReady(
   port: number,
 ): void {
   const fullPath = `${namespace}/${agent.slug}`;
-  const url = `http://localhost:${port}/${fullPath}/`;
+  const url = `http://localhost:${port}/${fullPath}`;
   console.log(`\n  ${green(bold(url))}\n`);
   stepInfo("Watch", "for changes...");
 }
