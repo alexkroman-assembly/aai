@@ -239,12 +239,14 @@ function setupWithSttEvents(options?: SetupOptions) {
   };
 }
 
-Deno.test("start sends READY message with sample rates", async () => {
+Deno.test("start sends READY message with protocol metadata", async () => {
   using ctx = setup();
   await ctx.session.start();
   const messages = getSentJson(ctx.transport);
   const ready = messages.find((m) => m.type === "ready");
   expect(ready).toBeDefined();
+  expect(ready!.protocol_version).toBe(1);
+  expect(ready!.audio_format).toBe("pcm16");
   expect(ready!.sample_rate).toBeDefined();
   expect(ready!.tts_sample_rate).toBeDefined();
 });

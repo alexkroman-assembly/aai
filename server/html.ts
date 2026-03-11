@@ -70,7 +70,9 @@ export function renderAgentPage(name: string, basePath = ""): string {
   </head>
   <body>
     <main id="app"></main>
-    <script>window.__AAI_BASE__="${escape(basePath)}";</script>
+    <script>window.__AAI_BASE__="${
+    escape(basePath)
+  }";window.__AAI_WS__="websocket";</script>
     <script type="module" src="${escape(basePath)}/client.js"></script>
   </body>
 </html>`;

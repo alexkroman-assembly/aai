@@ -20,3 +20,8 @@ Deno.test("renderAgentPage escapes basePath in __AAI_BASE__", () => {
   const html = renderAgentPage("Test", '/ns/"><script>xss');
   expect(html).not.toContain("<script>xss");
 });
+
+Deno.test("renderAgentPage injects __AAI_WS__ path", () => {
+  const html = renderAgentPage("Test", "/ns/agent");
+  expect(html).toContain('window.__AAI_WS__="websocket"');
+});

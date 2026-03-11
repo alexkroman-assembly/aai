@@ -19,7 +19,13 @@ function withSessionEnv(
 
 Deno.test("parseServerMessage", async (t) => {
   const valid: [string, Record<string, unknown>][] = [
-    ["ready", { type: "ready", sample_rate: 16000, tts_sample_rate: 24000 }],
+    ["ready", {
+      type: "ready",
+      protocol_version: 1,
+      audio_format: "pcm16",
+      sample_rate: 16000,
+      tts_sample_rate: 24000,
+    }],
     ["partial_transcript", { type: "partial_transcript", text: "hello" }],
     ["final_transcript", { type: "final_transcript", text: "done" }],
     ["turn", { type: "turn", text: "What's the weather?" }],
@@ -116,6 +122,79 @@ Deno.test("VoiceSession", async (t) => {
           "wss://aai-agent.fly.dev/alex/ai-takes/websocket",
         );
         session.disconnect();
+      }),
+    );
+  });
+
+  await t.step("protocol negotiation", async (t) => {
+    await t.step(
+      "errors on incompatible protocol version",
+      withSessionEnv(async (mock) => {
+        const { session, ws } = await connectSession(mock);
+        ws.simulateMessage(JSON.stringify({
+          type: "ready",
+          protocol_version: 99,
+          audio_format: "pcm16",
+          sample_rate: 16000,
+          tts_sample_rate: 24000,
+        }));
+        expect(session.state.value).toBe("error");
+        expect(session.error.value?.code).toBe("protocol");
+        expect(session.error.value?.message).toContain("v99");
+        session.disconnect();
+      }),
+    );
+
+    await t.step(
+      "errors on unsupported audio format",
+      withSessionEnv(async (mock) => {
+        const { session, ws } = await connectSession(mock);
+        ws.simulateMessage(JSON.stringify({
+          type: "ready",
+          protocol_version: 1,
+          audio_format: "opus",
+          sample_rate: 16000,
+          tts_sample_rate: 24000,
+        }));
+        expect(session.state.value).toBe("error");
+        expect(session.error.value?.code).toBe("protocol");
+        expect(session.error.value?.message).toContain("opus");
+        session.disconnect();
+      }),
+    );
+
+    await t.step(
+      "accepts ready without protocol_version (backwards compat)",
+      withSessionEnv(async (mock) => {
+        const { session, ws } = await connectSession(mock);
+        ws.simulateMessage(JSON.stringify({
+          type: "ready",
+          sample_rate: 16000,
+          tts_sample_rate: 24000,
+        }));
+        // Should not error — old servers don't send protocol_version
+        expect(session.state.value).not.toBe("error");
+        session.disconnect();
+      }),
+    );
+
+    await t.step(
+      "uses __AAI_WS__ for WebSocket path when set",
+      withSessionEnv(async (mock) => {
+        // deno-lint-ignore no-explicit-any
+        const g = globalThis as any;
+        g.__AAI_WS__ = "ws";
+        try {
+          const { session, ws } = await connectSession(mock, {
+            platformUrl: "https://example.com/ns/agent",
+          });
+          expect(ws.url.toString()).toBe(
+            "wss://example.com/ns/agent/ws",
+          );
+          session.disconnect();
+        } finally {
+          delete g.__AAI_WS__;
+        }
       }),
     );
   });

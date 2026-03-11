@@ -1,12 +1,20 @@
 import { batch, type Signal, signal } from "@preact/signals";
 // Inlined from core/_protocol.ts to avoid dependency on unpublished @aai/core.
+const SUPPORTED_PROTOCOL_VERSION = 1;
 const DEFAULT_STT_SAMPLE_RATE = 16_000;
 const DEFAULT_TTS_SAMPLE_RATE = 24_000;
+const SUPPORTED_AUDIO_FORMATS = new Set(["pcm16"]);
 
 type ErrorMessage = { type: "error"; message: string; details?: string[] };
 
 type ServerMessage =
-  | { type: "ready"; sample_rate: number; tts_sample_rate: number }
+  | {
+    type: "ready";
+    protocol_version?: number;
+    audio_format?: string;
+    sample_rate: number;
+    tts_sample_rate: number;
+  }
   | { type: "partial_transcript"; text: string }
   | { type: "final_transcript"; text: string; turn_order?: number }
   | { type: "turn"; text: string; turn_order?: number }
@@ -172,6 +180,38 @@ export function createVoiceSession(options: SessionOptions): VoiceSession {
     msg: Extract<ServerMessage, { type: "ready" }>,
   ): Promise<void> {
     if (audioSetupInFlight) return;
+
+    // Protocol version check — reject incompatible servers
+    const serverVersion = msg.protocol_version;
+    if (
+      serverVersion !== undefined &&
+      serverVersion !== SUPPORTED_PROTOCOL_VERSION
+    ) {
+      batch(() => {
+        error.value = {
+          code: "protocol",
+          message:
+            `Server protocol v${serverVersion} is not compatible with client v${SUPPORTED_PROTOCOL_VERSION}. Please redeploy your agent.`,
+        };
+        state.value = "error";
+      });
+      return;
+    }
+
+    // Audio format check — reject unknown formats
+    const audioFormat = msg.audio_format ?? "pcm16";
+    if (!SUPPORTED_AUDIO_FORMATS.has(audioFormat)) {
+      batch(() => {
+        error.value = {
+          code: "protocol",
+          message:
+            `Unsupported audio format "${audioFormat}". Please redeploy your agent.`,
+        };
+        state.value = "error";
+      });
+      return;
+    }
+
     audioSetupInFlight = true;
     try {
       const [
@@ -302,7 +342,9 @@ export function createVoiceSession(options: SessionOptions): VoiceSession {
     }
 
     const base = options.platformUrl;
-    const wsUrl = new URL("websocket", base.endsWith("/") ? base : base + "/");
+    // deno-lint-ignore no-explicit-any
+    const wsPath = (globalThis as any).__AAI_WS__ as string ?? "websocket";
+    const wsUrl = new URL(wsPath, base.endsWith("/") ? base : base + "/");
     wsUrl.protocol = wsUrl.protocol === "https:" ? "wss:" : "ws:";
     if (hasConnected) wsUrl.searchParams.set("resume", "1");
     const socket = new WebSocket(wsUrl);

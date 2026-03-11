@@ -1,0 +1,553 @@
+export const snapshot = {};
+
+snapshot[`DevRegisterSchema snapshot 1`] = `
+{
+  "\$schema": "https://json-schema.org/draft/2020-12/schema",
+  additionalProperties: false,
+  properties: {
+    client: {
+      type: "string",
+    },
+    config: {
+      additionalProperties: false,
+      properties: {
+        builtinTools: {
+          items: {
+            enum: [
+              "web_search",
+              "visit_webpage",
+              "fetch_json",
+              "run_code",
+              "user_input",
+              "final_answer",
+            ],
+            type: "string",
+          },
+          type: "array",
+        },
+        greeting: {
+          type: "string",
+        },
+        instructions: {
+          type: "string",
+        },
+        name: {
+          type: "string",
+        },
+        prompt: {
+          type: "string",
+        },
+        voice: {
+          type: "string",
+        },
+      },
+      required: [
+        "instructions",
+        "greeting",
+        "voice",
+      ],
+      type: "object",
+    },
+    env: {
+      additionalProperties: {
+        type: "string",
+      },
+      propertyNames: {
+        type: "string",
+      },
+      type: "object",
+    },
+    token: {
+      minLength: 1,
+      type: "string",
+    },
+    toolSchemas: {
+      items: {
+        additionalProperties: false,
+        properties: {
+          description: {
+            type: "string",
+          },
+          name: {
+            type: "string",
+          },
+          parameters: {
+            additionalProperties: {},
+            propertyNames: {
+              type: "string",
+            },
+            type: "object",
+          },
+        },
+        required: [
+          "name",
+          "description",
+          "parameters",
+        ],
+        type: "object",
+      },
+      type: "array",
+    },
+    transport: {
+      items: {
+        enum: [
+          "websocket",
+          "twilio",
+        ],
+        type: "string",
+      },
+      type: "array",
+    },
+    type: {
+      const: "dev_register",
+      type: "string",
+    },
+  },
+  required: [
+    "type",
+    "token",
+    "config",
+    "toolSchemas",
+    "env",
+    "transport",
+  ],
+  type: "object",
+}
+`;
+
+snapshot[`DevRegisteredSchema snapshot 1`] = `
+{
+  "\$schema": "https://json-schema.org/draft/2020-12/schema",
+  additionalProperties: false,
+  properties: {
+    slug: {
+      type: "string",
+    },
+    type: {
+      const: "dev_registered",
+      type: "string",
+    },
+  },
+  required: [
+    "type",
+    "slug",
+  ],
+  type: "object",
+}
+`;
+
+snapshot[`ServerMessageSchema snapshot 1`] = `
+{
+  "\$schema": "https://json-schema.org/draft/2020-12/schema",
+  oneOf: [
+    {
+      additionalProperties: false,
+      properties: {
+        audio_format: {
+          const: "pcm16",
+          type: "string",
+        },
+        protocol_version: {
+          type: "number",
+        },
+        sample_rate: {
+          type: "number",
+        },
+        tts_sample_rate: {
+          type: "number",
+        },
+        type: {
+          const: "ready",
+          type: "string",
+        },
+      },
+      required: [
+        "type",
+        "protocol_version",
+        "audio_format",
+        "sample_rate",
+        "tts_sample_rate",
+      ],
+      type: "object",
+    },
+    {
+      additionalProperties: false,
+      properties: {
+        text: {
+          type: "string",
+        },
+        type: {
+          const: "partial_transcript",
+          type: "string",
+        },
+      },
+      required: [
+        "type",
+        "text",
+      ],
+      type: "object",
+    },
+    {
+      additionalProperties: false,
+      properties: {
+        text: {
+          type: "string",
+        },
+        turn_order: {
+          type: "number",
+        },
+        type: {
+          const: "final_transcript",
+          type: "string",
+        },
+      },
+      required: [
+        "type",
+        "text",
+      ],
+      type: "object",
+    },
+    {
+      additionalProperties: false,
+      properties: {
+        text: {
+          type: "string",
+        },
+        turn_order: {
+          type: "number",
+        },
+        type: {
+          const: "turn",
+          type: "string",
+        },
+      },
+      required: [
+        "type",
+        "text",
+      ],
+      type: "object",
+    },
+    {
+      additionalProperties: false,
+      properties: {
+        text: {
+          type: "string",
+        },
+        type: {
+          const: "chat",
+          type: "string",
+        },
+      },
+      required: [
+        "type",
+        "text",
+      ],
+      type: "object",
+    },
+    {
+      additionalProperties: false,
+      properties: {
+        type: {
+          const: "tts_done",
+          type: "string",
+        },
+      },
+      required: [
+        "type",
+      ],
+      type: "object",
+    },
+    {
+      additionalProperties: false,
+      properties: {
+        type: {
+          const: "cancelled",
+          type: "string",
+        },
+      },
+      required: [
+        "type",
+      ],
+      type: "object",
+    },
+    {
+      additionalProperties: false,
+      properties: {
+        type: {
+          const: "reset",
+          type: "string",
+        },
+      },
+      required: [
+        "type",
+      ],
+      type: "object",
+    },
+    {
+      additionalProperties: false,
+      properties: {
+        details: {
+          items: {
+            type: "string",
+          },
+          type: "array",
+        },
+        message: {
+          type: "string",
+        },
+        type: {
+          const: "error",
+          type: "string",
+        },
+      },
+      required: [
+        "type",
+        "message",
+      ],
+      type: "object",
+    },
+    {
+      additionalProperties: false,
+      properties: {
+        type: {
+          const: "pong",
+          type: "string",
+        },
+      },
+      required: [
+        "type",
+      ],
+      type: "object",
+    },
+  ],
+}
+`;
+
+snapshot[`ClientMessageSchema snapshot 1`] = `
+{
+  "\$schema": "https://json-schema.org/draft/2020-12/schema",
+  oneOf: [
+    {
+      additionalProperties: false,
+      properties: {
+        type: {
+          const: "audio_ready",
+          type: "string",
+        },
+      },
+      required: [
+        "type",
+      ],
+      type: "object",
+    },
+    {
+      additionalProperties: false,
+      properties: {
+        type: {
+          const: "cancel",
+          type: "string",
+        },
+      },
+      required: [
+        "type",
+      ],
+      type: "object",
+    },
+    {
+      additionalProperties: false,
+      properties: {
+        type: {
+          const: "reset",
+          type: "string",
+        },
+      },
+      required: [
+        "type",
+      ],
+      type: "object",
+    },
+    {
+      additionalProperties: false,
+      properties: {
+        type: {
+          const: "ping",
+          type: "string",
+        },
+      },
+      required: [
+        "type",
+      ],
+      type: "object",
+    },
+    {
+      additionalProperties: false,
+      properties: {
+        messages: {
+          items: {
+            additionalProperties: false,
+            properties: {
+              role: {
+                enum: [
+                  "user",
+                  "assistant",
+                ],
+                type: "string",
+              },
+              text: {
+                type: "string",
+              },
+            },
+            required: [
+              "role",
+              "text",
+            ],
+            type: "object",
+          },
+          type: "array",
+        },
+        type: {
+          const: "history",
+          type: "string",
+        },
+      },
+      required: [
+        "type",
+        "messages",
+      ],
+      type: "object",
+    },
+  ],
+}
+`;
+
+snapshot[`AudioFrameSpec snapshot 1`] = `
+{
+  bitsPerSample: 16,
+  bytesPerSample: 2,
+  channels: 1,
+  endianness: "little",
+  format: "pcm16",
+}
+`;
+
+snapshot[`ServerStateMachine snapshot 1`] = `
+{
+  initial: "connected",
+  transitions: {
+    audio: [
+      "audio",
+      "tts_done",
+      "cancelled",
+      "error",
+      "pong",
+    ],
+    cancelled: [
+      "partial_transcript",
+      "final_transcript",
+      "error",
+      "pong",
+    ],
+    chat: [
+      "audio",
+      "tts_done",
+      "cancelled",
+      "error",
+      "pong",
+    ],
+    connected: [
+      "ready",
+    ],
+    error: [
+      "partial_transcript",
+      "final_transcript",
+      "error",
+      "pong",
+    ],
+    final_transcript: [
+      "partial_transcript",
+      "final_transcript",
+      "turn",
+      "cancelled",
+      "error",
+      "pong",
+    ],
+    partial_transcript: [
+      "partial_transcript",
+      "final_transcript",
+      "cancelled",
+      "error",
+      "pong",
+    ],
+    pong: "*",
+    ready: [
+      "partial_transcript",
+      "final_transcript",
+      "error",
+      "pong",
+    ],
+    reset: [
+      "partial_transcript",
+      "final_transcript",
+      "chat",
+      "error",
+      "pong",
+    ],
+    tts_done: [
+      "partial_transcript",
+      "final_transcript",
+      "chat",
+      "error",
+      "pong",
+    ],
+    turn: [
+      "chat",
+      "error",
+      "pong",
+    ],
+  },
+}
+`;
+
+snapshot[`ClientStateMachine snapshot 1`] = `
+{
+  initial: "connected",
+  transitions: {
+    audio: [
+      "audio",
+      "cancel",
+      "reset",
+      "ping",
+    ],
+    audio_ready: [
+      "audio",
+      "cancel",
+      "reset",
+      "ping",
+    ],
+    cancel: [
+      "audio",
+      "cancel",
+      "reset",
+      "ping",
+    ],
+    connected: [
+      "audio_ready",
+      "history",
+      "ping",
+    ],
+    history: [
+      "audio_ready",
+      "history",
+      "ping",
+    ],
+    ping: "*",
+    reset: [
+      "audio_ready",
+      "audio",
+      "cancel",
+      "reset",
+      "ping",
+    ],
+  },
+}
+`;

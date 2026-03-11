@@ -10,6 +10,7 @@ import type { AgentConfig, ToolSchema } from "@aai/sdk/types";
 import type { WorkerApi } from "@aai/core/worker-entry";
 import { buildSystemPrompt } from "./system_prompt.ts";
 import * as metrics from "./metrics.ts";
+import { AUDIO_FORMAT, PROTOCOL_VERSION } from "@aai/core/protocol";
 
 export type SessionTransport = {
   send(data: string | ArrayBuffer | Uint8Array): void;
@@ -304,6 +305,8 @@ export function createSession(opts: SessionOptions): Session {
       await doConnectSttWithEvents();
       trySendJson({
         type: "ready",
+        protocol_version: PROTOCOL_VERSION,
+        audio_format: AUDIO_FORMAT,
         sample_rate: config.sttConfig.sampleRate,
         tts_sample_rate: config.ttsConfig.sampleRate,
       });
