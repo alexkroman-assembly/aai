@@ -5,6 +5,7 @@ import { _internals, AAI_ROOT } from "./_bundler.ts";
 const {
   WORKSPACE_ALIASES,
   bundleError,
+  getConfigPath,
   getOutputText,
   jsBytes,
   buildNpmAliases,
@@ -52,6 +53,13 @@ Deno.test("WORKSPACE_ALIASES: all values are absolute paths under AAI_ROOT", () 
     // Key should be an @aai/ specifier
     expect(key.startsWith("@aai/")).toBe(true);
   }
+});
+
+// --- getConfigPath ---
+
+Deno.test("getConfigPath: returns root deno.json when it exists", () => {
+  const configPath = getConfigPath();
+  expect(configPath).toBe(resolve(AAI_ROOT, "deno.json"));
 });
 
 // --- getOutputText ---

@@ -60,7 +60,18 @@ function ensureInit() {
 
 export const AAI_ROOT = resolve(dirname(fromFileUrl(import.meta.url)), "..");
 
-const baseConfigPath = resolve(AAI_ROOT, "deno.json");
+function getConfigPath(): string {
+  const root = resolve(AAI_ROOT, "deno.json");
+  try {
+    Deno.statSync(root);
+    return root;
+  } catch {
+    return resolve(
+      dirname(fromFileUrl(import.meta.url)),
+      "_bundler_config.json",
+    );
+  }
+}
 
 /**
  * Resolves workspace package specifiers (@aai/sdk/*, @aai/core/*, @aai/ui)
@@ -220,6 +231,7 @@ function getOutputText(
 export const _internals = {
   WORKSPACE_ALIASES,
   bundleError,
+  getConfigPath,
   getOutputText,
   jsBytes,
   buildNpmAliases,
@@ -243,8 +255,8 @@ export async function bundleAgent(
   const workerEntryAbsolute = resolve(AAI_ROOT, "core/_worker_entry.ts");
 
   const alias = workspaceAliasPlugin();
-  const workerPlugins = [alias, denoPlugin({ configPath: baseConfigPath })];
-  const clientPlugins = [alias, denoPlugin({ configPath: baseConfigPath })];
+  const workerPlugins = [alias, denoPlugin({ configPath: getConfigPath() })];
+  const clientPlugins = [alias, denoPlugin({ configPath: getConfigPath() })];
 
   const workerResult = await buildWithCleanErrors({
     ...BASE,
