@@ -1,4 +1,4 @@
-import { h, render } from "preact";
+import { render } from "preact";
 import type { ComponentType } from "preact";
 import { createVoiceSession, type VoiceSession } from "./session.ts";
 import {
@@ -7,6 +7,7 @@ import {
   type SessionSignals,
 } from "./signals.ts";
 import { applyTheme, defaultTheme, type Theme } from "./theme.ts";
+import { html } from "./_html.ts";
 
 function injectBodyStyle(theme: Theme): HTMLStyleElement {
   const style = document.createElement("style");
@@ -46,21 +47,17 @@ export function mount(
 
   // deno-lint-ignore no-explicit-any
   const injectedBase = (globalThis as any).__AAI_BASE__ as string | undefined;
+  if (!options?.platformUrl && !injectedBase) {
+    throw new Error("Missing __AAI_BASE__ global — the server must inject it.");
+  }
   const platformUrl = options?.platformUrl ??
-    (injectedBase
-      ? globalThis.location.origin + injectedBase
-      : globalThis.location.origin + globalThis.location.pathname);
+    globalThis.location.origin + injectedBase;
   const session = createVoiceSession({ platformUrl });
   const signals = createSessionControls(session);
   const styleEl = injectBodyStyle(theme);
 
-  render(
-    h(SessionProvider, {
-      value: signals,
-      children: [h(Component, null)],
-    }),
-    container,
-  );
+  // deno-fmt-ignore
+  render(html`<${SessionProvider} value="${signals}"><${Component} /></${SessionProvider}>`, container);
 
   const handle: MountHandle = {
     session,

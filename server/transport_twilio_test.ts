@@ -12,6 +12,7 @@ import {
   createTwilioTransport,
   decodeTwilioFrame,
 } from "./transport_twilio.ts";
+import { WSContext } from "hono/ws";
 
 // --- mulaw codec ---
 
@@ -123,27 +124,39 @@ Deno.test("decodeTwilioFrame produces PCM16 bytes at 16kHz", () => {
 // --- twilio transport adapter ---
 
 Deno.test("createTwilioTransport", async (t) => {
-  function mockWs(): WebSocket & { sent: string[] } {
+  function mockWs(): {
+    ctx: WSContext;
+    sent: string[];
+    setReady(v: number): void;
+  } {
     const sent: string[] = [];
-    return {
-      readyState: WebSocket.OPEN,
-      send(data: string) {
-        sent.push(data);
+    let readyState: 0 | 1 | 2 | 3 = 1;
+    const ctx = new WSContext({
+      send: (data) => sent.push(data as string),
+      close: () => {},
+      get readyState() {
+        return readyState as 0 | 1 | 2 | 3;
       },
+    });
+    return {
+      ctx,
       sent,
-    } as unknown as WebSocket & { sent: string[] };
+      setReady(v: number) {
+        readyState = v as 0 | 1 | 2 | 3;
+      },
+    };
   }
 
   await t.step("drops string messages (UI-only)", () => {
     const ws = mockWs();
-    const t = createTwilioTransport(ws);
+    const t = createTwilioTransport(ws.ctx);
     t.send(JSON.stringify({ type: "ready" }));
     expect(ws.sent.length).toBe(0);
   });
 
   await t.step("converts PCM16 binary to mulaw media event", () => {
     const ws = mockWs();
-    const transport = createTwilioTransport(ws);
+    const transport = createTwilioTransport(ws.ctx);
     transport.streamSid = "stream-123";
 
     // Send 4 bytes of PCM16 (2 samples)
@@ -159,15 +172,15 @@ Deno.test("createTwilioTransport", async (t) => {
 
   await t.step("skips binary when no streamSid", () => {
     const ws = mockWs();
-    const transport = createTwilioTransport(ws);
+    const transport = createTwilioTransport(ws.ctx);
     transport.send(new Uint8Array([0, 0, 0, 0]));
     expect(ws.sent.length).toBe(0);
   });
 
   await t.step("skips when socket not open", () => {
     const ws = mockWs();
-    (ws as { readyState: number }).readyState = WebSocket.CLOSED;
-    const transport = createTwilioTransport(ws);
+    ws.setReady(3);
+    const transport = createTwilioTransport(ws.ctx);
     transport.streamSid = "stream-1";
     transport.send(new Uint8Array([0, 0, 0, 0]));
     expect(ws.sent.length).toBe(0);

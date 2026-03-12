@@ -1,27 +1,8 @@
 import { expect } from "@std/expect";
-import { render } from "preact";
-import { installMockWebSocket, setupDOM } from "./_test_utils.ts";
+import { withMountEnv } from "./_test_utils.ts";
 import { mount } from "./mount.ts";
 import { defaultTheme } from "./theme.ts";
 import { html } from "./_html.ts";
-
-function withMountEnv(
-  fn: (mock: ReturnType<typeof installMockWebSocket>) => void | Promise<void>,
-) {
-  return async () => {
-    setupDOM();
-    const mock = installMockWebSocket();
-    try {
-      await fn(mock);
-    } finally {
-      // Clean up any mounted content
-      const app = globalThis.document.querySelector("#app");
-      if (app) render(null, app as Element);
-      await new Promise<void>((r) => setTimeout(r, 0));
-      mock.restore();
-    }
-  };
-}
 
 Deno.test("mount()", async (t) => {
   await t.step(

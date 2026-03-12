@@ -1,6 +1,6 @@
 import { Confirm } from "@cliffy/prompt";
 import { deadline } from "@std/async/deadline";
-import { bold, cyan, dim, yellow } from "@std/fmt/colors";
+import { bold, brightBlue, dim, yellow } from "@std/fmt/colors";
 import { greaterThan, parse } from "@std/semver";
 
 const REPO = "alexkroman/aai";
@@ -81,7 +81,7 @@ export async function promptUpgradeIfAvailable(
 
   console.log(
     `\n${yellow("Update available:")} ${dim(currentVersion)} → ${
-      bold(cyan(newVersion))
+      bold(brightBlue(newVersion))
     }`,
   );
   const confirmed = await Confirm.prompt({

@@ -5,12 +5,12 @@ import type { AgentScope, ScopeKey } from "./scope_token.ts";
 import type { KvStore } from "./kv.ts";
 
 export type HonoEnv = {
+  Bindings: Deno.ServeHandlerInfo;
   Variables: {
     slug: string;
-    ownerHash: string;
+    accountId: string;
     scope: AgentScope;
     slots: Map<string, AgentSlot>;
-    devSlots: Map<string, AgentSlot>;
     sessions: Map<string, Session>;
     store: BundleStore;
     scopeKey: ScopeKey;

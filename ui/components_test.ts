@@ -1,9 +1,8 @@
 import { expect } from "@std/expect";
-import { FakeTime } from "@std/testing/time";
 import { h, render } from "preact";
 import { signal } from "@preact/signals";
-import { createMockSignals, getContainer, setupDOM } from "./_test_utils.ts";
-import { SessionProvider } from "./signals.ts";
+import { createMockSignals, withDOM } from "./_test_utils.ts";
+import { SessionProvider, type SessionSignals } from "./signals.ts";
 import {
   App,
   ChatView,
@@ -13,28 +12,7 @@ import {
   Transcript,
 } from "./_components.ts";
 import { html } from "./_html.ts";
-import type { SessionSignals } from "./signals.ts";
 import type { AgentState, Message } from "./types.ts";
-
-function withDOM(
-  fn: (container: Element) => void | Promise<void>,
-) {
-  return async () => {
-    const time = new FakeTime();
-    try {
-      setupDOM();
-      const container = getContainer();
-      try {
-        await fn(container);
-      } finally {
-        render(null, container);
-        await time.tickAsync(100);
-      }
-    } finally {
-      time.restore();
-    }
-  };
-}
 
 function renderWithProvider(
   container: Element,

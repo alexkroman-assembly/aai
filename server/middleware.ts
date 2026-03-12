@@ -3,7 +3,7 @@ import { secureHeaders } from "hono/secure-headers";
 import { createMiddleware } from "hono/factory";
 import { HTTPException } from "hono/http-exception";
 import type { HonoEnv } from "./hono_env.ts";
-import { claimNamespace, verifyOwner } from "./auth.ts";
+import { verifyOrClaimNamespace } from "./auth.ts";
 import { type ScopeKey, verifyScopeToken } from "./scope_token.ts";
 import type { BundleStore } from "./bundle_store_tigris.ts";
 
@@ -55,17 +55,14 @@ export function requireOwnerMiddleware(store: BundleStore) {
     const slug = c.var.slug;
     const namespace = slug.split("/")[0];
 
-    const ownerHash = await verifyOwner(apiKey, namespace, store);
-    if (!ownerHash) {
+    const accountId = await verifyOrClaimNamespace(apiKey, namespace, store);
+    if (!accountId) {
       throw new HTTPException(403, {
         message: `Namespace "${namespace}" is owned by another user.`,
       });
     }
 
-    const existing = await store.getNamespaceOwner(namespace);
-    if (!existing) await claimNamespace(namespace, ownerHash, store);
-
-    c.set("ownerHash", ownerHash);
+    c.set("accountId", accountId);
     await next();
   });
 }
@@ -76,6 +73,30 @@ export const requireUpgrade = createMiddleware<HonoEnv>(async (c, next) => {
   }
   await next();
 });
+
+/** Only allow requests from loopback / private addresses (Fly internal network, etc.). */
+export const requireInternal = createMiddleware<HonoEnv>(async (c, next) => {
+  const fly = c.req.header("fly-client-ip");
+  const addr = c.env?.remoteAddr;
+  const ip = fly ?? (addr && "hostname" in addr ? addr.hostname : "") ?? "";
+  if (isPrivateIp(ip)) {
+    await next();
+  } else {
+    throw new HTTPException(403, { message: "Forbidden" });
+  }
+});
+
+function isPrivateIp(ip: string): boolean {
+  if (!ip) return false;
+  return (
+    ip === "127.0.0.1" ||
+    ip === "::1" ||
+    ip.startsWith("10.") ||
+    ip.startsWith("172.") ||
+    ip.startsWith("192.168.") ||
+    ip.startsWith("fdaa:") // Fly.io private network
+  );
+}
 
 export function requireScopeTokenMiddleware(scopeKey: ScopeKey) {
   return createMiddleware<HonoEnv>(async (c, next) => {

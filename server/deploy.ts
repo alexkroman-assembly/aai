@@ -1,30 +1,24 @@
 import type { Context } from "hono";
-import { validator } from "hono/validator";
 import { loadPlatformConfig } from "./config.ts";
-import {
-  type DeployBody,
-  DeployBodySchema,
-  normalizeTransport,
-} from "@aai/sdk/schema";
+import type { DeployBody } from "@aai/sdk/schema";
+import { normalizeTransport } from "@aai/sdk/schema";
+import { DeployBodySchema } from "./_schemas.ts";
 import type { AgentSlot } from "./worker_pool.ts";
 import type { HonoEnv } from "./hono_env.ts";
+import { jsonValidator } from "./_validation.ts";
 
 export { hashApiKey } from "./auth.ts";
 
-export const validateDeployBody = validator("json", (value, c) => {
-  const parsed = DeployBodySchema.safeParse(value);
-  if (!parsed.success) {
-    return c.json(
-      { error: `Invalid deploy body: ${parsed.error.message}` },
-      400,
-    );
-  }
-  return parsed.data;
-});
+export const validateDeployBody = jsonValidator(
+  DeployBodySchema,
+  "Invalid deploy body",
+);
 
-export async function handleDeploy(c: Context<HonoEnv>) {
-  const { slug, ownerHash, slots, store } = c.var;
-  const body = c.req.valid("json" as never) as DeployBody;
+export async function handleDeploy(
+  c: Context<HonoEnv, string, { out: { json: DeployBody } }>,
+) {
+  const { slug, accountId, slots, store } = c.var;
+  const body = c.req.valid("json");
 
   try {
     loadPlatformConfig(body.env);
@@ -55,20 +49,14 @@ export async function handleDeploy(c: Context<HonoEnv>) {
     transport,
     worker: body.worker,
     client: body.client,
-    owner_hash: ownerHash,
-    config: body.config,
-    toolSchemas: body.toolSchemas,
+    account_id: accountId,
   });
 
   const slot: AgentSlot = {
     slug,
     env: body.env,
     transport,
-    config: body.config,
-    name: body.config?.name,
-    toolSchemas: body.toolSchemas,
-    ownerHash,
-    activeSessions: 0,
+    accountId,
   };
   slots.set(slug, slot);
 

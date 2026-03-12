@@ -1,26 +1,29 @@
+import { z } from "zod";
 import {
   DEFAULT_MODEL,
   DEFAULT_STT_CONFIG,
   DEFAULT_TTS_CONFIG,
-  type STTConfig,
-  type TTSConfig,
+  STTConfigSchema,
+  TTSConfigSchema,
 } from "./types.ts";
-import { EnvSchema } from "@aai/sdk/schema";
+import { EnvSchema } from "./_schemas.ts";
 
-export type PlatformConfig = {
-  apiKey: string;
-  sttConfig: STTConfig;
-  ttsConfig: TTSConfig;
-  model: string;
-  llmGatewayBase: string;
-};
+export const PlatformConfigSchema = z.object({
+  apiKey: z.string().min(1),
+  sttConfig: STTConfigSchema,
+  ttsConfig: TTSConfigSchema,
+  model: z.string(),
+  llmGatewayBase: z.string().url(),
+});
+
+export type PlatformConfig = z.infer<typeof PlatformConfigSchema>;
 
 export function loadPlatformConfig(
   env: Record<string, string | undefined>,
 ): PlatformConfig {
   const parsed = EnvSchema.parse(env);
 
-  return {
+  return PlatformConfigSchema.parse({
     apiKey: parsed.ASSEMBLYAI_API_KEY,
     sttConfig: { ...DEFAULT_STT_CONFIG },
     ttsConfig: {
@@ -29,5 +32,5 @@ export function loadPlatformConfig(
     },
     model: parsed.LLM_MODEL ?? DEFAULT_MODEL,
     llmGatewayBase: "https://llm-gateway.assemblyai.com/v1",
-  };
+  });
 }

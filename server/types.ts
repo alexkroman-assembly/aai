@@ -10,19 +10,31 @@ export type STTConfig = {
   wssBase: string;
   tokenExpiresIn: number;
   formatTurns: boolean;
-  minEndOfTurnSilenceWhenConfident: number;
+  minTurnSilence: number;
   maxTurnSilence: number;
   vadThreshold: number;
-  prompt?: string;
+  sttPrompt?: string;
 };
+
+export const STTConfigSchema: z.ZodType<STTConfig> = z.object({
+  sampleRate: z.number(),
+  speechModel: z.string(),
+  wssBase: z.string(),
+  tokenExpiresIn: z.number(),
+  formatTurns: z.boolean(),
+  minTurnSilence: z.number(),
+  maxTurnSilence: z.number(),
+  vadThreshold: z.number(),
+  sttPrompt: z.string().optional(),
+});
 
 export const DEFAULT_STT_CONFIG: STTConfig = {
   sampleRate: DEFAULT_STT_SAMPLE_RATE,
-  speechModel: "u3-pro",
+  speechModel: "u3-rt-pro",
   wssBase: "wss://streaming.assemblyai.com/v3/ws",
   tokenExpiresIn: 480,
   formatTurns: true,
-  minEndOfTurnSilenceWhenConfident: 400,
+  minTurnSilence: 400,
   maxTurnSilence: 1000,
   vadThreshold: 0.7,
 };
@@ -38,6 +50,17 @@ export type TTSConfig = {
   speedAlpha?: number;
 };
 
+export const TTSConfigSchema: z.ZodType<TTSConfig> = z.object({
+  wssUrl: z.string(),
+  apiKey: z.string(),
+  voice: z.string(),
+  modelId: z.string(),
+  audioFormat: z.string(),
+  samplingRate: z.number(),
+  sampleRate: z.number(),
+  speedAlpha: z.number().optional(),
+});
+
 export const DEFAULT_TTS_CONFIG: TTSConfig = {
   wssUrl: "wss://users-ws.rime.ai/ws",
   apiKey: "",
@@ -50,49 +73,3 @@ export const DEFAULT_TTS_CONFIG: TTSConfig = {
 };
 
 export const DEFAULT_MODEL = "claude-haiku-4-5-20251001";
-
-export type ChatMessage = {
-  role: "system" | "user" | "assistant" | "tool";
-  content: string | null;
-  tool_calls?: {
-    id: string;
-    type: "function";
-    function: { name: string; arguments: string; [key: string]: unknown };
-    [key: string]: unknown;
-  }[];
-  tool_call_id?: string;
-  [key: string]: unknown;
-};
-
-const ChatMessageSchema: z.ZodType<ChatMessage> = z.object({
-  role: z.enum(["system", "user", "assistant", "tool"]),
-  content: z.string().nullable(),
-  tool_calls: z.array(
-    z.object({
-      id: z.string(),
-      type: z.literal("function"),
-      function: z.object({ name: z.string(), arguments: z.string() })
-        .passthrough(),
-    }).passthrough(),
-  ).optional(),
-  tool_call_id: z.string().optional(),
-}).passthrough();
-
-export type LLMResponse = {
-  id?: string;
-  choices: {
-    index?: number;
-    message: ChatMessage;
-    finish_reason: string;
-  }[];
-  [key: string]: unknown;
-};
-
-export const LLMResponseSchema: z.ZodType<LLMResponse> = z.object({
-  id: z.string().optional(),
-  choices: z.array(z.object({
-    index: z.number().optional(),
-    message: ChatMessageSchema,
-    finish_reason: z.string(),
-  })).nullable().transform((v) => v ?? []),
-}).passthrough();

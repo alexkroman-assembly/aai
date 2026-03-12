@@ -3,9 +3,11 @@ import { z } from "zod";
 import type {
   AgentDef,
   HookContext,
+  Message,
   ToolContext,
   ToolDef,
 } from "@aai/sdk/types";
+import type { ToolSchema, WorkerConfig } from "@aai/sdk/schema";
 import type { Kv, KvEntry } from "@aai/sdk/kv";
 import { deadline } from "@std/async/deadline";
 
@@ -15,6 +17,7 @@ export type ExecuteTool = (
   name: string,
   args: Record<string, unknown>,
   sessionId?: string,
+  messages?: Message[],
 ) => Promise<string>;
 
 export async function executeToolCall(
@@ -25,28 +28,30 @@ export async function executeToolCall(
   sessionId?: string,
   state?: unknown,
   kv?: Kv,
+  messages?: readonly Message[],
 ): Promise<string> {
   const schema = tool.parameters ?? z.object({});
   const parsed = schema.safeParse(args);
   if (!parsed.success) {
     const issues = (parsed.error?.issues ?? [])
-      .map((i) => `${i.path.map(String).join(".")}: ${i.message}`)
+      .map((i: z.ZodIssue) => `${i.path.map(String).join(".")}: ${i.message}`)
       .join(", ");
     return `Error: Invalid arguments for tool "${name}": ${issues}`;
   }
 
   try {
-    const signal = AbortSignal.timeout(TOOL_HANDLER_TIMEOUT);
+    const abortSignal = AbortSignal.timeout(TOOL_HANDLER_TIMEOUT);
     const envCopy = { ...env };
     const ctx: ToolContext = {
       sessionId: sessionId ?? "",
       env: envCopy,
-      signal,
+      abortSignal,
       state: (state ?? {}) as Record<string, unknown>,
       get kv(): Kv {
         if (!kv) throw new Error("KV not available");
         return kv;
       },
+      messages: messages ?? [],
     };
     const result = await Promise.resolve(
       tool.execute(parsed.data, ctx),
@@ -63,24 +68,48 @@ export async function executeToolCall(
   }
 }
 
+export type { WorkerConfig } from "@aai/sdk/schema";
+
+export type StepInfoRpc = {
+  stepNumber: number;
+  toolCalls: { toolName: string; args: Record<string, unknown> }[];
+  text: string;
+};
+
 export type WorkerApi = {
+  getConfig(): Promise<WorkerConfig>;
   executeTool(
     name: string,
     args: Record<string, unknown>,
     sessionId?: string,
     timeoutMs?: number,
     env?: Record<string, string>,
+    messages?: Message[],
   ): Promise<string>;
   invokeHook(
     hook: string,
     sessionId: string,
-    extra?: { text?: string; error?: string },
+    extra?: { text?: string; error?: string; step?: StepInfoRpc },
     timeoutMs?: number,
     env?: Record<string, string>,
   ): Promise<void>;
+  resolveMaxSteps(
+    sessionId: string,
+    timeoutMs?: number,
+    env?: Record<string, string>,
+  ): Promise<number | null>;
+  resolveBeforeStep(
+    sessionId: string,
+    stepNumber: number,
+    timeoutMs?: number,
+    env?: Record<string, string>,
+  ): Promise<{ activeTools?: string[] } | null>;
   /** Release the underlying Comlink proxy and its MessagePort resources. */
   dispose?: () => Promise<void>;
 };
+
+import type { KvRequest } from "./_protocol.ts";
+export type { KvRequest };
 
 /** API shape the host exposes to the worker via Comlink.proxy. */
 export type HostApi = {
@@ -95,15 +124,7 @@ export type HostApi = {
     headers: Record<string, string>;
     body: string;
   }>;
-  kv(req: {
-    op: string;
-    key?: string;
-    value?: string;
-    ttl?: number;
-    prefix?: string;
-    limit?: number;
-    reverse?: boolean;
-  }): Promise<{ result: unknown }>;
+  kv(req: KvRequest): Promise<{ result: unknown }>;
 };
 
 /** API shape exposed by the worker via Comlink. */
@@ -112,11 +133,14 @@ export type ExposedWorkerApi = {
   init(hostPort: MessagePort): void;
   /** Release the host callback port (for clean test teardown). */
   dispose(): void;
+  /** Return agent config and tool schemas extracted from the agent definition. */
+  getConfig(): WorkerConfig;
   executeTool(
     name: string,
     args: Record<string, unknown>,
     sessionId?: string,
     env?: Record<string, string>,
+    messages?: Message[],
   ): Promise<string>;
   invokeHook(
     hook: string,
@@ -124,7 +148,17 @@ export type ExposedWorkerApi = {
     text?: string,
     error?: string,
     env?: Record<string, string>,
+    stepJson?: string,
   ): Promise<void>;
+  resolveMaxSteps(
+    sessionId: string,
+    env?: Record<string, string>,
+  ): Promise<number | null>;
+  resolveBeforeStep(
+    sessionId: string,
+    stepNumber: number,
+    env?: Record<string, string>,
+  ): Promise<{ activeTools?: string[] } | null>;
 };
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs?: number): Promise<T> {
@@ -158,19 +192,45 @@ export function createWorkerApi(
   }
 
   return {
-    async executeTool(name, args, sessionId, timeoutMs, env) {
+    async getConfig() {
+      await ready;
+      return await withTimeout(remote.getConfig(), 5_000);
+    },
+    async executeTool(name, args, sessionId, timeoutMs, env, messages) {
       await ready;
       const raw = await withTimeout(
-        remote.executeTool(name, args, sessionId, env),
+        remote.executeTool(name, args, sessionId, env, messages),
         timeoutMs,
       );
       return typeof raw === "string" ? raw : String(raw ?? "");
     },
     async invokeHook(hook, sessionId, extra, timeoutMs, env) {
       await ready;
+      const stepJson = extra?.step ? JSON.stringify(extra.step) : undefined;
       await withTimeout(
-        remote.invokeHook(hook, sessionId, extra?.text, extra?.error, env),
+        remote.invokeHook(
+          hook,
+          sessionId,
+          extra?.text,
+          extra?.error,
+          env,
+          stepJson,
+        ),
         timeoutMs,
+      );
+    },
+    async resolveMaxSteps(sessionId, timeoutMs, env) {
+      await ready;
+      return await withTimeout(
+        remote.resolveMaxSteps(sessionId, env),
+        timeoutMs ?? 5_000,
+      );
+    },
+    async resolveBeforeStep(sessionId, stepNumber, timeoutMs, env) {
+      await ready;
+      return await withTimeout(
+        remote.resolveBeforeStep(sessionId, stepNumber, env),
+        timeoutMs ?? 5_000,
       );
     },
     async dispose() {
@@ -193,11 +253,7 @@ export function startWorker(
   let hostPort: MessagePort | undefined;
 
   function applyEnv(extra?: Record<string, string>): void {
-    if (!extra) return;
-    const updated = { ...mergedEnv, ...extra };
-    if (JSON.stringify(updated) !== JSON.stringify(mergedEnv)) {
-      mergedEnv = updated;
-    }
+    if (extra) mergedEnv = { ...mergedEnv, ...extra };
   }
 
   function getState(sessionId: string): unknown {
@@ -206,6 +262,8 @@ export function startWorker(
     }
     return sessions.get(sessionId) ?? {};
   }
+
+  const EMPTY_PARAMS = z.object({});
 
   const api: ExposedWorkerApi = {
     init(port: MessagePort) {
@@ -219,7 +277,37 @@ export function startWorker(
       hostPort?.close();
     },
 
-    async executeTool(name, args, sessionId, env) {
+    getConfig(): WorkerConfig {
+      const toolSchemas: ToolSchema[] = Object.entries(agent.tools).map(
+        ([name, def]) => ({
+          name,
+          description: def.description,
+          parameters: z.toJSONSchema(
+            def.parameters ?? EMPTY_PARAMS,
+          ) as ToolSchema["parameters"],
+        }),
+      );
+      return {
+        config: {
+          name: agent.name,
+          mode: agent.mode,
+          instructions: agent.instructions,
+          greeting: agent.greeting,
+          voice: agent.voice,
+          sttPrompt: agent.sttPrompt,
+          maxSteps: typeof agent.maxSteps === "function"
+            ? undefined
+            : agent.maxSteps,
+          toolChoice: agent.toolChoice,
+          builtinTools: agent.builtinTools
+            ? [...agent.builtinTools]
+            : undefined,
+        },
+        toolSchemas,
+      };
+    },
+
+    async executeTool(name, args, sessionId, env, messages) {
       applyEnv(env);
       const tool = toolHandlers.get(name);
       if (!tool) return `Error: Unknown tool "${name}"`;
@@ -231,10 +319,11 @@ export function startWorker(
         sessionId,
         getState(sessionId ?? ""),
         proxyKv,
+        messages,
       );
     },
 
-    async invokeHook(hook, sessionId, text, error, env) {
+    async invokeHook(hook, sessionId, text, error, env, stepJson) {
       applyEnv(env);
       const state = getState(sessionId);
       const ctx: HookContext = {
@@ -255,7 +344,44 @@ export function startWorker(
         await agent.onTurn?.(text, ctx);
       } else if (hook === "onError" && error !== undefined) {
         agent.onError?.(new Error(error), ctx);
+      } else if (hook === "onStep" && stepJson !== undefined) {
+        const step = JSON.parse(stepJson);
+        await agent.onStep?.(step, ctx);
       }
+    },
+
+    // deno-lint-ignore require-await
+    async resolveMaxSteps(sessionId, env) {
+      applyEnv(env);
+      if (typeof agent.maxSteps !== "function") return null;
+      const state = getState(sessionId);
+      const ctx: HookContext = {
+        sessionId,
+        env: { ...mergedEnv },
+        state: state as Record<string, unknown>,
+        get kv() {
+          if (!proxyKv) throw new Error("KV not available");
+          return proxyKv;
+        },
+      };
+      return agent.maxSteps(ctx);
+    },
+
+    async resolveBeforeStep(sessionId, stepNumber, env) {
+      applyEnv(env);
+      if (!agent.onBeforeStep) return null;
+      const state = getState(sessionId);
+      const ctx: HookContext = {
+        sessionId,
+        env: { ...mergedEnv },
+        state: state as Record<string, unknown>,
+        get kv() {
+          if (!proxyKv) throw new Error("KV not available");
+          return proxyKv;
+        },
+      };
+      const result = await agent.onBeforeStep(stepNumber, ctx);
+      return result ?? null;
     },
   };
 
@@ -266,23 +392,8 @@ export function startWorker(
 const KV_TIMEOUT_MS = 10_000;
 
 function createProxyKv(hostApi: Comlink.Remote<HostApi>): Kv {
-  async function kvCall(
-    params: Record<string, unknown>,
-  ): Promise<unknown> {
-    const resp = await withTimeout(
-      hostApi.kv(
-        params as {
-          op: string;
-          key?: string;
-          value?: string;
-          ttl?: number;
-          prefix?: string;
-          limit?: number;
-          reverse?: boolean;
-        },
-      ),
-      KV_TIMEOUT_MS,
-    );
+  async function kvCall(req: KvRequest): Promise<unknown> {
+    const resp = await withTimeout(hostApi.kv(req), KV_TIMEOUT_MS);
     return (resp as { result: unknown }).result;
   }
 
@@ -352,6 +463,10 @@ async function serializeBody(body: BodyInit | null): Promise<string | null> {
   return String(body);
 }
 
+function headersToRecord(h?: HeadersInit): Record<string, string> {
+  return Object.fromEntries(new Headers(h).entries());
+}
+
 /** Replace globalThis.fetch with a proxy to the host process via Comlink. */
 function installFetchProxy(hostApi: Comlink.Remote<HostApi>): void {
   globalThis.fetch = async (
@@ -366,9 +481,7 @@ function installFetchProxy(hostApi: Comlink.Remote<HostApi>): void {
     if (input instanceof Request) {
       url = input.url;
       method = init?.method ?? input.method;
-      headers = Object.fromEntries(
-        new Headers(init?.headers ?? input.headers).entries(),
-      );
+      headers = headersToRecord(init?.headers ?? input.headers);
       body = init?.body != null
         ? await serializeBody(init.body)
         : input.body != null
@@ -377,9 +490,7 @@ function installFetchProxy(hostApi: Comlink.Remote<HostApi>): void {
     } else {
       url = String(input);
       method = init?.method ?? "GET";
-      headers = Object.fromEntries(
-        new Headers(init?.headers).entries(),
-      );
+      headers = headersToRecord(init?.headers);
       body = init?.body != null ? await serializeBody(init.body) : null;
     }
 

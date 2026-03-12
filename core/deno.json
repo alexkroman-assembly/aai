@@ -1,11 +1,9 @@
 {
   "name": "@aai/core",
-  "version": "0.1.34",
+  "version": "0.1.65",
   "exports": {
     "./worker-entry": "./_worker_entry.ts",
     "./protocol": "./_protocol.ts",
-    "./ws-endpoint": "./_ws_endpoint.ts",
-    "./rpc-schema": "./_rpc_schema.ts",
     "./deno-worker": "./_deno_worker.ts"
   },
   "imports": {

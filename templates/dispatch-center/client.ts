@@ -226,7 +226,7 @@ export default function App() {
           alignItems: "center",
           gap: "10px",
         }}">
-          <span style="${{ color: "#3b82f6" }}">\\u{25C6}</span>
+          <span style="${{ color: "#3b82f6" }}">◆</span>
           Dispatch Command Center
           <span style="${{
             width: "10px",

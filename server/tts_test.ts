@@ -1,5 +1,5 @@
 import { expect } from "@std/expect";
-import { createTtsClient } from "./tts.ts";
+import { createTtsConnection } from "./tts.ts";
 import { DEFAULT_TTS_CONFIG } from "./types.ts";
 import { installMockWebSocket } from "./_mock_ws.ts";
 import { flush } from "./_test_utils.ts";
@@ -10,10 +10,10 @@ async function* textStream(...texts: string[]): AsyncGenerator<string> {
   for (const t of texts) yield t;
 }
 
-Deno.test("createTtsClient", async (t) => {
+Deno.test("TtsConnection", async (t) => {
   await t.step("does not create a WebSocket on construction", () => {
     using mockWs = installMockWebSocket();
-    const _client = createTtsClient(config);
+    const _conn = createTtsConnection(config);
     expect(mockWs.created.length).toBe(0);
   });
 
@@ -21,10 +21,10 @@ Deno.test("createTtsClient", async (t) => {
     "synthesizeStream sends text chunks + FLUSH and relays audio",
     async () => {
       using mockWs = installMockWebSocket();
-      const client = createTtsClient(config);
+      const conn = createTtsConnection(config);
 
       const chunks: Uint8Array[] = [];
-      const promise = client.synthesizeStream(
+      const promise = conn.synthesizeStream(
         textStream("Hello ", "world"),
         (chunk) => chunks.push(chunk),
       );
@@ -56,12 +56,12 @@ Deno.test("createTtsClient", async (t) => {
     "resolves immediately when signal is already aborted",
     async () => {
       using _mockWs = installMockWebSocket();
-      const client = createTtsClient(config);
+      const conn = createTtsConnection(config);
       const controller = new AbortController();
       controller.abort();
 
       const chunks: Uint8Array[] = [];
-      await client.synthesizeStream(
+      await conn.synthesizeStream(
         textStream("Hello"),
         (c) => chunks.push(c),
         controller.signal,
@@ -72,11 +72,11 @@ Deno.test("createTtsClient", async (t) => {
 
   await t.step("aborts mid-synthesis and closes WebSocket", async () => {
     using mockWs = installMockWebSocket();
-    const client = createTtsClient(config);
+    const conn = createTtsConnection(config);
 
     const controller = new AbortController();
     const chunks: Uint8Array[] = [];
-    const promise = client.synthesizeStream(
+    const promise = conn.synthesizeStream(
       textStream("Long text"),
       (c) => chunks.push(c),
       controller.signal,
@@ -92,17 +92,24 @@ Deno.test("createTtsClient", async (t) => {
 
   await t.step("close sends EOS and prevents further synthesis", async () => {
     using mockWs = installMockWebSocket();
-    const client = createTtsClient(config);
+    const conn = createTtsConnection(config);
 
-    const p = client.synthesizeStream(textStream("Hello"), () => {});
+    const p = conn.synthesizeStream(textStream("Hello"), () => {});
     await flush();
     mockWs.created[0].close();
     await p;
 
-    client.close();
+    conn.close();
 
     const chunks: Uint8Array[] = [];
-    await client.synthesizeStream(textStream("Hello"), (c) => chunks.push(c));
+    await conn.synthesizeStream(textStream("Hello"), (c) => chunks.push(c));
     expect(chunks).toHaveLength(0);
+  });
+
+  await t.step("close is idempotent", () => {
+    const conn = createTtsConnection(config);
+    conn.close();
+    conn.close();
+    expect(conn.closed).toBe(true);
   });
 });

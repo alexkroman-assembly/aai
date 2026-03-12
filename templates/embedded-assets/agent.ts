@@ -1,4 +1,4 @@
-import { defineAgent, multiTool, z } from "@aai/sdk";
+import { defineAgent, tool, z } from "@aai/sdk";
 import knowledge from "./knowledge.json" with { type: "json" };
 
 type FaqEntry = { question: string; answer: string };
@@ -16,33 +16,33 @@ Rules:
 - Keep answers concise and conversational — this is a voice agent
 - Quote the knowledge base accurately, do not embellish
 - If a question is ambiguous, ask the user to clarify
+- Use 'search_knowledge' to find answers to specific questions
+- Use 'list_topics' to see all available FAQ topics
 - Always be helpful and polite`,
   greeting:
     "Hi! I'm your FAQ assistant. Ask me anything about the AAI agent framework and I'll look it up in my knowledge base.",
   voice: "luna",
   tools: {
-    knowledge_base: multiTool({
+    search_knowledge: tool({
       description:
-        "Search or browse the embedded FAQ knowledge base. Use 'search' to find answers, 'list' to see all topics.",
-      actions: {
-        search: {
-          schema: z.object({
-            query: z.string().describe("The user's question to search for"),
-          }),
-          execute: ({ query }) => {
-            const q = (query as string).toLowerCase();
-            const match = faqs.find((f) =>
-              f.question.toLowerCase().includes(q) ||
-              q.includes(f.question.toLowerCase()) ||
-              f.answer.toLowerCase().includes(q)
-            );
-            return match ?? { result: "No matching FAQ found." };
-          },
-        },
-        list: {
-          execute: () => faqs.map((f) => f.question),
-        },
+        "Search the embedded FAQ knowledge base for an answer matching the user's question.",
+      parameters: z.object({
+        query: z.string().describe("The user's question to search for"),
+      }),
+      execute: ({ query }) => {
+        const q = query.toLowerCase();
+        const match = faqs.find((f) =>
+          f.question.toLowerCase().includes(q) ||
+          q.includes(f.question.toLowerCase()) ||
+          f.answer.toLowerCase().includes(q)
+        );
+        return match ?? { result: "No matching FAQ found." };
       },
+    }),
+    list_topics: tool({
+      description:
+        "List all available topics in the embedded FAQ knowledge base.",
+      execute: () => faqs.map((f) => f.question),
     }),
   },
 });

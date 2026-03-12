@@ -1,8 +1,13 @@
+import { FakeTime } from "@std/testing/time";
+import { render } from "preact";
 import { installDomShim } from "./_dom_shim.ts";
 import { DOMParser } from "@b-fuze/deno-dom";
 import { signal } from "@preact/signals";
-import type { SessionSignals } from "./signals.ts";
+import { createVoiceSession, type VoiceSession } from "./session.ts";
+import { createSessionControls, type SessionSignals } from "./signals.ts";
 import type { AgentState, Message, SessionError } from "./types.ts";
+export { installMockWebSocket, MockWebSocket } from "../core/_mock_ws.ts";
+import { installMockWebSocket } from "../core/_mock_ws.ts";
 
 const HTML =
   `<!DOCTYPE html><html><head></head><body><div id="app"></div></body></html>`;
@@ -23,106 +28,6 @@ export function getContainer(): Element {
 
 // Ensure document exists at import time for modules that need DOM globals.
 setupDOM();
-
-// ── Mock WebSocket (local copy to avoid pulling server/ into the binary) ──
-
-export class MockWebSocket extends EventTarget {
-  static readonly CONNECTING = 0;
-  static readonly OPEN = 1;
-  static readonly CLOSING = 2;
-  static readonly CLOSED = 3;
-
-  readyState = MockWebSocket.CONNECTING;
-  binaryType = "arraybuffer";
-  sent: (string | ArrayBuffer | Uint8Array)[] = [];
-  url: string;
-
-  constructor(
-    url: string | URL,
-    _protocols?: string | string[] | Record<string, unknown>,
-  ) {
-    super();
-    this.url = typeof url === "string" ? url : url.toString();
-    queueMicrotask(() => {
-      if (this.readyState === MockWebSocket.CONNECTING) {
-        this.readyState = MockWebSocket.OPEN;
-        this.dispatchEvent(new Event("open"));
-      }
-    });
-  }
-
-  send(data: string | ArrayBuffer | Uint8Array) {
-    this.sent.push(data);
-  }
-
-  close(code?: number, _reason?: string) {
-    this.readyState = MockWebSocket.CLOSED;
-    this.dispatchEvent(new CloseEvent("close", { code: code ?? 1000 }));
-  }
-
-  simulateMessage(data: string | ArrayBuffer) {
-    this.dispatchEvent(new MessageEvent("message", { data }));
-  }
-
-  open() {
-    this.readyState = MockWebSocket.OPEN;
-    this.dispatchEvent(new Event("open"));
-  }
-
-  msg(data: string | ArrayBuffer) {
-    this.dispatchEvent(new MessageEvent("message", { data }));
-  }
-
-  disconnect(code = 1000) {
-    this.dispatchEvent(new CloseEvent("close", { code }));
-  }
-
-  error() {
-    this.dispatchEvent(new Event("error"));
-  }
-
-  sentJson(): Record<string, unknown>[] {
-    return this.sent
-      .filter((d): d is string => typeof d === "string")
-      .map((s) => JSON.parse(s));
-  }
-}
-
-// deno-lint-ignore no-explicit-any
-const _g = globalThis as any;
-
-export function installMockWebSocket(): {
-  restore: () => void;
-  created: MockWebSocket[];
-  get lastWs(): MockWebSocket | null;
-  [Symbol.dispose]: () => void;
-} {
-  const saved = globalThis.WebSocket;
-  const created: MockWebSocket[] = [];
-
-  _g.WebSocket = class extends MockWebSocket {
-    constructor(
-      url: string | URL,
-      protocols?: string | string[] | Record<string, unknown>,
-    ) {
-      super(url, protocols);
-      created.push(this);
-    }
-  };
-
-  return {
-    created,
-    get lastWs() {
-      return created.length > 0 ? created[created.length - 1] : null;
-    },
-    restore() {
-      globalThis.WebSocket = saved;
-    },
-    [Symbol.dispose]() {
-      globalThis.WebSocket = saved;
-    },
-  };
-}
 
 export const flush = () => new Promise<void>((r) => queueMicrotask(r));
 
@@ -292,6 +197,93 @@ export function findWorkletNode(
   const node = nodes.find((n) => n.name === name);
   if (!node) throw new Error(`No worklet node named "${name}"`);
   return node;
+}
+
+// ── Test environment wrappers ──
+
+/**
+ * Set up a DOM + FakeTime environment, run `fn`, then clean up.
+ * Used by component tests that need a container and timer control.
+ */
+export function withDOM(
+  fn: (container: Element) => void | Promise<void>,
+): () => Promise<void> {
+  return async () => {
+    const time = new FakeTime();
+    try {
+      setupDOM();
+      const container = getContainer();
+      try {
+        await fn(container);
+      } finally {
+        render(null, container);
+        await time.tickAsync(100);
+      }
+    } finally {
+      time.restore();
+    }
+  };
+}
+
+/**
+ * Set up DOM + mock WebSocket, run `fn`, then clean up.
+ * Used by mount tests.
+ */
+export function withMountEnv(
+  fn: (mock: ReturnType<typeof installMockWebSocket>) => void | Promise<void>,
+): () => Promise<void> {
+  return async () => {
+    setupDOM();
+    const mock = installMockWebSocket();
+    try {
+      await fn(mock);
+    } finally {
+      const app = globalThis.document.querySelector("#app");
+      if (app) render(null, app as Element);
+      await new Promise<void>((r) => setTimeout(r, 0));
+      mock.restore();
+    }
+  };
+}
+
+/**
+ * Set up mock WebSocket + location + session + signals, run `fn`, clean up.
+ * Used by signals tests.
+ */
+export function withSignalsEnv(
+  fn: (ctx: {
+    mock: ReturnType<typeof installMockWebSocket>;
+    session: VoiceSession;
+    signals: ReturnType<typeof createSessionControls>;
+    connect: () => Promise<void>;
+    send: (msg: Record<string, unknown>) => void;
+  }) => void | Promise<void>,
+): () => Promise<void> {
+  return async () => {
+    const mock = installMockWebSocket();
+    const loc = installMockLocation();
+    const session = createVoiceSession({
+      platformUrl: "http://localhost:3000",
+    });
+    const signals = createSessionControls(session);
+    try {
+      await fn({
+        mock,
+        session,
+        signals,
+        async connect() {
+          session.connect();
+          await flush();
+        },
+        send(msg) {
+          mock.lastWs!.simulateMessage(JSON.stringify(msg));
+        },
+      });
+    } finally {
+      mock.restore();
+      loc.restore();
+    }
+  };
 }
 
 // ── Mock signals ──

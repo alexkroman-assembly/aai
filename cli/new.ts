@@ -1,83 +1,38 @@
-import { join } from "@std/path";
-import { step } from "./_output.ts";
+import { Command } from "@cliffy/command";
+import { exists } from "@std/fs/exists";
+import { dirname, fromFileUrl, join } from "@std/path";
+import { brightBlue } from "@std/fmt/colors";
+import { ensureClaudeMd, ensureTypescriptSetup } from "./_discover.ts";
 
-export const _internals = {
-  step,
-};
+export const newCommand: Command = new Command()
+  .description("Scaffold a new agent project")
+  .arguments("[dir:string]")
+  .option("-n, --name <name:string>", "Agent name")
+  .option("-t, --template <template:string>", "Template to use")
+  .option("-f, --force", "Overwrite existing agent.ts")
+  .action(async ({ name, template, force }, dir) => {
+    const cwd = dir ?? (Deno.env.get("INIT_CWD") || Deno.cwd());
 
-export type NewOptions = {
-  targetDir: string;
-  template: string;
-  templatesDir: string;
-  name?: string;
-};
-
-export async function listTemplates(dir: string): Promise<string[]> {
-  const templates: string[] = [];
-  for await (const entry of Deno.readDir(dir)) {
-    if (entry.isDirectory) templates.push(entry.name);
-  }
-  return templates.sort();
-}
-
-async function copyDir(src: string, dest: string): Promise<void> {
-  await Deno.mkdir(dest, { recursive: true });
-  for await (const entry of Deno.readDir(src)) {
-    const srcPath = join(src, entry.name);
-    const destPath = join(dest, entry.name);
-    if (entry.isDirectory) {
-      await copyDir(srcPath, destPath);
-    } else {
-      await Deno.copyFile(srcPath, destPath);
+    if (!force && await exists(join(cwd, "agent.ts"))) {
+      console.log(
+        `agent.ts already exists in this directory. Use ${
+          brightBlue("--force")
+        } to overwrite.`,
+      );
+      Deno.exit(1);
     }
-  }
-}
 
-export async function runNew(opts: NewOptions): Promise<string> {
-  const { targetDir, template, templatesDir, name } = opts;
-  const available = await listTemplates(templatesDir);
+    const cliDir = dirname(fromFileUrl(import.meta.url));
+    const templatesDir = join(cliDir, "..", "templates");
+    const { runNew } = await import("./_new.ts");
 
-  if (!available.includes(template)) {
-    throw new Error(
-      `unknown template '${template}' -- available: ${available.join(", ")}`,
-    );
-  }
-
-  const src = join(templatesDir, template);
-
-  _internals.step("Create", `from template '${template}'`);
-
-  await Deno.mkdir(targetDir, { recursive: true });
-
-  for await (const entry of Deno.readDir(src)) {
-    if (entry.name === "node_modules" || entry.name === "_deno.json") continue;
-    const srcPath = join(src, entry.name);
-    const destPath = join(targetDir, entry.name);
-    if (entry.isDirectory) {
-      await copyDir(srcPath, destPath);
-    } else {
-      await Deno.copyFile(srcPath, destPath);
+    if (!template) {
+      template = "simple";
     }
-  }
 
-  if (name) {
-    const agentPath = join(targetDir, "agent.ts");
-    const content = await Deno.readTextFile(agentPath);
-    const escaped = name.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-    const updated = content.replace(
-      /^(\s*name:\s*)"[^"]*"/m,
-      `$1"${escaped}"`,
-    );
-    await Deno.writeTextFile(agentPath, updated);
-  }
+    await runNew({ targetDir: cwd, template, templatesDir, name });
+    await ensureClaudeMd(cwd);
+    await ensureTypescriptSetup(cwd);
 
-  try {
-    await Deno.copyFile(
-      join(targetDir, ".env.example"),
-      join(targetDir, ".env"),
-    );
-  } catch { /* no .env.example in template */ }
-
-  _internals.step("Done", targetDir);
-  return targetDir;
-}
+    console.log(`Run ${brightBlue("aai deploy")} to deploy to production.\n`);
+  }) as unknown as Command;

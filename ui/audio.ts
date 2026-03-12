@@ -109,7 +109,7 @@ export async function createVoiceIO(
   };
 
   let playNode: AudioWorkletNode | null = null;
-  let closed = false;
+  const lifecycle = new AbortController();
 
   function ensurePlayNode(): AudioWorkletNode {
     if (playNode) return playNode;
@@ -127,7 +127,7 @@ export async function createVoiceIO(
 
   const io: VoiceIO = {
     enqueue(pcm16Buffer: ArrayBuffer) {
-      if (closed) return;
+      if (lifecycle.signal.aborted) return;
       if (pcm16Buffer.byteLength === 0) return;
       const node = ensurePlayNode();
       node.port.postMessage(
@@ -145,8 +145,8 @@ export async function createVoiceIO(
     },
 
     async close() {
-      if (closed) return;
-      closed = true;
+      if (lifecycle.signal.aborted) return;
+      lifecycle.abort();
       capNode.port.postMessage({ event: "stop" });
       for (const t of stream.getTracks()) t.stop();
       await ctx.close().catch(() => {});

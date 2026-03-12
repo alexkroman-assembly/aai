@@ -1,4 +1,4 @@
-import { defineAgent, fetchJSON, multiTool, z } from "@aai/sdk";
+import { defineAgent, fetchJSON, tool, z } from "@aai/sdk";
 
 function first(field: unknown): string | undefined {
   return Array.isArray(field) ? field[0] : undefined;
@@ -109,6 +109,8 @@ a healthcare provider for medical decisions.
 - If symptoms sound urgent (chest pain, difficulty breathing, sudden numbness), \
 advise calling emergency services immediately
 - Use web_search to look up current symptom information when needed
+- Use medication_lookup to get details on a single medication
+- Use check_drug_interaction to check interactions between multiple drugs
 
 Use run_code for health calculations:
 - BMI: weight_kg / (height_m * height_m). Categories: <18.5 underweight, 18.5-25 normal, 25-30 overweight, >30 obese
@@ -118,27 +120,25 @@ Use run_code for health calculations:
     "Hey, I'm Dr. Sage. Try asking me something like, what are the side effects of ibuprofen, can I take aspirin and warfarin together, or calculate my BMI. Just remember, I'm not a real doctor, so always check with your healthcare provider.",
   builtinTools: ["web_search", "run_code"],
   tools: {
-    medication: multiTool({
+    medication_lookup: tool({
       description:
-        "Look up medication info or check drug interactions. Use 'lookup' for details on a single drug, 'check_interaction' to check interactions between multiple drugs.",
-      actions: {
-        lookup: {
-          schema: z.object({
-            name: z.string().describe(
-              "Medication name (generic or brand, e.g. 'ibuprofen' or 'Advil')",
-            ),
-          }),
-          execute: ({ name }) => lookupDrug(name as string),
-        },
-        check_interaction: {
-          schema: z.object({
-            drugs: z.string().describe(
-              "Comma-separated medication names (e.g. 'ibuprofen, warfarin')",
-            ),
-          }),
-          execute: ({ drugs }) => checkInteractions(drugs as string),
-        },
-      },
+        "Look up detailed information about a single medication, including purpose, warnings, dosage, side effects, and manufacturer. Works with both generic and brand names.",
+      parameters: z.object({
+        name: z.string().describe(
+          "Medication name (generic or brand, e.g. 'ibuprofen' or 'Advil')",
+        ),
+      }),
+      execute: ({ name }) => lookupDrug(name),
+    }),
+    check_drug_interaction: tool({
+      description:
+        "Check for known interactions between two or more medications. Resolves drug names via RxNorm and returns interaction details with severity levels.",
+      parameters: z.object({
+        drugs: z.string().describe(
+          "Comma-separated medication names (e.g. 'ibuprofen, warfarin')",
+        ),
+      }),
+      execute: ({ drugs }) => checkInteractions(drugs),
     }),
   },
 });

@@ -1,6 +1,7 @@
 import { assertEquals } from "@std/assert";
 import { createOrchestrator } from "./orchestrator.ts";
 import {
+  createTestKvStore,
   createTestScopeKey,
   createTestStore,
   DUMMY_INFO,
@@ -9,7 +10,8 @@ import {
 Deno.test("orchestrator adds Cross-Origin-Isolation headers", async () => {
   using store = createTestStore();
   const scopeKey = await createTestScopeKey();
-  const handler = createOrchestrator({ store, scopeKey });
+  const kvStore = createTestKvStore();
+  const handler = createOrchestrator({ store, scopeKey, kvStore });
   const res = await handler(
     new Request("http://localhost/health"),
     DUMMY_INFO,
@@ -24,7 +26,8 @@ Deno.test("orchestrator adds Cross-Origin-Isolation headers", async () => {
 Deno.test("orchestrator returns 400 on deploy without auth", async () => {
   using store = createTestStore();
   const scopeKey = await createTestScopeKey();
-  const handler = createOrchestrator({ store, scopeKey });
+  const kvStore = createTestKvStore();
+  const handler = createOrchestrator({ store, scopeKey, kvStore });
   const res = await handler(
     new Request("http://localhost/ns/agent/deploy", { method: "POST" }),
     DUMMY_INFO,

@@ -1,6 +1,6 @@
 {
   "name": "@aai/sdk",
-  "version": "0.1.27",
+  "version": "0.1.52",
   "exports": {
     ".": "./mod.ts",
     "./types": "./types.ts",
@@ -8,8 +8,7 @@
     "./define-agent": "./define_agent.ts",
     "./fetch-json": "./fetch_json.ts",
     "./kv": "./kv.ts",
-    "./kv-tools": "./kv_tools.ts",
-    "./multi-tool": "./multi_tool.ts"
+    "./kv-tools": "./kv_tools.ts"
   },
   "imports": {
     "zod": "jsr:@zod/zod@^4.3.6"

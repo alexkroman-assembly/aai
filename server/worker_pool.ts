@@ -1,6 +1,7 @@
 import { encodeBase64 } from "@std/encoding/base64";
 import { loadPlatformConfig } from "./config.ts";
-import type { AgentConfig, ToolSchema } from "@aai/sdk/types";
+import type { AgentConfig } from "@aai/sdk/types";
+import type { ToolSchema } from "@aai/sdk/schema";
 import {
   createWorkerApi,
   type HostApi,
@@ -8,14 +9,14 @@ import {
 } from "@aai/core/worker-entry";
 import type { ExecuteTool } from "@aai/core/worker-entry";
 import type { BundleStore } from "./bundle_store_tigris.ts";
-import type { AgentMetadata } from "@aai/core/rpc-schema";
-import { createDenoWorker } from "@aai/core/deno-worker";
-import { assertPublicUrl } from "./builtin_tools.ts";
+import type { AgentMetadata } from "./_schemas.ts";
+import { createDenoWorker, LOCKED_PERMISSIONS } from "@aai/core/deno-worker";
+import { assertPublicUrl, getBuiltinToolSchemas } from "./builtin_tools.ts";
 import type { KvStore } from "./kv.ts";
 import type { AgentScope } from "./scope_token.ts";
-export type { AgentMetadata } from "@aai/core/rpc-schema";
+export type { AgentMetadata } from "./_schemas.ts";
 
-const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
+const IDLE_MS = 5 * 60 * 1000;
 
 export type AgentSlot = {
   slug: string;
@@ -24,12 +25,11 @@ export type AgentSlot = {
   config?: AgentConfig;
   name?: string;
   toolSchemas?: ToolSchema[];
-  ownerHash?: string;
+  accountId?: string;
   worker?: { handle: { terminate(): void }; api: WorkerApi };
   initializing?: Promise<void>;
-  activeSessions: number;
+  configLoaded?: boolean;
   idleTimer?: ReturnType<typeof setTimeout>;
-  _dev?: boolean;
 };
 
 async function spawnAgent(
@@ -48,26 +48,42 @@ async function spawnAgent(
   if (!code) throw new Error(`Worker code not found for ${slug}`);
   const workerUrl = `data:application/javascript;base64,${encodeBase64(code)}`;
 
-  const worker = createDenoWorker(workerUrl, slug, {
-    net: false,
-    read: false,
-    env: false,
-    run: false,
-    write: false,
-    ffi: false,
-    sys: false,
-  });
+  const worker = createDenoWorker(workerUrl, slug, LOCKED_PERMISSIONS);
 
+  let lastCrash = 0;
   worker.addEventListener(
     "error",
     ((event: ErrorEvent) => {
-      console.error("Worker error", { slug, error: event.message });
-      if (slot.worker?.handle === worker) slot.worker = undefined;
+      console.error("Worker died", { slug, error: event.message });
+      if (slot.worker?.handle !== worker) return;
+      slot.worker = undefined;
+
+      const now = Date.now();
+      if (now - lastCrash < 5_000) {
+        console.error("Worker crash loop, not respawning", { slug });
+        return;
+      }
+      lastCrash = now;
+      console.info("Respawning worker", { slug });
+      spawnAgent(slot, getWorkerCode, kvCtx).catch((err: unknown) => {
+        console.error("Worker respawn failed", {
+          slug,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
     }) as EventListener,
   );
 
   const api = createWorkerApi(worker, createHostApi(kvCtx));
   slot.worker = { handle: worker, api };
+
+  if (!slot.configLoaded) {
+    const { config, toolSchemas } = await api.getConfig();
+    slot.config = config;
+    slot.name = config.name;
+    slot.toolSchemas = toolSchemas;
+    slot.configLoaded = true;
+  }
 }
 
 function createHostApi(
@@ -100,25 +116,40 @@ function createHostApi(
       const { kvStore, scope } = kvCtx;
       switch (req.op) {
         case "get":
-          return { result: await kvStore.get(scope, req.key!) };
+          return { result: await kvStore.get(scope, req.key) };
         case "set":
-          await kvStore.set(scope, req.key!, req.value!, req.ttl);
+          await kvStore.set(scope, req.key, req.value, req.ttl);
           return { result: "OK" };
         case "del":
-          await kvStore.del(scope, req.key!);
+          await kvStore.del(scope, req.key);
           return { result: "OK" };
         case "list":
           return {
-            result: await kvStore.list(scope, req.prefix ?? "", {
+            result: await kvStore.list(scope, req.prefix, {
               limit: req.limit,
               reverse: req.reverse,
             }),
           };
         default:
-          throw new Error(`Unknown KV operation: ${req.op}`);
+          throw new Error(
+            `Unknown KV operation: ${(req as { op: string }).op}`,
+          );
       }
     },
   };
+}
+
+function resetIdleTimer(slot: AgentSlot): void {
+  if (slot.idleTimer) clearTimeout(slot.idleTimer);
+  const id = setTimeout(() => {
+    if (!slot.worker) return;
+    console.info("Evicting idle worker", { slug: slot.slug });
+    slot.worker.handle.terminate();
+    slot.worker = undefined;
+    slot.idleTimer = undefined;
+  }, IDLE_MS);
+  Deno.unrefTimer(id);
+  slot.idleTimer = id;
 }
 
 export function ensureAgent(
@@ -129,21 +160,17 @@ export function ensureAgent(
   const t0 = performance.now();
 
   if (slot.worker) {
-    console.info("Agent ready", {
-      slug: slot.slug,
-      cached: true,
-      durationMs: Math.round(performance.now() - t0),
-    });
+    resetIdleTimer(slot);
     return Promise.resolve();
   }
   if (slot.initializing) return slot.initializing;
 
   slot.initializing = spawnAgent(slot, getWorkerCode, kvCtx).then(() => {
     slot.initializing = undefined;
+    resetIdleTimer(slot);
     console.info("Agent ready", {
       slug: slot.slug,
       name: slot.name,
-      cached: false,
       durationMs: Math.round(performance.now() - t0),
     });
   }).catch((err) => {
@@ -152,32 +179,6 @@ export function ensureAgent(
   });
 
   return slot.initializing;
-}
-
-export function trackSessionOpen(slot: AgentSlot): void {
-  slot.activeSessions++;
-  if (slot.idleTimer) {
-    clearTimeout(slot.idleTimer);
-    slot.idleTimer = undefined;
-  }
-}
-
-export function trackSessionClose(
-  slot: AgentSlot,
-): void {
-  slot.activeSessions = Math.max(0, slot.activeSessions - 1);
-  if (slot.activeSessions === 0 && slot.worker) {
-    const timerId = setTimeout(() => {
-      if (slot.activeSessions === 0 && slot.worker) {
-        console.info("Evicting idle agent Worker", { slug: slot.slug });
-        slot.worker.handle.terminate();
-        slot.worker = undefined;
-        slot.idleTimer = undefined;
-      }
-    }, IDLE_TIMEOUT_MS);
-    Deno.unrefTimer(timerId);
-    slot.idleTimer = timerId;
-  }
 }
 
 export function registerSlot(
@@ -198,36 +199,52 @@ export function registerSlot(
     slug: metadata.slug,
     env: metadata.env,
     transport: metadata.transport,
-    config: metadata.config,
-    name: metadata.config?.name,
-    toolSchemas: metadata.toolSchemas,
-    ownerHash: metadata.owner_hash,
-    activeSessions: 0,
+    accountId: metadata.account_id,
   });
   return true;
 }
 
-export function createToolExecutor(
+export type SessionSetup = {
+  agentConfig: AgentConfig;
+  toolSchemas: ToolSchema[];
+  platformConfig: ReturnType<typeof loadPlatformConfig>;
+  executeTool: ExecuteTool;
+  getWorkerApi: () => Promise<WorkerApi>;
+  env?: Record<string, string | undefined>;
+};
+
+export async function prepareSession(
   slot: AgentSlot,
+  slug: string,
   store: BundleStore,
-  kvCtx?: { kvStore: KvStore; scope: AgentScope },
-): { executeTool: ExecuteTool; getWorkerApi?: () => Promise<WorkerApi> } {
-  const customTools = slot.toolSchemas ?? [];
+  kvStore: KvStore,
+): Promise<SessionSetup> {
+  const kvCtx = slot.accountId
+    ? { kvStore, scope: { accountId: slot.accountId, slug } }
+    : undefined;
   const getWorkerCode = (s: string) => store.getFile(s, "worker");
-  if (customTools.length === 0) {
-    return {
-      executeTool: () => Promise.resolve("Error: No custom tools"),
-    };
-  }
   const getWorkerApi = async () => {
     await ensureAgent(slot, getWorkerCode, kvCtx);
     return slot.worker!.api;
   };
+  const executeTool: ExecuteTool = async (name, args, sessionId, messages) => {
+    const api = await getWorkerApi();
+    return api.executeTool(name, args, sessionId, 30_000, slot.env, messages);
+  };
+
+  // Boot worker and extract config from agent definition
+  await getWorkerApi();
+  const config = slot.config!;
+
+  const builtinTools = getBuiltinToolSchemas(config.builtinTools ?? []);
+  const toolSchemas = [...(slot.toolSchemas ?? []), ...builtinTools];
+
   return {
-    executeTool: async (name, args, sessionId) => {
-      const api = await getWorkerApi();
-      return api.executeTool(name, args, sessionId, 30_000, slot.env);
-    },
+    agentConfig: config,
+    toolSchemas,
+    platformConfig: loadPlatformConfig(slot.env),
+    executeTool,
     getWorkerApi,
+    env: slot.env,
   };
 }

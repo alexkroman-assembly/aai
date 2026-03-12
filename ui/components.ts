@@ -26,7 +26,7 @@ export const ErrorBanner: (
 ) => preact.JSX.Element | null = _ErrorBanner;
 
 export const MessageBubble: (
-  props: { key?: unknown; message: Message },
+  props: { message: Message },
 ) => preact.JSX.Element = _MessageBubble;
 
 export const Transcript: (

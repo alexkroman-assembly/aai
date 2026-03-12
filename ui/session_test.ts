@@ -183,7 +183,7 @@ Deno.test("VoiceSession", async (t) => {
       withSessionEnv(async (mock) => {
         // deno-lint-ignore no-explicit-any
         const g = globalThis as any;
-        g.__AAI_WS__ = "ws";
+        g.__AAI_WS__ = "/ns/agent/ws";
         try {
           const { session, ws } = await connectSession(mock, {
             platformUrl: "https://example.com/ns/agent",

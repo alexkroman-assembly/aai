@@ -18,7 +18,7 @@ export default defineAgent({
 });
 ```
 
-Run it: `aai dev`
+Run it: `aai deploy`
 
 ## Imports
 
@@ -40,9 +40,6 @@ import { defineAgent, fetchJSON, z } from "@aai/sdk";
 // For persistent memory helpers
 import { defineAgent, kvTools } from "@aai/sdk";
 
-// For multi-action tools
-import { defineAgent, multiTool, z } from "@aai/sdk";
-
 // Type imports (when you need explicit type annotations)
 import type { HookContext, ToolContext } from "@aai/sdk";
 ```
@@ -57,7 +54,9 @@ defineAgent({
   instructions?: string;     // System prompt (sensible voice-first default provided)
   greeting?: string;         // Spoken on connect
   voice?: Voice;             // Rime TTS voice (default: "luna")
-  prompt?: string;           // TTS voice guidance — controls pacing, tone, emotion
+  sttPrompt?: string;        // STT guidance (jargon, names)
+  maxSteps?: number | ((ctx: HookContext) => number);
+  toolChoice?: ToolChoice;   // "auto" | "required" | "none"
   transport?: Transport[];   // "websocket" | "twilio" (default: ["websocket"])
   env?: string[];            // Env var names to load (default: ["ASSEMBLYAI_API_KEY"])
   builtinTools?: BuiltinTool[];
@@ -67,6 +66,9 @@ defineAgent({
   onDisconnect?: (ctx: HookContext) => void | Promise<void>;
   onError?: (error: Error, ctx?: HookContext) => void;
   onTurn?: (text: string, ctx: HookContext) => void | Promise<void>;
+  onStep?: (step: StepInfo, ctx: HookContext) => void | Promise<void>;
+  onBeforeStep?: (stepNumber: number, ctx: HookContext) =>
+    { activeTools?: string[] } | void;
 });
 ```
 
@@ -112,15 +114,11 @@ tools: {
       param: z.string().describe("What this param is"),
     }),
     execute: async (args, ctx) => {
-      const { param } = args as { param: string };
-      return { result: param };
+      return { result: args.param };
     },
   },
 },
 ```
-
-With this approach, `args` is `Record<string, unknown>` — use `args as { ... }`
-to destructure with type safety.
 
 ### No-parameter tools
 
@@ -146,53 +144,6 @@ parameters: z.object({
 }),
 ```
 
-### `multiTool()` — one tool, many actions
-
-Replaces manual switch-case patterns. Automatically generates a `z.enum` for the
-`action` parameter and merges all action schemas:
-
-```ts
-import { defineAgent, multiTool, z } from "@aai/sdk";
-import type { ToolContext } from "@aai/sdk";
-
-type GameState = { score: number; room: string; items: string[] };
-
-export default defineAgent({
-  name: "Adventure",
-  state: (): GameState => ({ score: 0, room: "start", items: [] }),
-  tools: {
-    game: multiTool({
-      description: "Manage game state: get, move, take.",
-      actions: {
-        get: {
-          execute: (_args: Record<string, unknown>, ctx: ToolContext) => {
-            return ctx.state as GameState;
-          },
-        },
-        move: {
-          schema: z.object({ room: z.string() }),
-          execute: (args: Record<string, unknown>, ctx: ToolContext) => {
-            const s = ctx.state as GameState;
-            s.room = args.room as string;
-            return { room: s.room };
-          },
-        },
-        take: {
-          schema: z.object({ item: z.string() }),
-          execute: (args: Record<string, unknown>, ctx: ToolContext) => {
-            const s = ctx.state as GameState;
-            s.items.push(args.item as string);
-            return { items: s.items };
-          },
-        },
-      },
-    }),
-  },
-});
-```
-
----
-
 ## Tool context
 
 Every `execute` function and lifecycle hook receives a context object:
@@ -201,11 +152,107 @@ Every `execute` function and lifecycle hook receives a context object:
 // Tools get ToolContext
 ctx.sessionId; // string — unique per connection
 ctx.env; // Record<string, string> — env vars from .env
-ctx.signal; // AbortSignal — cancelled on interruption (tools only)
+ctx.abortSignal; // AbortSignal — cancelled on interruption (tools only)
 ctx.state; // per-session state (see "Per-session state")
 ctx.kv; // persistent KV store (see "Persistent storage")
+ctx.messages; // readonly Message[] — conversation history
 
-// Hooks get HookContext (same minus signal)
+// Hooks get HookContext (same minus signal and messages)
+```
+
+---
+
+## Tool choice
+
+Control how the LLM selects tools. Default is `"auto"`:
+
+```ts
+export default defineAgent({
+  name: "Strict Tool Agent",
+  toolChoice: "required", // Force the LLM to always call a tool
+  // Options: "auto" (default), "none",
+  // { type: "tool", toolName: "my_tool" }
+});
+```
+
+---
+
+## Step hooks
+
+### `onStep` — after each tool step
+
+Called after each LLM step completes. Use for logging, analytics, or updating
+state based on what tools were called:
+
+```ts
+export default defineAgent({
+  name: "Logged Agent",
+  onStep: (step, ctx) => {
+    console.log(`Step ${step.stepNumber}: ${step.toolCalls.length} tool calls`);
+    for (const tc of step.toolCalls) {
+      console.log(`  - ${tc.toolName}`);
+    }
+  },
+});
+```
+
+### `onBeforeStep` — dynamic tool filtering
+
+Called before each LLM step. Return `{ activeTools: [...] }` to limit which
+tools the LLM can use on this step. Useful for workflows where tools should only
+be available at certain stages:
+
+```ts
+export default defineAgent({
+  name: "Workflow Agent",
+  state: () => ({ phase: "gather" }),
+  onBeforeStep: (stepNumber, ctx) => {
+    const state = ctx.state as { phase: string };
+    if (state.phase === "gather") {
+      return { activeTools: ["search", "lookup", "final_answer"] };
+    }
+    return { activeTools: ["summarize", "final_answer"] };
+  },
+});
+```
+
+---
+
+## Dynamic `maxSteps`
+
+`maxSteps` can be a function that returns the max steps based on session state:
+
+```ts
+export default defineAgent({
+  name: "Adaptive Agent",
+  state: () => ({ complexity: "simple" }),
+  maxSteps: (ctx) => {
+    const state = ctx.state as { complexity: string };
+    return state.complexity === "complex" ? 10 : 5;
+  },
+});
+```
+
+---
+
+## Conversation history in tools
+
+Tools receive the conversation history via `ctx.messages`. Each message has
+`role` ("user", "assistant", or "tool") and `content` (string):
+
+```ts
+tools: {
+  summarize_conversation: tool({
+    description: "Summarize the conversation so far",
+    execute: (args, ctx) => {
+      const userMessages = ctx.messages.filter(m => m.role === "user");
+      return {
+        messageCount: ctx.messages.length,
+        userTurns: userMessages.length,
+      };
+    },
+  }),
+},
 ```
 
 ---
@@ -226,7 +273,8 @@ Enable built-in tools via the `builtinTools` array. `user_input` and
 - **`final_answer`** — Deliver spoken response via TTS (auto-included). Params:
   `answer`
 
-The framework forces `final_answer` after 4 tool iterations.
+The framework forces `final_answer` after `maxSteps - 1` tool iterations
+(default: 4).
 
 ---
 
@@ -403,15 +451,15 @@ type Voice =
   | string; // any Rime speaker ID — https://docs.rime.ai/api-reference/voices
 ```
 
-### TTS voice guidance (`prompt`)
+### STT transcription guidance (`sttPrompt`)
 
-Controls how the voice speaks — pacing, tone, emotion. Does not affect what the
-LLM says:
+Helps the speech-to-text engine with domain-specific vocabulary — proper nouns,
+acronyms, jargon:
 
 ```ts
 export default defineAgent({
   voice: "orion",
-  prompt: "Speak in a dramatic, atmospheric tone. Use pauses for suspense.",
+  sttPrompt: "Transcribe technical terms: Kubernetes, gRPC, PostgreSQL",
 });
 ```
 
@@ -566,7 +614,6 @@ export default defineAgent({
 ## CLI commands
 
 ```sh
-aai dev          # Local dev server with file watching
 aai deploy       # Bundle and deploy to production
 aai deploy --dry-run  # Validate and bundle without deploying
 aai new          # Scaffold a new agent project
@@ -578,26 +625,16 @@ Install: `curl -fsSL https://aai-agent.fly.dev/install | sh`
 
 ## Build validation
 
-`aai dev` and `aai deploy` validate before bundling:
+`aai deploy` bundles and deploys your agent:
 
-1. Checks for a default export from `defineAgent()`
-2. Validates `name` is a non-empty string
-3. For each custom tool: verifies `description`, validates Zod schema with
-   sample args, test-runs `execute()` (execution errors are OK — schema validity
-   is what matters)
-4. Bundles with esbuild
+1. Bundles agent code with esbuild (static compilation only — agent code is
+   never imported or executed by the CLI)
+2. Deploys the bundled JS to the server, where it runs inside a sandboxed Deno
+   Worker with all permissions denied
 
 ---
 
 ## Troubleshooting
 
-- **"missing default export"** — Use `export default defineAgent({...})`
-- **"missing env vars required by agent: X"** — Add to `.env` or remove from
-  `env` array
-- **"schema validation failed with sample args"** — Check `.min()`, `.regex()`,
-  `.refine()` validators
+- **"no agent found"** — Ensure `agent.ts` exists in the current directory
 - **"bundle failed"** — TypeScript syntax error — check imports, brackets
-- **Tool test shows "✗"** — `execute` threw with sample args — may be expected
-  if tool needs real data
-- **Dev server shows error but still running** — Previous working version still
-  serves — fix and save

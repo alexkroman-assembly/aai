@@ -1,4 +1,4 @@
-import { defineAgent, z } from "@aai/sdk";
+import { defineAgent, tool, z } from "@aai/sdk";
 
 const PICKS: Record<string, Record<string, string[]>> = {
   movie: {
@@ -76,11 +76,11 @@ Use run_code for sleep calculations:
 - Format as HH:MM`,
   greeting:
     "Hey there, night owl. Try asking me for a cozy movie recommendation, or tell me what time you need to wake up and I'll calculate the best time to fall asleep.",
-  prompt:
+  sttPrompt:
     "Transcribe movie titles, music artists, book names, and times accurately. Listen for genres like horror, comedy, sci-fi, jazz, ambient, and mood words like chill, intense, cozy, spooky.",
   builtinTools: ["run_code"],
   tools: {
-    recommend: {
+    recommend: tool({
       description:
         "Get recommendations for movies, music, or books based on mood.",
       parameters: z.object({
@@ -91,9 +91,9 @@ Use run_code for sleep calculations:
         return {
           category,
           mood,
-          picks: PICKS[category as string]?.[mood as string] ?? [],
+          picks: PICKS[category]?.[mood] ?? [],
         };
       },
-    },
+    }),
   },
 });

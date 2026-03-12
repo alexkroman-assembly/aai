@@ -1,14 +1,31 @@
 import { z } from "zod";
-import type { BuiltinTool, ToolSchema, Transport } from "./_schema.ts";
+import type {
+  AgentMode,
+  BuiltinTool,
+  ToolChoice,
+  ToolSchema,
+  Transport,
+} from "./_schema.ts";
 import type { Kv } from "./kv.ts";
-export type { AgentConfig, BuiltinTool, ToolSchema } from "./_schema.ts";
+export type {
+  AgentConfig,
+  AgentMode,
+  BuiltinTool,
+  ToolChoice,
+} from "./_schema.ts";
+
+export type Message = {
+  role: "user" | "assistant" | "tool";
+  content: string;
+};
 
 export type ToolContext<S = Record<string, unknown>> = {
   sessionId: string;
   env: Record<string, string>;
-  signal?: AbortSignal;
+  abortSignal?: AbortSignal;
   state: S;
   kv: Kv;
+  messages: readonly Message[];
 };
 
 export type HookContext<S = Record<string, unknown>> = {
@@ -18,11 +35,12 @@ export type HookContext<S = Record<string, unknown>> = {
   kv: Kv;
 };
 
-export type ToolDef = {
+// deno-lint-ignore no-explicit-any
+export type ToolDef<P extends z.ZodObject<z.ZodRawShape> = any> = {
   description: string;
-  parameters?: z.ZodObject<z.ZodRawShape>;
+  parameters?: P;
   execute: (
-    args: Record<string, unknown>,
+    args: z.infer<P>,
     ctx: ToolContext,
   ) => Promise<unknown> | unknown;
 };
@@ -35,36 +53,17 @@ export function tool<P extends z.ZodObject<z.ZodRawShape>>(def: {
     args: z.infer<P>,
     ctx: ToolContext,
   ) => Promise<unknown> | unknown;
-}): ToolDef;
+}): ToolDef<P>;
 export function tool(def: {
   description: string;
   execute: (
-    args: Record<string, unknown>,
+    // deno-lint-ignore no-explicit-any
+    args: any,
     ctx: ToolContext,
   ) => Promise<unknown> | unknown;
 }): ToolDef;
 export function tool(def: ToolDef): ToolDef {
   return def;
-}
-
-export type ToolTuple =
-  | [
-    description: string,
-    schema: z.ZodObject<z.ZodRawShape>,
-    execute: ToolDef["execute"],
-  ]
-  | [description: string, execute: ToolDef["execute"]];
-
-export type ToolInput = ToolDef | ToolTuple;
-
-export function normalizeToolDef(input: ToolInput): ToolDef {
-  if (Array.isArray(input)) {
-    if (input.length === 3) {
-      return { description: input[0], parameters: input[1], execute: input[2] };
-    }
-    return { description: input[0], execute: input[1] };
-  }
-  return input;
 }
 
 export type Voice =
@@ -88,22 +87,39 @@ export type Voice =
   | "arcana"
   | (string & Record<never, never>);
 
+export type StepInfo = {
+  stepNumber: number;
+  toolCalls: { toolName: string; args: Record<string, unknown> }[];
+  text: string;
+};
+
 // deno-lint-ignore no-explicit-any
 export type AgentOptions<S = any> = {
   name: string;
+  mode?: AgentMode;
   env?: string[];
   transport?: Transport | Transport[];
   instructions?: string;
   greeting?: string;
   voice?: Voice;
-  prompt?: string;
+  sttPrompt?: string;
+  maxSteps?: number | ((ctx: HookContext<S>) => number);
+  toolChoice?: ToolChoice;
   builtinTools?: BuiltinTool[];
-  tools?: Record<string, ToolInput>;
+  tools?: Record<string, ToolDef>;
   state?: () => S;
   onConnect?: (ctx: HookContext<S>) => void | Promise<void>;
   onDisconnect?: (ctx: HookContext<S>) => void | Promise<void>;
   onError?: (error: Error, ctx?: HookContext<S>) => void;
   onTurn?: (text: string, ctx: HookContext<S>) => void | Promise<void>;
+  onStep?: (step: StepInfo, ctx: HookContext<S>) => void | Promise<void>;
+  onBeforeStep?: (
+    stepNumber: number,
+    ctx: HookContext<S>,
+  ) =>
+    | { activeTools?: string[] }
+    | void
+    | Promise<{ activeTools?: string[] } | void>;
 };
 
 export const DEFAULT_INSTRUCTIONS: string = `\
@@ -134,18 +150,23 @@ export function agentToolsToSchemas(
   return Object.entries(tools).map(([name, def]) => ({
     name,
     description: def.description,
-    parameters: z.toJSONSchema(def.parameters ?? EMPTY_PARAMS),
+    parameters: z.toJSONSchema(
+      def.parameters ?? EMPTY_PARAMS,
+    ) as ToolSchema["parameters"],
   }));
 }
 
 export type AgentDef = {
   readonly name: string;
+  readonly mode: AgentMode;
   readonly env: readonly string[];
   readonly transport: readonly Transport[];
   readonly instructions: string;
   readonly greeting: string;
   readonly voice: string;
-  readonly prompt?: string;
+  readonly sttPrompt?: string;
+  readonly maxSteps: number | ((ctx: HookContext) => number);
+  readonly toolChoice?: ToolChoice;
   readonly builtinTools?: readonly BuiltinTool[];
   readonly tools: Readonly<Record<string, ToolDef>>;
   readonly state?: () => unknown;
@@ -153,4 +174,6 @@ export type AgentDef = {
   readonly onDisconnect?: AgentOptions["onDisconnect"];
   readonly onError?: AgentOptions["onError"];
   readonly onTurn?: AgentOptions["onTurn"];
+  readonly onStep?: AgentOptions["onStep"];
+  readonly onBeforeStep?: AgentOptions["onBeforeStep"];
 };

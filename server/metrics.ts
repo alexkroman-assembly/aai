@@ -57,8 +57,19 @@ function resolve(
 
 // --- Metric types ---
 
-export type Counter = {
+type Counter = {
   inc(labels?: Labels, n?: number): void;
+  serialize(agent?: string): string;
+};
+
+type Gauge = {
+  inc(labels?: Labels): void;
+  dec(labels?: Labels): void;
+  serialize(agent?: string): string;
+};
+
+type Histogram = {
+  observe(value: number, labels?: Labels): void;
   serialize(agent?: string): string;
 };
 
@@ -87,12 +98,6 @@ export function createCounter(
     },
   };
 }
-
-export type Gauge = {
-  inc(labels?: Labels): void;
-  dec(labels?: Labels): void;
-  serialize(agent?: string): string;
-};
 
 export function createGauge(
   name: string,
@@ -126,11 +131,6 @@ export function createGauge(
 }
 
 type HistogramEntry = { counts: number[]; sum: number; count: number };
-
-export type Histogram = {
-  observe(value: number, labels?: Labels): void;
-  serialize(agent?: string): string;
-};
 
 export function createHistogram(
   name: string,
@@ -213,11 +213,6 @@ export const turnDuration = createHistogram(
   ["agent"],
 );
 
-export const llmDuration = createHistogram(
-  "aai_llm_duration_seconds",
-  "LLM API call duration in seconds",
-);
-
 export const ttsDuration = createHistogram(
   "aai_tts_duration_seconds",
   "TTS synthesis duration in seconds",
@@ -249,7 +244,6 @@ const agentMetrics: Metric[] = [
 
 const allMetrics: Metric[] = [
   ...agentMetrics,
-  llmDuration,
   ttsDuration,
   sttConnectDuration,
 ];

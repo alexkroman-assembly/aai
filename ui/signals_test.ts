@@ -3,49 +3,11 @@ import { render } from "preact";
 import {
   flush,
   getContainer,
-  installMockLocation,
-  installMockWebSocket,
   setupDOM,
+  withSignalsEnv,
 } from "./_test_utils.ts";
-import { createSessionControls, useSession } from "./signals.ts";
-import { createVoiceSession, type VoiceSession } from "./session.ts";
+import { useSession } from "./signals.ts";
 import { html } from "./_html.ts";
-
-function withSignalsEnv(
-  fn: (ctx: {
-    mock: ReturnType<typeof installMockWebSocket>;
-    session: VoiceSession;
-    signals: ReturnType<typeof createSessionControls>;
-    connect: () => Promise<void>;
-    send: (msg: Record<string, unknown>) => void;
-  }) => void | Promise<void>,
-) {
-  return async () => {
-    const mock = installMockWebSocket();
-    const loc = installMockLocation();
-    const session = createVoiceSession({
-      platformUrl: "http://localhost:3000",
-    });
-    const signals = createSessionControls(session);
-    try {
-      await fn({
-        mock,
-        session,
-        signals,
-        async connect() {
-          session.connect();
-          await flush();
-        },
-        send(msg) {
-          mock.lastWs!.simulateMessage(JSON.stringify(msg));
-        },
-      });
-    } finally {
-      mock.restore();
-      loc.restore();
-    }
-  };
-}
 
 Deno.test("createSessionControls", async (t) => {
   await t.step(

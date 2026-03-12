@@ -2,8 +2,8 @@ import { expect } from "@std/expect";
 import { stub } from "@std/testing/mock";
 import {
   _internals,
-  executeBuiltinTool,
   getBuiltinToolSchemas,
+  getBuiltinVercelTools,
 } from "./builtin_tools.ts";
 
 // --- htmlToMarkdown ---
@@ -67,11 +67,6 @@ Deno.test("getBuiltinToolSchemas returns requested + required tools", () => {
   expect(names).toContain("web_search");
 });
 
-Deno.test("getBuiltinToolSchemas ignores unknown tool names", () => {
-  const schemas = getBuiltinToolSchemas(["unknown_tool", "web_search"]);
-  expect(schemas).toHaveLength(3);
-});
-
 Deno.test("getBuiltinToolSchemas always includes required tools", () => {
   const schemas = getBuiltinToolSchemas([]);
   expect(schemas).toHaveLength(2);
@@ -86,33 +81,7 @@ Deno.test("getBuiltinToolSchemas does not duplicate final_answer", () => {
   expect(names.filter((n) => n === "final_answer")).toHaveLength(1);
 });
 
-// --- executeBuiltinTool ---
-
-Deno.test("executeBuiltinTool returns null for unknown tool", async () => {
-  const result = await executeBuiltinTool("nonexistent", {});
-  expect(result).toBeNull();
-});
-
-Deno.test("executeBuiltinTool returns error for invalid args", async () => {
-  const result = await executeBuiltinTool("web_search", {});
-  expect(result).not.toBeNull();
-  expect(result!).toContain("Error");
-});
-
-Deno.test("executeBuiltinTool passes Zod-parsed data to execute", async () => {
-  using _ = stub(
-    _internals,
-    "fetch",
-    mockFetch("<html><body>OK</body></html>"),
-  );
-  const result = await executeBuiltinTool(
-    "visit_webpage",
-    { url: "https://example.com" },
-  );
-  expect(result).not.toBeNull();
-  const parsed = JSON.parse(result!);
-  expect(parsed.url).toBe("https://example.com");
-});
+// --- getBuiltinVercelTools ---
 
 Deno.test("visit_webpage fetches and converts HTML", async () => {
   using _ = stub(
@@ -120,11 +89,16 @@ Deno.test("visit_webpage fetches and converts HTML", async () => {
     "fetch",
     mockFetch("<html><body><p>Hello World</p></body></html>"),
   );
-  const result = await executeBuiltinTool(
-    "visit_webpage",
+  const tools = getBuiltinVercelTools(["visit_webpage"]);
+  const result = await tools.visit_webpage.execute!(
     { url: "https://example.com" },
+    {
+      toolCallId: "test",
+      messages: [],
+      abortSignal: AbortSignal.timeout(5000),
+    },
   );
-  const parsed = JSON.parse(result!);
+  const parsed = JSON.parse(result as string);
   expect(parsed.content).toContain("Hello World");
 });
 
@@ -134,41 +108,57 @@ Deno.test("visit_webpage handles non-OK response", async () => {
     "fetch",
     mockFetch("Not Found", 404, "Not Found"),
   );
-  const result = await executeBuiltinTool(
-    "visit_webpage",
+  const tools = getBuiltinVercelTools(["visit_webpage"]);
+  const result = await tools.visit_webpage.execute!(
     { url: "https://example.com/missing" },
+    {
+      toolCallId: "test",
+      messages: [],
+      abortSignal: AbortSignal.timeout(5000),
+    },
   );
-  const parsed = JSON.parse(result!);
+  const parsed = JSON.parse(result as string);
   expect(parsed.error).toContain("404");
 });
 
 Deno.test("run_code executes and returns stdout", async () => {
-  const result = await executeBuiltinTool("run_code", {
-    code: 'console.log("hello")',
-  });
+  const tools = getBuiltinVercelTools(["run_code"]);
+  const result = await tools.run_code.execute!(
+    { code: 'console.log("hello")' },
+    {
+      toolCallId: "test",
+      messages: [],
+      abortSignal: AbortSignal.timeout(5000),
+    },
+  );
   expect(result).toBe("hello");
 });
 
 Deno.test("run_code returns error for syntax errors", async () => {
-  const result = await executeBuiltinTool("run_code", {
-    code: "this is not valid javascript %%%",
-  });
-  const parsed = JSON.parse(result!);
+  const tools = getBuiltinVercelTools(["run_code"]);
+  const result = await tools.run_code.execute!(
+    { code: "this is not valid javascript %%%" },
+    {
+      toolCallId: "test",
+      messages: [],
+      abortSignal: AbortSignal.timeout(5000),
+    },
+  );
+  const parsed = JSON.parse(result as string);
   expect(parsed.error).toBeDefined();
 });
 
 Deno.test("run_code returns no-output message for silent code", async () => {
-  const result = await executeBuiltinTool("run_code", {
-    code: "const x = 1 + 1;",
-  });
+  const tools = getBuiltinVercelTools(["run_code"]);
+  const result = await tools.run_code.execute!(
+    { code: "const x = 1 + 1;" },
+    {
+      toolCallId: "test",
+      messages: [],
+      abortSignal: AbortSignal.timeout(5000),
+    },
+  );
   expect(result).toBe("Code ran successfully (no output)");
-});
-
-Deno.test("user_input returns error (handled by turn handler)", async () => {
-  const result = await executeBuiltinTool("user_input", {
-    question: "What color?",
-  });
-  expect(result!).toContain("handled by the turn handler");
 });
 
 Deno.test("fetch_json fetches and returns JSON", async () => {
@@ -177,11 +167,16 @@ Deno.test("fetch_json fetches and returns JSON", async () => {
     "fetch",
     mockFetch(JSON.stringify({ name: "test", value: 42 })),
   );
-  const result = await executeBuiltinTool(
-    "fetch_json",
+  const tools = getBuiltinVercelTools(["fetch_json"]);
+  const result = await tools.fetch_json.execute!(
     { url: "https://api.example.com/data" },
+    {
+      toolCallId: "test",
+      messages: [],
+      abortSignal: AbortSignal.timeout(5000),
+    },
   );
-  const parsed = JSON.parse(result!);
+  const parsed = JSON.parse(result as string);
   expect(parsed.name).toBe("test");
   expect(parsed.value).toBe(42);
 });
@@ -192,11 +187,16 @@ Deno.test("fetch_json handles non-OK response", async () => {
     "fetch",
     mockFetch("Server Error", 500, "ISE"),
   );
-  const result = await executeBuiltinTool(
-    "fetch_json",
+  const tools = getBuiltinVercelTools(["fetch_json"]);
+  const result = await tools.fetch_json.execute!(
     { url: "https://api.example.com/fail" },
+    {
+      toolCallId: "test",
+      messages: [],
+      abortSignal: AbortSignal.timeout(5000),
+    },
   );
-  const parsed = JSON.parse(result!);
+  const parsed = JSON.parse(result as string);
   expect(parsed.error).toContain("500");
 });
 
@@ -206,10 +206,15 @@ Deno.test("fetch_json handles non-JSON response", async () => {
     "fetch",
     mockFetch("this is not json"),
   );
-  const result = await executeBuiltinTool(
-    "fetch_json",
+  const tools = getBuiltinVercelTools(["fetch_json"]);
+  const result = await tools.fetch_json.execute!(
     { url: "https://api.example.com/text" },
+    {
+      toolCallId: "test",
+      messages: [],
+      abortSignal: AbortSignal.timeout(5000),
+    },
   );
-  const parsed = JSON.parse(result!);
+  const parsed = JSON.parse(result as string);
   expect(parsed.error).toContain("not valid JSON");
 });

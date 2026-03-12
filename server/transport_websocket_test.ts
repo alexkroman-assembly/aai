@@ -1,27 +1,7 @@
 import { expect } from "@std/expect";
 import { discoverSlot, resolveSlot } from "./transport_websocket.ts";
 import type { AgentSlot } from "./worker_pool.ts";
-import { createTestStore } from "./_test_utils.ts";
-
-const VALID_ENV = { ASSEMBLYAI_API_KEY: "test-key" };
-
-function makeSlot(overrides?: Partial<AgentSlot>): AgentSlot {
-  return {
-    slug: "ns/test-agent",
-    env: VALID_ENV,
-    transport: ["websocket"],
-    config: {
-      name: "Test Agent",
-      instructions: "test",
-      greeting: "hello",
-      voice: "luna",
-    },
-    name: "Test Agent",
-    toolSchemas: [],
-    activeSessions: 0,
-    ...overrides,
-  };
-}
+import { createTestStore, makeSlot, VALID_ENV } from "./_test_utils.ts";
 
 // --- discoverSlot ---
 
@@ -48,11 +28,6 @@ Deno.test("discoverSlot lazy-loads from store", async () => {
     transport: ["websocket"],
     worker: "console.log('w');",
     client: "console.log('c');",
-    config: {
-      instructions: "test",
-      greeting: "hello",
-      voice: "luna",
-    },
   });
   const result = await discoverSlot("ns/stored-agent", slots, store);
   expect(result).not.toBe(null);

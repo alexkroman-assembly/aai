@@ -23,5 +23,5 @@ Deno.test("renderAgentPage escapes basePath in __AAI_BASE__", () => {
 
 Deno.test("renderAgentPage injects __AAI_WS__ path", () => {
   const html = renderAgentPage("Test", "/ns/agent");
-  expect(html).toContain('window.__AAI_WS__="websocket"');
+  expect(html).toContain('window.__AAI_WS__="/ns/agent/websocket"');
 });

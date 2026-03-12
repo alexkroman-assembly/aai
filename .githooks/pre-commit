@@ -10,8 +10,5 @@ fi
 echo "Auto-bumping versions for changed packages..."
 deno task bump
 
-echo "Updating CLI snapshots after version bump..."
-deno test --allow-all --unstable-worker-options cli/cli_test.ts -- --update && git add cli/__snapshots__/
-
 echo "Running checks before commit..."
 deno task check

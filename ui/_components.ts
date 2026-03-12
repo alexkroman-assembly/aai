@@ -6,34 +6,192 @@ import type { AgentState, Message, SessionError } from "./types.ts";
 import { useSession } from "./signals.ts";
 import { html } from "./_html.ts";
 
+// --- Static styles (allocated once, shared across renders) ---
+
+const styles = {
+  stateRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    marginBottom: "16px",
+    flexShrink: 0,
+  },
+  stateDot: {
+    width: "12px",
+    height: "12px",
+    borderRadius: "50%",
+  },
+  stateLabel: {
+    fontSize: "14px",
+    color: "var(--aai-text-muted)",
+    textTransform: "capitalize",
+  },
+  errorBanner: {
+    background: "var(--aai-surface)",
+    color: "var(--aai-error)",
+    padding: "10px 14px",
+    borderRadius: "var(--aai-radius)",
+    marginBottom: "16px",
+    fontSize: "14px",
+  },
+  bubbleWrap: { marginBottom: "12px" },
+  bubble: {
+    display: "inline-block",
+    maxWidth: "80%",
+    padding: "8px 12px",
+    borderRadius: "var(--aai-radius)",
+    textAlign: "left",
+    fontSize: "14px",
+  },
+  transcriptWrap: { marginBottom: "12px", textAlign: "right" },
+  transcriptBubble: {
+    display: "inline-block",
+    maxWidth: "80%",
+    padding: "8px 12px",
+    borderRadius: "var(--aai-radius)",
+    textAlign: "left",
+    fontSize: "14px",
+    background: "var(--aai-surface-light)",
+    opacity: 0.6,
+  },
+  thinkingRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "4px",
+    padding: "8px 12px",
+    marginBottom: "12px",
+  },
+  messageList: {
+    flex: 1,
+    minHeight: "200px",
+    overflowY: "auto",
+    marginBottom: "16px",
+    border: "1px solid var(--aai-surface-light)",
+    borderRadius: "var(--aai-radius)",
+    padding: "16px",
+    WebkitOverflowScrolling: "touch",
+  },
+  controlsRow: {
+    display: "flex",
+    gap: "8px",
+    flexShrink: 0,
+    paddingBottom: "env(safe-area-inset-bottom, 0)",
+  },
+  baseBtn: {
+    flex: 1,
+    padding: "12px 16px",
+    border: "none",
+    borderRadius: "var(--aai-radius)",
+    cursor: "pointer",
+    fontSize: "15px",
+    color: "var(--aai-text)",
+    WebkitTapHighlightColor: "transparent",
+  },
+  secondaryBtn: {
+    flex: 1,
+    padding: "12px 16px",
+    border: "1px solid var(--aai-surface-light)",
+    borderRadius: "var(--aai-radius)",
+    cursor: "pointer",
+    fontSize: "15px",
+    background: "transparent",
+    color: "var(--aai-text-muted)",
+    WebkitTapHighlightColor: "transparent",
+  },
+  page: {
+    fontFamily: "var(--aai-font)",
+    maxWidth: "600px",
+    margin: "0 auto",
+    padding: "20px",
+    color: "var(--aai-text)",
+    minHeight: "100vh",
+    boxSizing: "border-box",
+  },
+  chatPage: {
+    fontFamily: "var(--aai-font)",
+    maxWidth: "600px",
+    margin: "0 auto",
+    padding: "20px",
+    color: "var(--aai-text)",
+    minHeight: "100vh",
+    boxSizing: "border-box",
+    display: "flex",
+    flexDirection: "column",
+  },
+  startPage: {
+    fontFamily: "var(--aai-font)",
+    maxWidth: "600px",
+    margin: "0 auto",
+    padding: "20px",
+    color: "var(--aai-text)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: "100vh",
+  },
+  startBtn: {
+    padding: "18px 40px",
+    border: "none",
+    borderRadius: "var(--aai-radius)",
+    background: "var(--aai-primary)",
+    color: "var(--aai-text)",
+    fontSize: "18px",
+    fontWeight: 500,
+    cursor: "pointer",
+    WebkitTapHighlightColor: "transparent",
+  },
+} as const;
+
+// --- Bounce animation (injected once into document) ---
+
 const BOUNCE_CSS = `
 @keyframes aai-bounce {
   0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
   40% { opacity: 1; transform: scale(1); }
 }`;
 
+let bounceInjected = false;
+function ensureBounceCSS(): void {
+  if (bounceInjected) return;
+  bounceInjected = true;
+  const style = document.createElement("style");
+  style.textContent = BOUNCE_CSS;
+  document.head.appendChild(style);
+}
+
+const dotStyles = [
+  {
+    ...styles.stateDot,
+    background: "var(--aai-text-muted)",
+    animation: "aai-bounce 1.4s infinite ease-in-out both",
+    animationDelay: "0s",
+  },
+  {
+    ...styles.stateDot,
+    background: "var(--aai-text-muted)",
+    animation: "aai-bounce 1.4s infinite ease-in-out both",
+    animationDelay: "0.16s",
+  },
+  {
+    ...styles.stateDot,
+    background: "var(--aai-text-muted)",
+    animation: "aai-bounce 1.4s infinite ease-in-out both",
+    animationDelay: "0.32s",
+  },
+];
+
+// --- Components ---
+
 export function StateIndicator(
   { state }: { state: Signal<AgentState> },
 ): preact.JSX.Element {
   return html`
-    <div style="${{
-      display: "flex",
-      alignItems: "center",
-      gap: "8px",
-      marginBottom: "16px",
-      flexShrink: 0,
-    }}">
+    <div style="${styles.stateRow}">
       <div style="${{
-        width: "12px",
-        height: "12px",
-        borderRadius: "50%",
+        ...styles.stateDot,
         background: `var(--aai-state-${state.value})`,
       }}" />
-      <span style="${{
-        fontSize: "14px",
-        color: "var(--aai-text-muted)",
-        textTransform: "capitalize",
-      }}">${state}</span>
+      <span style="${styles.stateLabel}">${state}</span>
     </div>
   `;
 }
@@ -43,33 +201,21 @@ export function ErrorBanner(
 ): preact.JSX.Element | null {
   if (!error.value) return null;
   return html`
-    <div style="${{
-      background: "var(--aai-surface)",
-      color: "var(--aai-error)",
-      padding: "10px 14px",
-      borderRadius: "var(--aai-radius)",
-      marginBottom: "16px",
-      fontSize: "14px",
-    }}">${error.value.message}</div>
+    <div style="${styles.errorBanner}">${error.value.message}</div>
   `;
 }
 
 export function MessageBubble(
-  { message }: { key?: unknown; message: Message },
+  { message }: { message: Message },
 ): preact.JSX.Element {
   const isUser = message.role === "user";
   return html`
     <div style="${{
-      marginBottom: "12px",
+      ...styles.bubbleWrap,
       textAlign: isUser ? "right" : "left",
     }}">
       <div style="${{
-        display: "inline-block",
-        maxWidth: "80%",
-        padding: "8px 12px",
-        borderRadius: "var(--aai-radius)",
-        textAlign: "left",
-        fontSize: "14px",
+        ...styles.bubble,
         background: isUser ? "var(--aai-surface-light)" : "var(--aai-surface)",
       }}">
         <div>${message.text}</div>
@@ -83,20 +229,8 @@ export function Transcript(
 ): preact.JSX.Element | null {
   if (!text.value) return null;
   return html`
-    <div style="${{
-      marginBottom: "12px",
-      textAlign: "right",
-    }}">
-      <div style="${{
-        display: "inline-block",
-        maxWidth: "80%",
-        padding: "8px 12px",
-        borderRadius: "var(--aai-radius)",
-        textAlign: "left",
-        fontSize: "14px",
-        background: "var(--aai-surface-light)",
-        opacity: 0.6,
-      }}">
+    <div style="${styles.transcriptWrap}">
+      <div style="${styles.transcriptBubble}">
         <div>${text}</div>
       </div>
     </div>
@@ -104,28 +238,12 @@ export function Transcript(
 }
 
 export function ThinkingIndicator(): preact.JSX.Element {
-  const dotStyle = (delay: string) => ({
-    width: "8px",
-    height: "8px",
-    borderRadius: "50%",
-    background: "var(--aai-text-muted)",
-    animation: `aai-bounce 1.4s infinite ease-in-out both`,
-    animationDelay: delay,
-  });
+  ensureBounceCSS();
   return html`
-    <style>
-    ${BOUNCE_CSS}
-    </style>
-    <div style="${{
-      display: "flex",
-      alignItems: "center",
-      gap: "4px",
-      padding: "8px 12px",
-      marginBottom: "12px",
-    }}">
-      <div style="${dotStyle("0s")}" />
-      <div style="${dotStyle("0.16s")}" />
-      <div style="${dotStyle("0.32s")}" />
+    <div style="${styles.thinkingRow}">
+      <div style="${dotStyles[0]}" />
+      <div style="${dotStyles[1]}" />
+      <div style="${dotStyles[2]}" />
     </div>
   `;
 }
@@ -142,16 +260,7 @@ function MessageList() {
   });
 
   return html`
-    <div style="${{
-      flex: 1,
-      minHeight: "200px",
-      overflowY: "auto",
-      marginBottom: "16px",
-      border: "1px solid var(--aai-surface-light)",
-      borderRadius: "var(--aai-radius)",
-      padding: "16px",
-      WebkitOverflowScrolling: "touch",
-    }}">
+    <div style="${styles.messageList}">
       ${messages.value.map((msg: Message, i: number) =>
         html`
           <${MessageBubble} key="${i}" message="${msg}" />
@@ -168,44 +277,24 @@ function MessageList() {
 
 function Controls() {
   const { running, toggle, reset } = useSession();
-  const buttonBg = useComputed(() =>
-    running.value ? "var(--aai-error)" : "var(--aai-state-ready)"
-  );
+  const primaryStyle = useComputed(() => ({
+    ...styles.baseBtn,
+    background: running.value ? "var(--aai-error)" : "var(--aai-state-ready)",
+  }));
   const buttonLabel = useComputed(() => running.value ? "Stop" : "Resume");
 
-  const baseBtn = {
-    flex: 1,
-    padding: "12px 16px",
-    border: "none",
-    borderRadius: "var(--aai-radius)",
-    cursor: "pointer",
-    fontSize: "15px",
-    color: "var(--aai-text)",
-    WebkitTapHighlightColor: "transparent",
-  };
-
   return html`
-    <div style="${{
-      display: "flex",
-      gap: "8px",
-      flexShrink: 0,
-      paddingBottom: "env(safe-area-inset-bottom, 0)",
-    }}">
+    <div style="${styles.controlsRow}">
       <button
         type="button"
-        style="${{ ...baseBtn, background: buttonBg.value }}"
+        style="${primaryStyle.value}"
         onClick="${toggle}"
       >
         ${buttonLabel}
       </button>
       <button
         type="button"
-        style="${{
-          ...baseBtn,
-          border: "1px solid var(--aai-surface-light)",
-          background: "transparent",
-          color: "var(--aai-text-muted)",
-        }}"
+        style="${styles.secondaryBtn}"
         onClick="${reset}"
       >
         New Conversation
@@ -218,17 +307,7 @@ export function ChatView(): preact.JSX.Element {
   const { state, error } = useSession();
 
   return html`
-    <div style="${{
-      fontFamily: "var(--aai-font)",
-      maxWidth: "600px",
-      margin: "0 auto",
-      padding: "20px",
-      color: "var(--aai-text)",
-      minHeight: "100vh",
-      boxSizing: "border-box",
-      display: "flex",
-      flexDirection: "column",
-    }}">
+    <div style="${styles.chatPage}">
       <${StateIndicator} state="${state}" />
       <${ErrorBanner} error="${error}" />
       <${MessageList} />
@@ -242,30 +321,10 @@ export function App(): preact.JSX.Element {
 
   if (!started.value) {
     return html`
-      <div style="${{
-        fontFamily: "var(--aai-font)",
-        maxWidth: "600px",
-        margin: "0 auto",
-        padding: "20px",
-        color: "var(--aai-text)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        minHeight: "100vh",
-      }}">
+      <div style="${styles.startPage}">
         <button
           type="button"
-          style="${{
-            padding: "18px 40px",
-            border: "none",
-            borderRadius: "var(--aai-radius)",
-            background: "var(--aai-primary)",
-            color: "var(--aai-text)",
-            fontSize: "18px",
-            fontWeight: 500,
-            cursor: "pointer",
-            WebkitTapHighlightColor: "transparent",
-          }}"
+          style="${styles.startBtn}"
           onClick="${start}"
         >
           Start Conversation

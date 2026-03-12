@@ -2,7 +2,6 @@
   "workspace": ["server", "ui", "cli", "sdk", "core"],
   "tasks": {
     "setup": "git config core.hooksPath .githooks",
-    "dev": "deno run --allow-net --allow-env --allow-read --allow-write --allow-run --unstable-worker-options cli/cli.ts dev",
     "deploy": "deno run --allow-net --allow-env --allow-read --allow-write --allow-run cli/cli.ts deploy",
     "new": "deno run --allow-net --allow-env --allow-read --allow-write --allow-run cli/cli.ts new",
     "serve": "deno run --allow-net --allow-env --allow-read --allow-write --unstable-worker-options server/main.ts",

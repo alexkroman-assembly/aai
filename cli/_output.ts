@@ -1,4 +1,11 @@
-import { bold, cyan, dim, green, red, yellow } from "@std/fmt/colors";
+import {
+  bold,
+  brightBlue,
+  brightMagenta,
+  dim,
+  red,
+  yellow,
+} from "@std/fmt/colors";
 
 // Deno-style right-aligned action prefix width
 const PAD = 9;
@@ -12,15 +19,20 @@ function fmt(
 }
 
 export function step(action: string, msg: string): void {
-  console.log(fmt(action, green, msg));
+  console.log(fmt(action, brightMagenta, msg));
 }
 
 export function stepInfo(action: string, msg: string): void {
-  console.log(fmt(action, cyan, msg));
+  console.log(fmt(action, brightBlue, msg));
 }
 
 export function info(msg: string): void {
   console.log(dim(`${" ".repeat(PAD + 1)}${msg}`));
+}
+
+/** Indented line (same alignment as step/stepInfo message text) without dimming. */
+export function detail(msg: string): void {
+  console.log(`${" ".repeat(PAD + 1)}${msg}`);
 }
 
 export function warn(msg: string): void {

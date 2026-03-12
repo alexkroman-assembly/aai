@@ -4,11 +4,6 @@ import { defineAgent } from "./define_agent.ts";
 import { DEFAULT_GREETING, DEFAULT_INSTRUCTIONS } from "./types.ts";
 
 Deno.test("defineAgent", async (t) => {
-  await t.step("returns frozen object", () => {
-    const agent = defineAgent({ name: "Test" });
-    expect(Object.isFrozen(agent)).toBe(true);
-  });
-
   await t.step("applies defaults", () => {
     const agent = defineAgent({ name: "Test" });
     expect(agent.name).toBe("Test");
@@ -44,12 +39,6 @@ Deno.test("defineAgent", async (t) => {
     expect(agent.transport).toEqual(["websocket", "twilio"]);
   });
 
-  await t.step("freezes env and transport arrays", () => {
-    const agent = defineAgent({ name: "Test", env: ["A", "B"] });
-    expect(Object.isFrozen(agent.env)).toBe(true);
-    expect(Object.isFrozen(agent.transport)).toBe(true);
-  });
-
   await t.step("preserves tools", () => {
     const tools = {
       greet: {
@@ -81,13 +70,25 @@ Deno.test("defineAgent", async (t) => {
     expect(agent.onTurn).toBe(onTurn);
   });
 
-  await t.step("preserves prompt and builtinTools", () => {
+  await t.step("preserves sttPrompt, maxSteps, and builtinTools", () => {
     const agent = defineAgent({
       name: "Test",
-      prompt: "Speak slowly",
+      sttPrompt: "Transcribe accurately",
+      maxSteps: 10,
       builtinTools: ["web_search", "run_code"],
     });
-    expect(agent.prompt).toBe("Speak slowly");
+    expect(agent.sttPrompt).toBe("Transcribe accurately");
+    expect(agent.maxSteps).toBe(10);
     expect(agent.builtinTools).toEqual(["web_search", "run_code"]);
+  });
+
+  await t.step("maxSteps defaults to 5", () => {
+    const agent = defineAgent({ name: "Test" });
+    expect(agent.maxSteps).toBe(5);
+  });
+
+  await t.step("returns frozen object", () => {
+    const agent = defineAgent({ name: "Frozen" });
+    expect(Object.isFrozen(agent)).toBe(true);
   });
 });

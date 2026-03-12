@@ -1,6 +1,6 @@
 {
   "name": "@aai/ui",
-  "version": "0.1.49",
+  "version": "0.1.82",
   "exports": "./mod.ts",
   "publish": {
     "exclude": [
@@ -19,7 +19,8 @@
     "preact/hooks": "npm:preact@10.28.4/hooks",
     "@preact/signals": "npm:@preact/signals@2.8.1",
     "htm": "npm:htm@3.1.1",
-    "@b-fuze/deno-dom": "jsr:@b-fuze/deno-dom@^0.1.56"
+    "@b-fuze/deno-dom": "jsr:@b-fuze/deno-dom@^0.1.56",
+    "@aai/core": "workspace:@aai/core"
   },
   "compilerOptions": {
     "lib": [

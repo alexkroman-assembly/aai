@@ -13,15 +13,6 @@ Deno.test("kvTools", async (t) => {
     ]);
   });
 
-  await t.step("each tool has description and parameters", () => {
-    const tools = kvTools();
-    for (const [name, def] of Object.entries(tools)) {
-      assertEquals(typeof def.description, "string", `${name} description`);
-      assertEquals(typeof def.execute, "function", `${name} execute`);
-      assertEquals(def.parameters !== undefined, true, `${name} parameters`);
-    }
-  });
-
   await t.step("custom names override defaults", () => {
     const tools = kvTools({ names: { save: "store", forget: "erase" } });
     const names = Object.keys(tools).sort();

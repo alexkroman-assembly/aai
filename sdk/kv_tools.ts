@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { ToolDef } from "./types.ts";
+import { tool, type ToolDef } from "./types.ts";
 
 export type KvToolsOptions = {
   names?: {
@@ -40,7 +40,7 @@ export function kvTools(
   const desc = { ...DEFAULTS.descriptions, ...options?.descriptions };
 
   return {
-    [names.save]: {
+    [names.save]: tool({
       description: desc.save,
       parameters: z.object({
         key: z.string().describe(
@@ -49,24 +49,22 @@ export function kvTools(
         value: z.string().describe("The information to remember"),
       }),
       execute: async ({ key, value }, ctx) => {
-        const { kv } = ctx;
-        await kv.set(key as string, value as string);
+        await ctx.kv.set(key, value);
         return { saved: key };
       },
-    },
-    [names.recall]: {
+    }),
+    [names.recall]: tool({
       description: desc.recall,
       parameters: z.object({
         key: z.string().describe("The key to look up"),
       }),
       execute: async ({ key }, ctx) => {
-        const { kv } = ctx;
-        const value = await kv.get(key as string);
+        const value = await ctx.kv.get(key);
         if (value === null) return { found: false, key };
         return { found: true, key, value };
       },
-    },
-    [names.list]: {
+    }),
+    [names.list]: tool({
       description: desc.list,
       parameters: z.object({
         prefix: z.string().describe(
@@ -74,21 +72,19 @@ export function kvTools(
         ).optional(),
       }),
       execute: async ({ prefix }, ctx) => {
-        const { kv } = ctx;
-        const entries = await kv.list((prefix as string) ?? "");
+        const entries = await ctx.kv.list(prefix ?? "");
         return { count: entries.length, keys: entries.map((e) => e.key) };
       },
-    },
-    [names.forget]: {
+    }),
+    [names.forget]: tool({
       description: desc.forget,
       parameters: z.object({
         key: z.string().describe("The key to delete"),
       }),
       execute: async ({ key }, ctx) => {
-        const { kv } = ctx;
-        await kv.delete(key as string);
+        await ctx.kv.delete(key);
         return { deleted: key };
       },
-    },
+    }),
   };
 }

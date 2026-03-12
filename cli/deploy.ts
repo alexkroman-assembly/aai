@@ -1,135 +1,62 @@
-import { info, step, stepInfo, warn } from "./_output.ts";
-import type { BundleOutput } from "./_bundler.ts";
-import { incrementName } from "./_discover.ts";
+import { Command } from "@cliffy/command";
+import { step, stepInfo } from "./_output.ts";
+import { runBuild } from "./build.ts";
+import { runDeploy } from "./_deploy.ts";
+import {
+  DEFAULT_SERVER,
+  getApiKey,
+  getNamespace,
+  resolveSlug,
+  saveAgentLink,
+  saveNamespace,
+} from "./_discover.ts";
 
-export const _internals = {
-  fetch: globalThis.fetch.bind(globalThis),
-};
+export const deployCommand: Command = new Command()
+  .description("Bundle and deploy to production")
+  .option("-s, --server <url:string>", "Server URL")
+  .option("--local [url:string]", "Use local server", { hidden: true })
+  .option("--dry-run", "Validate and bundle without deploying")
+  .action(async ({ server, local, dryRun }) => {
+    const cwd = Deno.env.get("INIT_CWD") || Deno.cwd();
+    const serverUrl = local !== undefined
+      ? (typeof local === "string" ? local : "http://localhost:3100")
+      : (server || DEFAULT_SERVER);
 
-export type DeployOpts = {
-  url: string;
-  bundle: BundleOutput;
-  namespace: string;
-  slug: string;
-  dryRun: boolean;
-  apiKey: string;
-};
+    const apiKey = await getApiKey();
+    const namespace = await getNamespace();
+    const result = await runBuild({ agentDir: cwd });
 
-export type DeployResult = {
-  namespace: string;
-  slug: string;
-};
-
-async function attemptDeploy(
-  url: string,
-  namespace: string,
-  slug: string,
-  apiKey: string,
-  manifest: Record<string, unknown>,
-  worker: string,
-  client: string,
-): Promise<Response> {
-  const fullPath = `${namespace}/${slug}`;
-  return await _internals.fetch(`${url}/${fullPath}/deploy`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      env: manifest.env,
-      worker,
-      client,
-      transport: manifest.transport,
-      config: manifest.config,
-      toolSchemas: manifest.toolSchemas,
-    }),
-  });
-}
-
-const MAX_RETRIES = 20;
-
-export async function runDeploy(
-  opts: DeployOpts,
-): Promise<DeployResult> {
-  const manifest = JSON.parse(opts.bundle.manifest);
-  const worker = opts.bundle.worker;
-  const client = opts.bundle.client;
-
-  let namespace = opts.namespace;
-  const slug = opts.slug;
-
-  if (opts.dryRun) {
+    const { agent } = result;
+    const slug = await resolveSlug(cwd, namespace, agent.slug);
     const fullPath = `${namespace}/${slug}`;
-    stepInfo("Dry run", "would deploy:");
-    info(`${fullPath} -> ${opts.url}/${fullPath}`);
-    return { namespace, slug };
-  }
 
-  // Try deploying, auto-incrementing namespace on 403
-  for (let i = 0; i < MAX_RETRIES; i++) {
-    const resp = await attemptDeploy(
-      opts.url,
+    step("Deploy", fullPath);
+    const deployed = await runDeploy({
+      url: serverUrl,
+      bundle: result.bundle,
       namespace,
       slug,
-      opts.apiKey,
-      manifest,
-      worker,
-      client,
-    );
+      dryRun: dryRun ?? false,
+      apiKey,
+    });
 
-    if (resp.ok) {
-      const fullPath = `${namespace}/${slug}`;
-      const transport = manifest.transport ?? ["websocket"];
-      const urls: string[] = [];
-      if (transport.includes("websocket")) {
-        urls.push(`${opts.url}/${fullPath}`);
-      }
-      if (transport.includes("twilio")) {
-        urls.push(`${opts.url}/${fullPath}/voice`);
-      }
-      step("Deploy", `${fullPath} -> ${urls[0] ?? opts.url}`);
-      for (const url of urls.slice(1)) {
-        info(url);
-      }
-
-      // Health check: best-effort verification
-      try {
-        const healthResp = await _internals.fetch(
-          `${opts.url}/${fullPath}/health`,
-        );
-        const ok = healthResp.ok &&
-          (await healthResp.json()).status === "ok";
-        if (ok) {
-          step("Ready", fullPath);
-        } else {
-          warn(
-            `${fullPath} deployed but health check failed -- check for runtime errors`,
-          );
-        }
-      } catch {
-        // Health check is best-effort
-      }
-
-      return { namespace, slug };
+    if (deployed.namespace !== namespace) {
+      await saveNamespace(deployed.namespace);
     }
 
-    if (resp.status === 403) {
-      const text = await resp.text();
-      // Namespace conflict — increment and retry
-      if (text.includes("Namespace")) {
-        const next = incrementName(namespace);
-        step("Retry", `namespace "${namespace}" taken, trying "${next}"`);
-        namespace = next;
-        continue;
-      }
+    await saveAgentLink(cwd, {
+      namespace: deployed.namespace,
+      slug: deployed.slug,
+      apiKey,
+    });
+
+    const deployedPath = `${deployed.namespace}/${deployed.slug}`;
+    if (agent.transport.includes("websocket")) {
+      stepInfo("App", `${serverUrl}/${deployedPath}`);
+    }
+    if (agent.transport.includes("twilio")) {
+      stepInfo("Twilio", `${serverUrl}/${deployedPath}/twilio/voice`);
     }
 
-    const text = await resp.text();
-    throw new Error(`deploy failed (${resp.status}): ${text}`);
-  }
-
-  throw new Error(
-    `deploy failed: could not find available namespace after ${MAX_RETRIES} attempts`,
-  );
-}
+    stepInfo("Agent", deployed.slug);
+  }) as unknown as Command;

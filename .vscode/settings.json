@@ -1,5 +1,6 @@
 {
   "deno.enable": true,
   "deno.lint": true,
-  "deno.unstable": ["worker-options"]
+  "deno.unstable": ["worker-options"],
+  "jest.enable": false
 }

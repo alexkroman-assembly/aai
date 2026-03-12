@@ -1,17 +1,7 @@
 import { expect } from "@std/expect";
 import { assertSpyCalls, spy, stub } from "@std/testing/mock";
-import { _internals, runDeploy } from "./deploy.ts";
-import type { BundleOutput } from "./_bundler.ts";
-
-function makeBundle(): BundleOutput {
-  return {
-    worker: "// worker",
-    client: "// client",
-    manifest: JSON.stringify({ env: { ASSEMBLYAI_API_KEY: "test" } }),
-    workerBytes: 9,
-    clientBytes: 9,
-  };
-}
+import { _internals, runDeploy } from "./_deploy.ts";
+import { makeBundle } from "./_test_utils.ts";
 
 function healthOk(): Response {
   return new Response(JSON.stringify({ status: "ok" }), {

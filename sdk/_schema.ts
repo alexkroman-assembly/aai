@@ -23,7 +23,7 @@ export type BuiltinTool =
   | "user_input"
   | "final_answer";
 
-const BuiltinToolSchema: z.ZodType<BuiltinTool> = z.enum([
+export const BuiltinToolSchema: z.ZodType<BuiltinTool> = z.enum([
   "web_search",
   "visit_webpage",
   "fetch_json",
@@ -32,34 +32,77 @@ const BuiltinToolSchema: z.ZodType<BuiltinTool> = z.enum([
   "final_answer",
 ]);
 
+export type ToolChoice =
+  | "auto"
+  | "required"
+  | "none"
+  | { type: "tool"; toolName: string };
+
+export const ToolChoiceSchema: z.ZodType<ToolChoice> = z.union([
+  z.enum(["auto", "required", "none"]),
+  z.object({ type: z.literal("tool"), toolName: z.string().min(1) }),
+]);
+
+export type AgentMode = "full" | "stt-only";
+
+export const AgentModeSchema: z.ZodType<AgentMode> = z.enum([
+  "full",
+  "stt-only",
+]);
+
 export type AgentConfig = {
-  name?: string;
+  name: string;
+  mode?: AgentMode;
   instructions: string;
   greeting: string;
   voice: string;
-  prompt?: string;
+  sttPrompt?: string;
+  maxSteps?: number;
+  toolChoice?: ToolChoice;
+  transport?: Transport | Transport[];
   builtinTools?: BuiltinTool[];
 };
 
 export const AgentConfigSchema: z.ZodType<AgentConfig> = z.object({
-  name: z.string().optional(),
+  name: z.string().min(1),
+  mode: AgentModeSchema.optional(),
   instructions: z.string(),
   greeting: z.string(),
   voice: z.string(),
-  prompt: z.string().optional(),
+  sttPrompt: z.string().min(1).optional(),
+  maxSteps: z.number().int().positive().optional(),
+  toolChoice: ToolChoiceSchema.optional(),
+  transport: z.union([
+    TransportSchema,
+    z.array(TransportSchema).min(1),
+  ]).optional(),
   builtinTools: z.array(BuiltinToolSchema).optional(),
 });
 
+/**
+ * Serialized tool schema sent over the wire.
+ * `parameters` must be a valid JSON Schema object (with `type`, `properties`,
+ * etc.) — the Vercel AI SDK wraps it via `jsonSchema()`.
+ */
 export type ToolSchema = {
   name: string;
   description: string;
-  parameters: Record<string, unknown>;
+  parameters: {
+    type: "object";
+    properties?: Record<string, unknown>;
+    required?: string[];
+    [key: string]: unknown;
+  };
 };
 
 export const ToolSchemaSchema: z.ZodType<ToolSchema> = z.object({
-  name: z.string(),
-  description: z.string(),
-  parameters: z.record(z.string(), z.unknown()),
+  name: z.string().min(1),
+  description: z.string().min(1),
+  parameters: z.object({
+    type: z.literal("object"),
+    properties: z.record(z.string(), z.unknown()).optional(),
+    required: z.array(z.string()).optional(),
+  }).catchall(z.unknown()),
 });
 
 export type DeployBody = {
@@ -67,8 +110,6 @@ export type DeployBody = {
   worker: string;
   client: string;
   transport?: Transport | Transport[];
-  config: AgentConfig;
-  toolSchemas?: ToolSchema[];
 };
 
 export const DeployBodySchema: z.ZodType<DeployBody> = z.object({
@@ -79,17 +120,26 @@ export const DeployBodySchema: z.ZodType<DeployBody> = z.object({
     TransportSchema,
     z.array(TransportSchema),
   ]).optional(),
-  config: AgentConfigSchema,
-  toolSchemas: z.array(ToolSchemaSchema).optional(),
 });
 
 export type AgentEnv = {
   ASSEMBLYAI_API_KEY: string;
   LLM_MODEL?: string;
-  [key: string]: unknown;
+  [key: string]: string | undefined;
 };
 
 export const EnvSchema: z.ZodType<AgentEnv> = z.object({
   ASSEMBLYAI_API_KEY: z.string().min(1),
   LLM_MODEL: z.string().optional(),
-}).passthrough();
+}).catchall(z.string());
+
+/** Config returned by the worker via Comlink RPC. */
+export type WorkerConfig = {
+  config: AgentConfig;
+  toolSchemas: ToolSchema[];
+};
+
+export const WorkerConfigSchema: z.ZodType<WorkerConfig> = z.object({
+  config: AgentConfigSchema,
+  toolSchemas: z.array(ToolSchemaSchema),
+});

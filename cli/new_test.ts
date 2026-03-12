@@ -1,18 +1,7 @@
 import { expect } from "@std/expect";
-import { stub } from "@std/testing/mock";
 import { join } from "@std/path";
-import { _internals, listTemplates, runNew } from "./new.ts";
-
-async function withTempDir(
-  fn: (dir: string) => Promise<void>,
-): Promise<void> {
-  const dir = await Deno.makeTempDir({ prefix: "aai_new_test_" });
-  try {
-    await fn(dir);
-  } finally {
-    await Deno.remove(dir, { recursive: true });
-  }
-}
+import { listTemplates, runNew } from "./_new.ts";
+import { silenceSteps, withTempDir } from "./_test_utils.ts";
 
 async function createFakeTemplates(dir: string): Promise<string> {
   const templatesDir = join(dir, "templates");
@@ -54,12 +43,6 @@ async function createFakeTemplates(dir: string): Promise<string> {
   await Deno.writeTextFile(join(withEnv, ".env.example"), "MY_KEY=");
 
   return templatesDir;
-}
-
-// Suppress step output in tests
-function silenceSteps(): { restore: () => void } {
-  const stepStub = stub(_internals, "step", () => {});
-  return { restore: () => stepStub.restore() };
 }
 
 // --- listTemplates ---

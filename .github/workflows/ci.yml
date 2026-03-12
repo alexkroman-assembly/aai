@@ -37,7 +37,7 @@ jobs:
             --include ui/ \
             --include cli/claude.md \
             --include cli/deno.json \
-            --include _bundler_config.json \
+            --include cli/_bundler_config.json \
             $npm_includes \
             --output dist/aai \
             cli/cli.ts

@@ -4,9 +4,9 @@
  * to verify type-checking, validation, and bundling all pass.
  */
 
-import { bold, green, red } from "@std/fmt/colors";
+import { bold, brightMagenta, red } from "@std/fmt/colors";
 import { runBuild } from "./build.ts";
-import { runNew } from "./new.ts";
+import { runNew } from "./_new.ts";
 import { dirname, fromFileUrl, join } from "@std/path";
 
 const TEMPLATES_DIR = new URL("../templates", import.meta.url).pathname;
@@ -67,7 +67,7 @@ for (const template of templates) {
     // Build it
     await runBuild({ agentDir: tmpDir });
 
-    console.log(`  ${green("✓")} ${template}`);
+    console.log(`  ${brightMagenta("✓")} ${template}`);
     results.push({ name: template, ok: true });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -84,7 +84,7 @@ const passed = results.filter((r) => r.ok).length;
 const failed = results.filter((r) => !r.ok).length;
 
 if (failed === 0) {
-  console.log(bold(green(`All ${passed} templates passed.`)));
+  console.log(bold(brightMagenta(`All ${passed} templates passed.`)));
 } else {
   console.log(bold(red(`${failed} of ${results.length} templates failed.`)));
   Deno.exit(1);

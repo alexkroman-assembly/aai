@@ -6,9 +6,15 @@ import {
   S3Client,
 } from "@aws-sdk/client-s3";
 import type { AgentMetadata } from "./worker_pool.ts";
-import { AgentMetadataSchema } from "@aai/core/rpc-schema";
+import { AgentMetadataSchema } from "./_schemas.ts";
+import { type CredentialKey, decryptEnv, encryptEnv } from "./credentials.ts";
 
 export type FileKey = "worker" | "client" | "client_map";
+
+export type NamespaceOwner = {
+  account_id: string;
+  credential_hashes: string[];
+};
 
 export type BundleStore = {
   putAgent(bundle: {
@@ -18,26 +24,21 @@ export type BundleStore = {
     worker: string;
     client: string;
     client_map?: string;
-    owner_hash?: string;
-    config?: {
-      name?: string;
-      instructions: string;
-      greeting: string;
-      voice: string;
-      prompt?: string;
-      builtinTools?: string[];
-    };
-    toolSchemas?: {
-      name: string;
-      description: string;
-      parameters: Record<string, unknown>;
-    }[];
+    account_id?: string;
   }): Promise<void>;
   getManifest(slug: string): Promise<AgentMetadata | null>;
   getFile(slug: string, file: FileKey): Promise<string | null>;
   deleteAgent(slug: string): Promise<void>;
-  getNamespaceOwner(namespace: string): Promise<string | null>;
-  putNamespaceOwner(namespace: string, ownerHash: string): Promise<void>;
+  getNamespaceOwner(namespace: string): Promise<NamespaceOwner | null>;
+  putNamespaceOwner(
+    namespace: string,
+    owner: NamespaceOwner,
+  ): Promise<void>;
+  /** Atomically claim a namespace only if unclaimed. Returns true if claimed, false if already owned. */
+  claimIfUnclaimed(
+    namespace: string,
+    owner: NamespaceOwner,
+  ): Promise<boolean>;
   close(): void;
   [Symbol.dispose](): void;
 };
@@ -83,6 +84,7 @@ function isS3Error(err: unknown, codeOrStatus: string): boolean {
 export function createBundleStore(
   s3: S3Client,
   bucket: string,
+  credentialKey?: CredentialKey,
 ): BundleStore {
   const cache = new Map<string, CacheEntry>();
 
@@ -163,13 +165,16 @@ export function createBundleStore(
     async putAgent(bundle) {
       await deleteAgent(bundle.slug);
 
+      const envValue = credentialKey
+        ? await encryptEnv(credentialKey, bundle.env)
+        : bundle.env;
+
       const manifest = {
         slug: bundle.slug,
-        env: bundle.env,
+        env: envValue,
         transport: bundle.transport,
-        ...(bundle.owner_hash ? { owner_hash: bundle.owner_hash } : {}),
-        ...(bundle.config ? { config: bundle.config } : {}),
-        ...(bundle.toolSchemas ? { toolSchemas: bundle.toolSchemas } : {}),
+        ...(bundle.account_id ? { account_id: bundle.account_id } : {}),
+        ...(credentialKey ? { envEncrypted: true } : {}),
       };
       await put(
         objectKey(bundle.slug, "manifest.json"),
@@ -201,7 +206,15 @@ export function createBundleStore(
     async getManifest(slug) {
       const data = await get(objectKey(slug, "manifest.json"));
       if (data === null) return null;
-      const parsed = AgentMetadataSchema.safeParse(JSON.parse(data));
+      const raw = JSON.parse(data);
+
+      // Decrypt env if it was stored encrypted
+      if (raw.envEncrypted && credentialKey && typeof raw.env === "string") {
+        raw.env = await decryptEnv(credentialKey, raw.env);
+        delete raw.envEncrypted;
+      }
+
+      const parsed = AgentMetadataSchema.safeParse(raw);
       if (!parsed.success) return null;
       return parsed.data as AgentMetadata;
     },
@@ -213,12 +226,22 @@ export function createBundleStore(
 
     deleteAgent,
 
-    async getNamespaceOwner(namespace: string): Promise<string | null> {
+    async getNamespaceOwner(namespace: string): Promise<NamespaceOwner | null> {
       const data = await get(`namespaces/${namespace}/owner.json`);
       if (!data) return null;
       try {
         const parsed = JSON.parse(data);
-        return parsed.owner_hash ?? null;
+        // Migrate legacy format: { owner_hash } → { account_id, credential_hashes }
+        if (parsed.owner_hash && !parsed.account_id) {
+          return {
+            account_id: parsed.owner_hash,
+            credential_hashes: [parsed.owner_hash],
+          };
+        }
+        if (!parsed.account_id || !Array.isArray(parsed.credential_hashes)) {
+          return null;
+        }
+        return parsed as NamespaceOwner;
       } catch {
         return null;
       }
@@ -226,13 +249,41 @@ export function createBundleStore(
 
     async putNamespaceOwner(
       namespace: string,
-      ownerHash: string,
+      owner: NamespaceOwner,
     ): Promise<void> {
       await put(
         `namespaces/${namespace}/owner.json`,
-        JSON.stringify({ owner_hash: ownerHash }),
+        JSON.stringify(owner),
         "application/json",
       );
+    },
+
+    async claimIfUnclaimed(
+      namespace: string,
+      owner: NamespaceOwner,
+    ): Promise<boolean> {
+      const key = `namespaces/${namespace}/owner.json`;
+      const body = JSON.stringify(owner);
+      try {
+        const result = await s3.send(
+          new PutObjectCommand({
+            Bucket: bucket,
+            Key: key,
+            Body: body,
+            ContentType: "application/json",
+            IfNoneMatch: "*",
+          }),
+        );
+        if (result.ETag) {
+          cache.set(key, { data: body, etag: result.ETag });
+        }
+        return true;
+      } catch (err: unknown) {
+        if (isS3Error(err, "PreconditionFailed") || isS3Error(err, "412")) {
+          return false;
+        }
+        throw err;
+      }
     },
 
     close() {
@@ -243,59 +294,4 @@ export function createBundleStore(
       // no-op
     },
   };
-}
-
-export function createMemoryS3Client(): S3Client {
-  const store = new Map<string, { body: string; etag: string }>();
-
-  return {
-    send(command: unknown): Promise<unknown> {
-      if (command instanceof PutObjectCommand) {
-        const key = command.input.Key!;
-        const body = command.input.Body as string;
-        const etag = `"${Date.now()}"`;
-        store.set(key, { body, etag });
-        return Promise.resolve({ ETag: etag });
-      }
-
-      if (command instanceof GetObjectCommand) {
-        const key = command.input.Key!;
-        const entry = store.get(key);
-        if (!entry) {
-          return Promise.reject({ name: "NoSuchKey" });
-        }
-        if (
-          command.input.IfNoneMatch &&
-          command.input.IfNoneMatch === entry.etag
-        ) {
-          return Promise.reject({ name: "304" });
-        }
-        return Promise.resolve({
-          Body: { transformToString: () => Promise.resolve(entry.body) },
-          ETag: entry.etag,
-        });
-      }
-
-      if (command instanceof ListObjectsV2Command) {
-        const prefix = command.input.Prefix ?? "";
-        const contents = [...store.keys()]
-          .filter((k) => k.startsWith(prefix))
-          .map((k) => ({ Key: k }));
-        return Promise.resolve({ Contents: contents });
-      }
-
-      if (command instanceof DeleteObjectsCommand) {
-        const objects = command.input.Delete?.Objects ?? [];
-        for (const obj of objects) {
-          if (obj.Key) store.delete(obj.Key);
-        }
-        return Promise.resolve({});
-      }
-
-      return Promise.reject(new Error(`Unsupported S3 command`));
-    },
-    destroy() {},
-    config: {} as S3Client["config"],
-    middlewareStack: {} as S3Client["middlewareStack"],
-  } as unknown as S3Client;
 }

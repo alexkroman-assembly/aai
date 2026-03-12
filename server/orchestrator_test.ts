@@ -1,41 +1,16 @@
 import { assertEquals, assertStringIncludes } from "@std/assert";
 import { expect } from "@std/expect";
 import { stub } from "@std/testing/mock";
-import { createOrchestrator } from "./orchestrator.ts";
-import { _internals } from "./transport_websocket.ts";
-import { _internals as devInternals } from "./dev_session.ts";
+import { _internals as _wsInternals } from "./transport_websocket.ts";
 import { hashApiKey } from "./auth.ts";
+import type { NamespaceOwner } from "./bundle_store_tigris.ts";
 import { signScopeToken } from "./scope_token.ts";
 import {
-  createTestKvStore,
-  createTestScopeKey,
-  createTestStore,
+  createTestOrchestrator,
+  deployBody,
   DUMMY_INFO,
-  VALID_ENV,
 } from "./_test_utils.ts";
 import { MockWebSocket } from "./_mock_ws.ts";
-
-function deployBody(overrides?: Record<string, unknown>) {
-  return JSON.stringify({
-    env: VALID_ENV,
-    worker: "console.log('w');",
-    client: "console.log('c');",
-    config: {
-      instructions: "test",
-      greeting: "hello",
-      voice: "luna",
-    },
-    ...overrides,
-  });
-}
-
-async function createTestOrchestrator() {
-  const store = createTestStore();
-  const scopeKey = await createTestScopeKey();
-  const kvStore = createTestKvStore();
-  const handler = createOrchestrator({ store, scopeKey, kvStore });
-  return { handler, store, scopeKey, kvStore };
-}
 
 function req(path: string, init?: RequestInit) {
   return new Request(`http://localhost${path}`, init);
@@ -125,7 +100,11 @@ Deno.test("deploy rejects without auth", async () => {
 
 Deno.test("deploy rejects different owner for claimed namespace", async () => {
   const { handler, store } = await createTestOrchestrator();
-  await store.putNamespaceOwner("ns", await hashApiKey("key1"));
+  const owner: NamespaceOwner = {
+    account_id: "acct-1",
+    credential_hashes: [await hashApiKey("key1")],
+  };
+  await store.putNamespaceOwner("ns", owner);
 
   const res = await handler(
     req("/ns/agent/deploy", {
@@ -153,7 +132,8 @@ Deno.test("deploy succeeds and stores agent", async () => {
   );
   assertEquals(res.status, 200);
   const manifest = await store.getManifest("ns/my-agent");
-  assertEquals(manifest!.owner_hash, await hashApiKey("key1"));
+  // account_id is a UUID generated on first claim, just verify it exists
+  expect(manifest!.account_id).toBeTruthy();
 });
 
 Deno.test("deploy can redeploy same slug", async () => {
@@ -175,27 +155,6 @@ Deno.test("deploy can redeploy same slug", async () => {
     DUMMY_INFO,
   );
   assertEquals(res.status, 200);
-});
-
-Deno.test("deploy rejects missing config", async () => {
-  const { handler } = await createTestOrchestrator();
-  const res = await handler(
-    req("/ns/agent/deploy", {
-      method: "POST",
-      headers: {
-        Authorization: "Bearer key1",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        env: VALID_ENV,
-        worker: "console.log('w');",
-        client: "console.log('c');",
-      }),
-    }),
-    DUMMY_INFO,
-  );
-  assertEquals(res.status, 400);
-  assertStringIncludes((await res.json()).error, "config");
 });
 
 // =============================================================================
@@ -322,12 +281,29 @@ Deno.test("websocket upgrades for deployed agent", async () => {
 
   const mockSocket = new MockWebSocket("ws://test");
   const upgradeStub = stub(
-    _internals,
+    Deno,
     "upgradeWebSocket",
     () => ({
       socket: mockSocket as unknown as WebSocket,
       response: new Response(null, { status: 101 }),
     }),
+  );
+  const prepareStub = stub(
+    _wsInternals,
+    "prepareSession",
+    (() =>
+      Promise.resolve({
+        agentConfig: {
+          name: "test",
+          instructions: "",
+          greeting: "",
+          voice: "",
+        },
+        toolSchemas: [],
+        platformConfig: {} as never,
+        executeTool: () => Promise.resolve("ok"),
+        getWorkerApi: () => Promise.resolve({} as never),
+      })) as never,
   );
   try {
     const res = await handler(
@@ -337,6 +313,7 @@ Deno.test("websocket upgrades for deployed agent", async () => {
     assertEquals(res.status, 101);
   } finally {
     upgradeStub.restore();
+    prepareStub.restore();
   }
 });
 
@@ -344,10 +321,25 @@ Deno.test("websocket upgrades for deployed agent", async () => {
 // Per-agent metrics
 // =============================================================================
 
-Deno.test("per-agent metrics returns Prometheus format", async () => {
+Deno.test("per-agent metrics rejects without auth", async () => {
   const { handler } = await createTestOrchestrator();
   const res = await handler(
     req("/test-ns/test-agent/metrics"),
+    DUMMY_INFO,
+  );
+  assertEquals(res.status, 401);
+});
+
+Deno.test("per-agent metrics returns Prometheus format", async () => {
+  const { handler, store } = await createTestOrchestrator();
+  await store.putNamespaceOwner("test-ns", {
+    account_id: "acct-1",
+    credential_hashes: [await hashApiKey("key1")],
+  });
+  const res = await handler(
+    req("/test-ns/test-agent/metrics", {
+      headers: { Authorization: "Bearer key1" },
+    }),
     DUMMY_INFO,
   );
   assertEquals(res.status, 200);
@@ -381,9 +373,8 @@ Deno.test("kv rejects without auth", async () => {
 
 Deno.test("kv set and get round-trip", async () => {
   const { handler, scopeKey } = await createTestOrchestrator();
-  const ownerHash = await hashApiKey("key1");
   const token = await signScopeToken(scopeKey, {
-    ownerHash,
+    accountId: "acct-1",
     slug: "ns/agent",
   });
 
@@ -413,13 +404,12 @@ Deno.test("kv set and get round-trip", async () => {
 
 Deno.test("kv scope isolation", async () => {
   const { handler, scopeKey } = await createTestOrchestrator();
-  const ownerHash = await hashApiKey("key1");
   const tokenA = await signScopeToken(scopeKey, {
-    ownerHash,
+    accountId: "acct-1",
     slug: "ns/agent-a",
   });
   const tokenB = await signScopeToken(scopeKey, {
-    ownerHash,
+    accountId: "acct-1",
     slug: "ns/agent-b",
   });
 
@@ -454,7 +444,7 @@ Deno.test("kv scope isolation", async () => {
 Deno.test("kv rejects invalid op", async () => {
   const { handler, scopeKey } = await createTestOrchestrator();
   const token = await signScopeToken(scopeKey, {
-    ownerHash: "h",
+    accountId: "h",
     slug: "ns/agent",
   });
   const res = await handler(
@@ -469,36 +459,4 @@ Deno.test("kv rejects invalid op", async () => {
     DUMMY_INFO,
   );
   assertEquals(res.status, 400);
-});
-
-// =============================================================================
-// Dev WebSocket
-// =============================================================================
-
-Deno.test("dev websocket returns 400 without upgrade header", async () => {
-  const { handler } = await createTestOrchestrator();
-  const res = await handler(req("/ns/agent/dev"), DUMMY_INFO);
-  assertEquals(res.status, 400);
-});
-
-Deno.test("dev websocket upgrades connection", async () => {
-  const { handler } = await createTestOrchestrator();
-  const mockSocket = new MockWebSocket("ws://test");
-  const upgradeStub = stub(
-    devInternals,
-    "upgradeWebSocket",
-    () => ({
-      socket: mockSocket as unknown as WebSocket,
-      response: new Response(null, { status: 101 }),
-    }),
-  );
-  try {
-    const res = await handler(
-      req("/ns/agent/dev", { headers: { upgrade: "websocket" } }),
-      DUMMY_INFO,
-    );
-    assertEquals(res.status, 101);
-  } finally {
-    upgradeStub.restore();
-  }
 });

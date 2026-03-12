@@ -15,17 +15,14 @@ import type { AgentSlot } from "./worker_pool.ts";
 import type { BundleStore } from "./bundle_store_tigris.ts";
 import type { Session } from "./session.ts";
 import { handleTwilioStream, handleTwilioVoice } from "./transport_twilio.ts";
-import {
-  handleDevSessionWebSocket,
-  handleDevWebSocket,
-} from "./dev_session.ts";
 import { handleKv, validateKvRequest } from "./kv_handler.ts";
-import { createMemoryKvStore, type KvStore } from "./kv.ts";
+import type { KvStore } from "./kv.ts";
 import type { ScopeKey } from "./scope_token.ts";
 import { serialize as serializeMetrics, serializeForAgent } from "./metrics.ts";
 import type { HonoEnv } from "./hono_env.ts";
 import {
   corsMiddleware,
+  requireInternal,
   requireOwnerMiddleware,
   requireScopeTokenMiddleware,
   requireUpgrade,
@@ -35,15 +32,12 @@ import {
 
 export function createOrchestrator(opts: {
   store: BundleStore;
-  kvStore?: KvStore;
+  kvStore: KvStore;
   scopeKey: ScopeKey;
 }): Deno.ServeHandler {
-  const { store } = opts;
-  const kvStore = opts.kvStore ?? createMemoryKvStore();
-  const scopeKey = opts.scopeKey;
+  const { store, kvStore, scopeKey } = opts;
 
   const slots = new Map<string, AgentSlot>();
-  const devSlots = new Map<string, AgentSlot>();
   const sessions = new Map<string, Session>();
 
   const app = new Hono<HonoEnv>();
@@ -74,10 +68,10 @@ export function createOrchestrator(opts: {
   app.get("/favicon.svg", serveFavicon);
   app.get("/install", (c) => c.text(INSTALL_SCRIPT));
   app.get("/health", (c) => c.json({ status: "ok" }));
-  app.get("/metrics", (c) => {
-    c.header("Content-Type", "text/plain; version=0.0.4");
-    return c.body(serializeMetrics());
-  });
+  app.get("/metrics", requireInternal, (c) =>
+    c.body(serializeMetrics(), {
+      headers: { "Content-Type": "text/plain; version=0.0.4" },
+    }));
   app.get("/", (c) => c.html(renderLandingPage()));
 
   // --- Agent routes (require valid slug + inject shared state) ---
@@ -85,7 +79,6 @@ export function createOrchestrator(opts: {
   agent.use("*", slugValidation);
   agent.use("*", async (c, next) => {
     c.set("slots", slots);
-    c.set("devSlots", devSlots);
     c.set("sessions", sessions);
     c.set("store", store);
     c.set("scopeKey", scopeKey);
@@ -104,24 +97,25 @@ export function createOrchestrator(opts: {
   // Scope-token-authenticated
   agent.post(
     "/kv",
+    requireInternal,
     requireScopeTokenMiddleware(scopeKey),
     validateKvRequest,
     handleKv,
   );
 
   // Twilio
-  agent.post("/voice", handleTwilioVoice);
-  agent.all("/stream", requireUpgrade, handleTwilioStream);
-
-  // Dev mode
-  agent.all("/dev", requireUpgrade, handleDevWebSocket);
-  agent.all("/dev/websocket", handleDevSessionWebSocket);
+  agent.post("/twilio/voice", handleTwilioVoice);
+  agent.all("/twilio/stream", requireUpgrade, handleTwilioStream);
 
   // Agent public endpoints
-  agent.get("/metrics", (c) => {
-    c.header("Content-Type", "text/plain; version=0.0.4");
-    return c.body(serializeForAgent(c.var.slug));
-  });
+  agent.get(
+    "/metrics",
+    requireOwnerMiddleware(store),
+    (c) =>
+      c.body(serializeForAgent(c.var.slug), {
+        headers: { "Content-Type": "text/plain; version=0.0.4" },
+      }),
+  );
   agent.get("/health", handleAgentHealth);
   agent.all("/websocket", requireUpgrade, handleWebSocket);
   agent.get("/client.js", etag(), handleStaticFile);

@@ -2,17 +2,12 @@ import { Input, Secret } from "@cliffy/prompt";
 import { parse as parseDotenv } from "@std/dotenv/parse";
 import { exists } from "@std/fs/exists";
 import { basename, join, resolve } from "@std/path";
+import { z } from "zod";
 export function slugify(str: string): string {
   return str.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 import { step } from "./_output.ts";
-import { AAI_ROOT, importTempModule } from "./_bundler.ts";
-import {
-  type AgentConfig,
-  type AgentDef,
-  agentToolsToSchemas,
-  type ToolSchema,
-} from "@aai/sdk/types";
+import { AAI_ROOT } from "./_bundler.ts";
 
 const CONFIG_DIR = join(
   Deno.env.get("HOME") ?? Deno.env.get("USERPROFILE") ?? ".",
@@ -21,21 +16,27 @@ const CONFIG_DIR = join(
 );
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
 
-type AgentLink = {
-  namespace: string;
-  slug: string;
-  apiKey: string;
-};
+const AgentLinkSchema = z.object({
+  namespace: z.string(),
+  slug: z.string(),
+  apiKey: z.string(),
+});
 
-type CliConfig = {
-  assemblyai_api_key?: string;
-  namespace?: string;
-  agents?: Record<string, AgentLink>;
-};
+type AgentLink = z.infer<typeof AgentLinkSchema>;
+
+const CliConfigSchema = z.object({
+  assemblyai_api_key: z.string().optional(),
+  namespace: z.string().optional(),
+  agents: z.record(z.string(), AgentLinkSchema).optional(),
+});
+
+type CliConfig = z.infer<typeof CliConfigSchema>;
 
 async function readConfig(): Promise<CliConfig> {
   try {
-    return JSON.parse(await Deno.readTextFile(CONFIG_FILE));
+    return CliConfigSchema.parse(
+      JSON.parse(await Deno.readTextFile(CONFIG_FILE)),
+    );
   } catch {
     return {};
   }
@@ -47,6 +48,10 @@ async function writeConfig(config: CliConfig): Promise<void> {
     CONFIG_FILE,
     JSON.stringify(config, null, 2) + "\n",
   );
+  // Restrict to owner-only read/write (like ~/.fly/config.yml)
+  if (Deno.build.os !== "windows") {
+    await Deno.chmod(CONFIG_FILE, 0o600);
+  }
 }
 
 export async function getApiKey(): Promise<string> {
@@ -160,76 +165,24 @@ export type AgentEntry = {
   env: Record<string, string>;
   clientEntry: string;
   transport: ("websocket" | "twilio")[];
-  config?: AgentConfig;
-  toolSchemas?: ToolSchema[];
 };
 
 export const DEFAULT_SERVER = "https://aai-agent.fly.dev";
-
-/** Deps that are part of the aai toolchain and don't count as "external". */
-const AAI_INTERNAL_DEPS = new Set(["@jsr/aai__sdk", "@jsr/aai__ui"]);
-
-export async function hasExternalImports(dir: string): Promise<boolean> {
-  try {
-    const raw = JSON.parse(
-      await Deno.readTextFile(join(dir, "package.json")),
-    );
-    const deps = raw.dependencies ?? {};
-    const external = Object.keys(deps).filter((d) => !AAI_INTERNAL_DEPS.has(d));
-    if (external.length > 0) return true;
-  } catch { /* no package.json */ }
-
-  return false;
-}
-
-async function importAgentDef(dir: string): Promise<AgentDef | null> {
-  if (await hasExternalImports(dir)) return null;
-  const mod = await importTempModule(join(dir, "agent.ts"), {
-    rewriteSdkImports: true,
-  });
-  return mod.default as AgentDef;
-}
 
 export async function loadAgent(dir: string): Promise<AgentEntry | null> {
   const hasAgentTs = await exists(join(dir, "agent.ts"));
   if (!hasAgentTs) return null;
 
-  const def = await importAgentDef(dir);
-
   const slug = slugFromDir(dir);
-  const declared: readonly string[] = def?.env ?? ["ASSEMBLYAI_API_KEY"];
-  const transport: ("websocket" | "twilio")[] = def?.transport
-    ? [...def.transport]
-    : ["websocket"];
 
+  // Load all .env vars — the server extracts declared env from the worker at runtime
   const dotenvText = await Deno.readTextFile(join(dir, ".env")).catch(() => "");
-  const dotenv = parseDotenv(dotenvText);
+  const env = parseDotenv(dotenvText);
 
-  const env: Record<string, string> = {};
-  const missing: string[] = [];
-
-  for (const key of declared) {
-    const resolved = dotenv[key] ?? Deno.env.get(key);
-    if (resolved === undefined) {
-      missing.push(key);
-    } else {
-      env[key] = resolved;
-    }
-  }
-
-  if (missing.includes("ASSEMBLYAI_API_KEY")) {
+  if (!env.ASSEMBLYAI_API_KEY && !Deno.env.get("ASSEMBLYAI_API_KEY")) {
     env.ASSEMBLYAI_API_KEY = await getApiKey();
-    missing.splice(missing.indexOf("ASSEMBLYAI_API_KEY"), 1);
-  }
-
-  if (missing.length > 0) {
-    const hasEnvFile = await exists(join(dir, ".env"));
-    const hint = hasEnvFile
-      ? `Add them to .env:\n\n${missing.map((k) => `  ${k}=`).join("\n")}\n`
-      : `Create a .env file:\n\n${missing.map((k) => `  ${k}=`).join("\n")}\n`;
-    throw new Error(
-      `missing env vars required by agent: ${missing.join(", ")}\n\n${hint}`,
-    );
+  } else if (!env.ASSEMBLYAI_API_KEY) {
+    env.ASSEMBLYAI_API_KEY = Deno.env.get("ASSEMBLYAI_API_KEY")!;
   }
 
   const clientEntry = await exists(join(dir, "client.ts"))
@@ -238,30 +191,13 @@ export async function loadAgent(dir: string): Promise<AgentEntry | null> {
     ? join(dir, "client.tsx")
     : resolve(AAI_ROOT, "ui/client.ts");
 
-  const config: AgentConfig | undefined = def
-    ? {
-      name: def.name,
-      instructions: def.instructions,
-      greeting: def.greeting,
-      voice: def.voice,
-      prompt: def.prompt,
-      builtinTools: def.builtinTools ? [...def.builtinTools] : undefined,
-    }
-    : undefined;
-
-  const toolSchemas: ToolSchema[] | undefined = def
-    ? agentToolsToSchemas(def.tools)
-    : undefined;
-
   return {
     slug,
     dir,
     entryPoint: join(dir, "agent.ts"),
     env,
     clientEntry,
-    transport,
-    config,
-    toolSchemas,
+    transport: ["websocket"],
   };
 }
 

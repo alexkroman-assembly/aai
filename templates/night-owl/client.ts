@@ -37,7 +37,7 @@ export default function NightOwl() {
         minHeight: "100vh",
         gap: "24px",
       }}">
-        <div style="${{ fontSize: "48px" }}">\\u{1F989}</div>
+        <div style="${{ fontSize: "48px" }}">🦉</div>
         <h1 style="${{
           fontSize: "24px",
           fontWeight: 600,
@@ -86,7 +86,7 @@ export default function NightOwl() {
         paddingBottom: "16px",
         borderBottom: "1px solid var(--aai-surface-light)",
       }}">
-        <div style="${{ fontSize: "20px" }}">\\u{1F989}</div>
+        <div style="${{ fontSize: "20px" }}">🦉</div>
         <span style="${{ fontSize: "16px", fontWeight: 600 }}">Night Owl</span>
         <div style="${{ marginLeft: "auto" }}">
           <${StateIndicator} state="${state}" />

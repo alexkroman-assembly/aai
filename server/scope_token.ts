@@ -6,7 +6,7 @@
 import { jwtVerify, SignJWT } from "jose";
 
 export type AgentScope = {
-  ownerHash: string;
+  accountId: string;
   slug: string;
 };
 
@@ -15,15 +15,32 @@ export type ScopeKey = Uint8Array;
 
 const enc = new TextEncoder();
 
-export function importScopeKey(secret: string): Promise<ScopeKey> {
-  return Promise.resolve(enc.encode(secret));
+export async function importScopeKey(secret: string): Promise<ScopeKey> {
+  const ikm = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(secret),
+    "HKDF",
+    false,
+    ["deriveBits"],
+  );
+  const bits = await crypto.subtle.deriveBits(
+    {
+      name: "HKDF",
+      hash: "SHA-256",
+      salt: enc.encode("aai-scope-token"),
+      info: enc.encode("scope-signing"),
+    },
+    ikm,
+    256,
+  );
+  return new Uint8Array(bits);
 }
 
 export async function signScopeToken(
   key: ScopeKey,
   scope: AgentScope,
 ): Promise<string> {
-  return await new SignJWT({ sub: scope.ownerHash, scope: scope.slug })
+  return await new SignJWT({ sub: scope.accountId, scope: scope.slug })
     .setProtectedHeader({ alg: "HS256", typ: "JWT" })
     .sign(key);
 }
@@ -43,7 +60,7 @@ export async function verifyScopeToken(
     ) {
       return null;
     }
-    return { ownerHash: sub, slug: scope };
+    return { accountId: sub, slug: scope };
   } catch {
     return null;
   }

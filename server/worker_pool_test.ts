@@ -1,22 +1,6 @@
 import { expect } from "@std/expect";
-import {
-  type AgentSlot,
-  registerSlot,
-  trackSessionClose,
-  trackSessionOpen,
-} from "./worker_pool.ts";
-import type { WorkerApi } from "@aai/core/worker-entry";
+import { type AgentSlot, registerSlot } from "./worker_pool.ts";
 import { VALID_ENV } from "./_test_utils.ts";
-
-function makeSlot(overrides?: Partial<AgentSlot>): AgentSlot {
-  return {
-    slug: "test",
-    env: VALID_ENV,
-    transport: ["websocket"],
-    activeSessions: 0,
-    ...overrides,
-  };
-}
 
 // --- registerSlot ---
 
@@ -29,7 +13,6 @@ Deno.test("registerSlot with valid env", () => {
   });
   expect(ok).toBe(true);
   expect(slots.has("hello")).toBe(true);
-  expect(slots.get("hello")!.activeSessions).toBe(0);
 });
 
 Deno.test("registerSlot returns false for invalid env", () => {
@@ -48,53 +31,4 @@ Deno.test("registerSlot overwrites existing slot", () => {
   registerSlot(slots, { slug: "x", env: VALID_ENV, transport: ["websocket"] });
   registerSlot(slots, { slug: "x", env: VALID_ENV, transport: ["websocket"] });
   expect(slots.size).toBe(1);
-});
-
-// --- trackSessionOpen ---
-
-Deno.test("trackSessionOpen increments activeSessions", () => {
-  const slot = makeSlot();
-  trackSessionOpen(slot);
-  expect(slot.activeSessions).toBe(1);
-  trackSessionOpen(slot);
-  expect(slot.activeSessions).toBe(2);
-});
-
-Deno.test("trackSessionOpen clears idle timer", () => {
-  const slot = makeSlot({ idleTimer: setTimeout(() => {}, 99999) });
-  trackSessionOpen(slot);
-  expect(slot.idleTimer).toBeUndefined();
-});
-
-// --- trackSessionClose ---
-
-Deno.test("trackSessionClose decrements activeSessions", () => {
-  const slot = makeSlot({ activeSessions: 2 });
-  trackSessionClose(slot);
-  expect(slot.activeSessions).toBe(1);
-});
-
-Deno.test("trackSessionClose does not go below zero", () => {
-  const slot = makeSlot({ activeSessions: 0 });
-  trackSessionClose(slot);
-  expect(slot.activeSessions).toBe(0);
-});
-
-Deno.test("trackSessionClose sets idle timer when last session closes and agent is live", () => {
-  const slot = makeSlot({
-    activeSessions: 1,
-    worker: {
-      handle: { terminate() {} },
-      api: {} as WorkerApi,
-    },
-  });
-  trackSessionClose(slot);
-  expect(slot.idleTimer).toBeDefined();
-  clearTimeout(slot.idleTimer);
-});
-
-Deno.test("trackSessionClose does not set idle timer when no live agent", () => {
-  const slot = makeSlot({ activeSessions: 1 });
-  trackSessionClose(slot);
-  expect(slot.idleTimer).toBeUndefined();
 });

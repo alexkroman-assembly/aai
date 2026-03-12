@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { expect } from "@std/expect";
-import { agentToolsToSchemas, type ToolDef } from "@aai/sdk/types";
+import { agentToolsToSchemas, type ToolDef } from "./types.ts";
 
 Deno.test("agentToolsToSchemas - converts tool definitions to OpenAI schema", () => {
   const tools: Record<string, ToolDef> = {

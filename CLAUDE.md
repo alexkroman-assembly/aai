@@ -13,7 +13,6 @@ WebSocket or Twilio.
 deno task setup          # Configure git hooks (run after clone)
 deno task check          # Full CI: type-check, lint, fmt, tests
 deno task test           # Run all tests
-deno task dev            # Run CLI dev server locally
 deno task serve          # Run the orchestrator server directly
 deno task deploy         # Production deploy
 deno task new            # Scaffold a new agent from templates/
@@ -56,15 +55,13 @@ never on each other.
 
 #### cli/
 
-- `cli.ts` — arg parsing, scaffolds new agents if no `agent.ts`, then calls
-  `dev.ts`
-- `dev.ts` — validates, bundles (esbuild), deploys; optionally watches
+- `cli.ts` — arg parsing, subcommands: new, build, deploy, types
+- `new.ts` / `deploy.ts` — Cliffy command definitions for subcommands
+- `_new.ts` / `_deploy.ts` — internal logic for new/deploy
 - `_bundler.ts` — esbuild bundling of `agent.ts`/`client.tsx` into
   `worker.js`/`client.js`
 - `_discover.ts` — imports `agent.ts` to extract config from `defineAgent()`
 - `_validate.ts` — build-time agent config validation
-- `deploy.ts` — production deploy (persists to Tigris/S3)
-- `new.ts` — scaffolds new agent from `templates/`
 
 #### server/
 
@@ -76,9 +73,7 @@ never on each other.
   forces `final_answer` on last
 - `worker_pool.ts` — spawns agent code in sandboxed Deno Workers (all
   permissions false), idle eviction, hosts fetch proxy handler
-- `worker_entry.ts` — runs inside Worker; exposes `executeTool`/`invokeHook`
-  via RPC, monkeypatches `fetch` to proxy through host
-- `tool_executor.ts` — dispatches custom tool calls to Worker via RPC
+- `_sandbox_worker.ts` — sandboxed Deno Worker for `run_code` tool
 - `builtin_tools.ts` — web_search, visit_webpage, fetch_json, run_code,
   user_input, final_answer
 - `llm.ts` — Claude API calls (OpenAI-compatible format)
@@ -115,15 +110,12 @@ requests through Comlink to the host process. The host handler
 (SSRF protection) before executing the real fetch.
 
 **Comlink architecture**: All worker ↔ host communication uses Comlink
-(`npm:comlink`). Production workers use Comlink over `MessagePort` (structured
-clone). Dev workers use Comlink over WebSocket via `createWebSocketEndpoint`
-(`core/_ws_endpoint.ts`), which JSON-serializes Comlink messages. Both paths
-produce the same `WorkerApi` interface via `createWorkerApi`.
+(`npm:comlink`) over `MessagePort` (structured clone), producing a `WorkerApi`
+interface via `createWorkerApi`.
 
-The `HostApi` type (fetch + kv proxy) is exposed to production workers via a
-dedicated `MessageChannel` — the host calls `Comlink.expose(hostApi, port1)` and
-transfers `port2` to the worker. Dev workers don't need this because they run
-with `net: true`.
+The `HostApi` type (fetch + kv proxy) is exposed to workers via a dedicated
+`MessageChannel` — the host calls `Comlink.expose(hostApi, port1)` and transfers
+`port2` to the worker.
 
 ## Conventions
 
@@ -131,8 +123,7 @@ with `net: true`.
 - **Frameworks**: Preact (client UI)
 - **Testing**: `@std/testing/bdd` (`describe`/`it`) + `@std/expect`. Test files
   are co-located: `foo.ts` → `foo_test.ts`
-- **Browser behavior**: CLI opens the browser only when scaffolding a new agent,
-  never during `dev` on an existing agent
+- **Browser behavior**: CLI opens the browser only when scaffolding a new agent
 - **Agent API docs**: `cli/claude.md` is copied into user agent directories as
   their CLAUDE.md. When modifying the agent API surface (`sdk/types.ts`), update
   `cli/claude.md` to match.

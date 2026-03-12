@@ -1,8 +1,4 @@
-import {
-  type AgentConfig,
-  DEFAULT_INSTRUCTIONS,
-  type ToolSchema,
-} from "@aai/sdk/types";
+import { type AgentConfig, DEFAULT_INSTRUCTIONS } from "@aai/sdk/types";
 
 const VOICE_RULES =
   "\n\nCRITICAL OUTPUT RULES — you MUST follow these for EVERY response:\n" +
@@ -18,13 +14,13 @@ const VOICE_RULES =
 
 export function buildSystemPrompt(
   config: AgentConfig,
-  toolSchemas: ToolSchema[],
+  hasTools: boolean,
   opts?: { voice?: boolean },
 ): string {
   const agentInstructions = config.instructions
     ? `\n\nAgent-Specific Instructions:\n${config.instructions}`
     : "";
-  const toolReminder = toolSchemas.length > 0
+  const toolReminder = hasTools
     ? "\n\nAnswer the user's request using the tool calling API provided to you. " +
       "NEVER write tool calls as text, XML, or code in your response — always use the structured tool calling mechanism. " +
       "Before calling a tool, do some analysis. " +
@@ -38,9 +34,7 @@ export function buildSystemPrompt(
       "\n\nTool Preambles: When you decide to call a tool, ALWAYS say a brief natural phrase BEFORE the tool call " +
       '(e.g. "Let me look that up" or "One moment while I check"). ' +
       "This fills silence while the tool executes. Keep preambles to one short sentence." +
-      "\n\nIMPORTANT: You MUST call the final_answer tool to deliver every response. " +
-      "Put your complete spoken response in the answer parameter. " +
-      "It is the only way to complete the task — otherwise you will be stuck in a loop."
+      "\n\nWhen you have your final response ready, call the final_answer tool with your spoken response in the answer parameter."
     : "";
 
   const today = new Date().toLocaleDateString("en-US", {

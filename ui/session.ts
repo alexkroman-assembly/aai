@@ -1,29 +1,26 @@
 import { batch, type Signal, signal } from "@preact/signals";
-// Inlined from core/_protocol.ts to avoid dependency on unpublished @aai/core.
-const SUPPORTED_PROTOCOL_VERSION = 1;
-const DEFAULT_STT_SAMPLE_RATE = 16_000;
-const DEFAULT_TTS_SAMPLE_RATE = 24_000;
+import {
+  DEFAULT_STT_SAMPLE_RATE,
+  DEFAULT_TTS_SAMPLE_RATE,
+  PROTOCOL_VERSION,
+  type ServerMessage as _ServerMessage,
+} from "@aai/core/protocol";
+
+const SUPPORTED_PROTOCOL_VERSION = PROTOCOL_VERSION;
 const SUPPORTED_AUDIO_FORMATS = new Set(["pcm16"]);
 
-type ErrorMessage = { type: "error"; message: string; details?: string[] };
-
+// Client-side variant: protocol_version and audio_format are optional for
+// backwards compatibility with older servers that don't send them.
 type ServerMessage =
-  | {
-    type: "ready";
-    protocol_version?: number;
-    audio_format?: string;
-    sample_rate: number;
-    tts_sample_rate: number;
-  }
-  | { type: "partial_transcript"; text: string }
-  | { type: "final_transcript"; text: string; turn_order?: number }
-  | { type: "turn"; text: string; turn_order?: number }
-  | { type: "chat"; text: string }
-  | { type: "tts_done" }
-  | { type: "cancelled" }
-  | { type: "reset" }
-  | ErrorMessage
-  | { type: "pong" };
+  | Omit<
+    Extract<_ServerMessage, { type: "ready" }>,
+    "protocol_version" | "audio_format"
+  >
+    & {
+      protocol_version?: number;
+      audio_format?: string;
+    }
+  | Exclude<_ServerMessage, { type: "ready" }>;
 
 import {
   type AgentState,

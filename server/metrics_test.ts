@@ -124,7 +124,6 @@ Deno.test("serialize includes all registered metrics", () => {
   expect(output).toContain("aai_turns_total");
   expect(output).toContain("aai_errors_total");
   expect(output).toContain("aai_turn_duration_seconds");
-  expect(output).toContain("aai_llm_duration_seconds");
   expect(output).toContain("aai_tts_duration_seconds");
   expect(output).toContain("aai_stt_connect_duration_seconds");
   expect(output).toContain("aai_tool_duration_seconds");
