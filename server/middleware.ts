@@ -1,6 +1,7 @@
 // Copyright 2025 the AAI authors. MIT license.
+import { STATUS_CODE } from "@std/http/status";
 import { HttpError } from "./context.ts";
-import { verifyOrClaimNamespace } from "./auth.ts";
+import { verifySlugOwner } from "./auth.ts";
 import {
   type AgentScope,
   type ScopeKey,
@@ -39,7 +40,7 @@ export function applyGlobalHeaders(res: Response): Response {
 /** Handle CORS preflight (OPTIONS) requests. */
 export function handlePreflight(): Response {
   return new Response(null, {
-    status: 204,
+    status: STATUS_CODE.NoContent,
     headers: { ...CORS_HEADERS, ...SECURITY_HEADERS },
   });
 }
@@ -48,17 +49,16 @@ function bearerToken(req: Request): string | null {
   return req.headers.get("Authorization")?.slice(7) || null;
 }
 
-/** Validate namespace/slug URL params and return the combined slug. */
+/** Validate slug URL param and return it. */
 export function validateSlug(params: Record<string, string>): string {
-  const ns = params.namespace ?? "";
   const slug = params.slug ?? "";
-  if (!VALID_SLUG_REGEXP.test(ns) || !VALID_SLUG_REGEXP.test(slug)) {
-    throw new HttpError(400, "Invalid slug");
+  if (!VALID_SLUG_REGEXP.test(slug)) {
+    throw new HttpError(STATUS_CODE.BadRequest, "Invalid slug");
   }
-  return `${ns}/${slug}`;
+  return slug;
 }
 
-/** Verify the request has a valid owner credential for the namespace. Returns accountId. */
+/** Verify the request has a valid owner credential for the slug. Returns the API key hash. */
 export async function requireOwner(
   req: Request,
   opts: { slug: string; store: BundleStore },
@@ -66,28 +66,27 @@ export async function requireOwner(
   const apiKey = bearerToken(req);
   if (!apiKey) {
     throw new HttpError(
-      401,
+      STATUS_CODE.Unauthorized,
       "Missing Authorization header (Bearer <API_KEY>)",
     );
   }
-  const namespace = opts.slug.split("/")[0]!;
-  const accountId = await verifyOrClaimNamespace(apiKey, {
-    namespace,
+  const result = await verifySlugOwner(apiKey, {
+    slug: opts.slug,
     store: opts.store,
   });
-  if (!accountId) {
+  if (result.status === "forbidden") {
     throw new HttpError(
-      403,
-      `Namespace "${namespace}" is owned by another user.`,
+      STATUS_CODE.Forbidden,
+      `Slug "${opts.slug}" is owned by another user.`,
     );
   }
-  return accountId;
+  return result.keyHash;
 }
 
 /** Require WebSocket upgrade header. */
 export function requireUpgrade(req: Request): void {
   if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") {
-    throw new HttpError(400, "Expected WebSocket upgrade");
+    throw new HttpError(STATUS_CODE.BadRequest, "Expected WebSocket upgrade");
   }
 }
 
@@ -100,7 +99,7 @@ export function requireInternal(
   const addr = info?.remoteAddr;
   const ip = fly ?? (addr && "hostname" in addr ? addr.hostname : "") ?? "";
   if (!isPrivateIp(ip)) {
-    throw new HttpError(403, "Forbidden");
+    throw new HttpError(STATUS_CODE.Forbidden, "Forbidden");
   }
 }
 
@@ -123,11 +122,17 @@ export async function requireScopeToken(
 ): Promise<AgentScope> {
   const token = bearerToken(req);
   if (!token) {
-    throw new HttpError(401, "Missing Authorization header");
+    throw new HttpError(
+      STATUS_CODE.Unauthorized,
+      "Missing Authorization header",
+    );
   }
   const scope = await verifyScopeToken(scopeKey, token);
   if (!scope) {
-    throw new HttpError(403, "Invalid or tampered scope token");
+    throw new HttpError(
+      STATUS_CODE.Forbidden,
+      "Invalid or tampered scope token",
+    );
   }
   return scope;
 }

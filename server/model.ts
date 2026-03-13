@@ -2,6 +2,7 @@
 import { createOpenAI } from "@ai-sdk/openai";
 import {
   type LanguageModelV1,
+  type LanguageModelV1CallOptions,
   type LanguageModelV1Middleware,
   wrapLanguageModel,
 } from "ai";
@@ -15,23 +16,26 @@ const DEFAULT_GATEWAY = "https://llm-gateway.assemblyai.com/v1";
  * We ensure at least one key by replacing `{}` with `{"_":""}`.
  */
 const gatewayBugMiddleware: LanguageModelV1Middleware = {
-  // deno-lint-ignore no-explicit-any
-  transformParams: ({ params }: { params: any }) => {
+  // deno-lint-ignore require-await
+  transformParams: async (
+    { params }: { params: LanguageModelV1CallOptions },
+  ) => {
     const messages = params.prompt;
     if (!Array.isArray(messages)) return params;
 
     const patched = messages.map(
-      // deno-lint-ignore no-explicit-any
-      (msg: any) => {
+      (msg) => {
         if (msg.role !== "assistant") return msg;
         const content = msg.content;
         if (!Array.isArray(content)) return msg;
 
         const patchedContent = content.map(
-          // deno-lint-ignore no-explicit-any
-          (part: any) => {
+          (part) => {
             if (part.type !== "tool-call") return part;
-            const args = part.args;
+            const args = part.args as
+              | Record<string, unknown>
+              | unknown[]
+              | null;
             if (
               typeof args === "object" && args !== null &&
               !Array.isArray(args) &&

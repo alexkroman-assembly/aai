@@ -2,7 +2,7 @@
 import { assert, assertStrictEquals } from "@std/assert";
 import { wireSessionSocket } from "./ws_handler.ts";
 import type { Session } from "./session.ts";
-import { MockWebSocket } from "./_mock_ws.ts";
+import { MockWebSocket } from "@aai/sdk/testing";
 import { flush } from "./_test_utils.ts";
 
 function createSpySession(): Session & { calls: string[] } {

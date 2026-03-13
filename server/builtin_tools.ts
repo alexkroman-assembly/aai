@@ -7,13 +7,13 @@ import {
   type ToolExecutionOptions,
   type ToolSet,
 } from "ai";
-import * as Comlink from "comlink";
+import { createRpcClient, isRpcMessage } from "@aai/sdk/rpc";
 import type {
   BuiltinTool as BuiltinToolName,
   ToolSchema,
 } from "@aai/sdk/types";
 import TurndownService from "turndown";
-import { createDenoWorker, LOCKED_PERMISSIONS } from "@aai/core/deno-worker";
+import { createDenoWorker, LOCKED_PERMISSIONS } from "./_deno_worker.ts";
 import { matchSubnets } from "@std/net/unstable-ip";
 
 const turndown = new TurndownService({ headingStyle: "atx" });
@@ -248,13 +248,17 @@ const runCode = defineTool({
       LOCKED_PERMISSIONS,
     );
 
-    type SandboxApi = {
-      execute(code: string): Promise<{ output: string; error?: string }>;
-    };
-
     try {
-      const api = Comlink.wrap<SandboxApi>(worker);
-      const result = await api.execute(code);
+      const rpcClient = createRpcClient((msg) => worker.postMessage(msg));
+      worker.onmessage = (e: MessageEvent) => {
+        if (isRpcMessage(e.data) && e.data.type === "rpc-response") {
+          rpcClient.handleResponse(e.data);
+        }
+      };
+      const result = await rpcClient.call("execute", code) as {
+        output: string;
+        error?: string;
+      };
 
       if (result.error) {
         return JSON.stringify({ error: result.error });
@@ -399,7 +403,9 @@ export function getBuiltinVercelTools(
   for (const name of allNames) {
     const bt = BUILTIN_TOOLS[name];
     if (!bt) continue;
-    const params = jsonSchema(z.toJSONSchema(bt.parameters));
+    const params = jsonSchema(
+      z.toJSONSchema(bt.parameters) as ToolSchema["parameters"],
+    );
     if (name === FINAL_ANSWER_TOOL || name === USER_INPUT_TOOL) {
       // No execute → generateText stops the loop when LLM calls these
       tools[name] = vercelTool({

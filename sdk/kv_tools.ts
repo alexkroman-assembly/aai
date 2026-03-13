@@ -105,7 +105,10 @@ export function kvTools(
         ),
         value: z.string().describe("The information to remember"),
       }),
-      execute: async ({ key, value }, ctx) => {
+      execute: async (
+        { key, value }: { key: string; value: string },
+        ctx,
+      ) => {
         await ctx.kv.set(key, value);
         return { saved: key };
       },
@@ -115,7 +118,7 @@ export function kvTools(
       parameters: z.object({
         key: z.string().describe("The key to look up"),
       }),
-      execute: async ({ key }, ctx) => {
+      execute: async ({ key }: { key: string }, ctx) => {
         const value = await ctx.kv.get(key);
         if (value === null) return { found: false, key };
         return { found: true, key, value };
@@ -128,7 +131,7 @@ export function kvTools(
           "Prefix to filter keys (e.g. 'user:'). Use empty string for all.",
         ).optional(),
       }),
-      execute: async ({ prefix }, ctx) => {
+      execute: async ({ prefix }: { prefix?: string }, ctx) => {
         const entries = await ctx.kv.list(prefix ?? "");
         return { count: entries.length, keys: entries.map((e) => e.key) };
       },
@@ -138,7 +141,7 @@ export function kvTools(
       parameters: z.object({
         key: z.string().describe("The key to delete"),
       }),
-      execute: async ({ key }, ctx) => {
+      execute: async ({ key }: { key: string }, ctx) => {
         await ctx.kv.delete(key);
         return { deleted: key };
       },

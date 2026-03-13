@@ -1,6 +1,5 @@
 // Copyright 2025 the AAI authors. MIT license.
 import { assertEquals, assertStrictEquals } from "@std/assert";
-import { normalizeTransport } from "@aai/sdk/types";
 import {
   AgentConfigSchema,
   AgentMetadataSchema,
@@ -10,23 +9,6 @@ import {
   ServerMessageSchema,
   ToolSchemaSchema,
 } from "./_schemas.ts";
-
-Deno.test("normalizeTransport", async (t) => {
-  await t.step("defaults to websocket", () => {
-    assertEquals(normalizeTransport(undefined), ["websocket"]);
-  });
-
-  await t.step("wraps string in array", () => {
-    assertEquals(normalizeTransport("twilio"), ["twilio"]);
-  });
-
-  await t.step("passes array through", () => {
-    assertEquals(normalizeTransport(["websocket", "twilio"]), [
-      "websocket",
-      "twilio",
-    ]);
-  });
-});
 
 Deno.test("AgentConfigSchema", async (t) => {
   await t.step("accepts minimal config", () => {
@@ -107,7 +89,7 @@ Deno.test("DeployBodySchema", async (t) => {
     const result = DeployBodySchema.safeParse({
       env: { ASSEMBLYAI_API_KEY: "test" },
       worker: "code",
-      client: "code",
+      html: "<html></html>",
     });
     assertStrictEquals(result.success, true);
   });
@@ -116,26 +98,29 @@ Deno.test("DeployBodySchema", async (t) => {
     const result = DeployBodySchema.safeParse({
       env: {},
       worker: "",
-      client: "code",
+      html: "<html></html>",
     });
     assertStrictEquals(result.success, false);
   });
 
-  await t.step("accepts transport as string or array", () => {
-    const asString = DeployBodySchema.safeParse({
+  await t.step("accepts transport as array", () => {
+    const result = DeployBodySchema.safeParse({
       env: {},
       worker: "code",
-      client: "code",
-      transport: "twilio",
-    });
-    const asArray = DeployBodySchema.safeParse({
-      env: {},
-      worker: "code",
-      client: "code",
+      html: "<html></html>",
       transport: ["websocket", "twilio"],
     });
-    assertStrictEquals(asString.success, true);
-    assertStrictEquals(asArray.success, true);
+    assertStrictEquals(result.success, true);
+  });
+
+  await t.step("rejects transport as bare string", () => {
+    const result = DeployBodySchema.safeParse({
+      env: {},
+      worker: "code",
+      html: "<html></html>",
+      transport: "twilio",
+    });
+    assertStrictEquals(result.success, false);
   });
 });
 
@@ -244,7 +229,7 @@ Deno.test("AgentMetadataSchema", async (t) => {
       slug: "my-agent",
       env: { KEY: "val" },
       transport: ["websocket", "twilio"],
-      account_id: "abc123",
+      credential_hashes: ["abc123"],
     });
     assertStrictEquals(result.success, true);
   });

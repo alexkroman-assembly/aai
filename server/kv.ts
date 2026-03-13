@@ -2,7 +2,7 @@
 import { Redis } from "@upstash/redis";
 import type { AgentScope } from "./scope_token.ts";
 
-const MAX_VALUE_SIZE = 65_536;
+import { MAX_VALUE_SIZE } from "@aai/sdk/kv";
 
 export type KvListEntry = { key: string; value: unknown };
 
@@ -24,11 +24,11 @@ export type KvStore = {
 };
 
 function scopedKey(scope: AgentScope, key: string): string {
-  return `kv:${scope.accountId}:${scope.slug}:${key}`;
+  return `kv:${scope.keyHash}:${scope.slug}:${key}`;
 }
 
 function scopePrefix(scope: AgentScope): string {
-  return `kv:${scope.accountId}:${scope.slug}:`;
+  return `kv:${scope.keyHash}:${scope.slug}:`;
 }
 
 async function scanAll(redis: Redis, pattern: string): Promise<string[]> {

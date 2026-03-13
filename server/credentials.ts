@@ -1,18 +1,19 @@
 // Copyright 2025 the AAI authors. MIT license.
 /**
- * Encrypts and decrypts agent env vars at rest using jose JWE (A256GCM + dir).
+ * Encrypts and decrypts agent env vars at rest using AES-256-GCM.
  * The encryption key is derived from KV_SCOPE_SECRET via HKDF.
  */
 
-import { compactDecrypt, CompactEncrypt } from "jose";
+import { decodeBase64Url, encodeBase64Url } from "@std/encoding/base64url";
+import { decryptAesGcm, encryptAesGcm } from "./_aes_gcm.ts";
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
 
-/** Opaque type for the credential encryption key (raw 256-bit bytes). */
-export type CredentialKey = Uint8Array;
+/** Opaque type for the credential encryption key. */
+export type CredentialKey = CryptoKey;
 
-/** Derive a 256-bit key from the scope secret via HKDF-SHA256. */
+/** Derive a 256-bit AES-GCM key from the scope secret via HKDF-SHA256. */
 export async function deriveCredentialKey(
   secret: string,
 ): Promise<CredentialKey> {
@@ -21,9 +22,9 @@ export async function deriveCredentialKey(
     enc.encode(secret),
     "HKDF",
     false,
-    ["deriveBits"],
+    ["deriveKey"],
   );
-  const bits = await crypto.subtle.deriveBits(
+  return await crypto.subtle.deriveKey(
     {
       name: "HKDF",
       hash: "SHA-256",
@@ -31,26 +32,28 @@ export async function deriveCredentialKey(
       info: enc.encode("env-encryption"),
     },
     ikm,
-    256,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"],
   );
-  return new Uint8Array(bits);
 }
 
-/** Encrypt an env record into a compact JWE string. */
+/** Encrypt an env record. Returns base64url(nonce ‖ ciphertext ‖ tag). */
 export async function encryptEnv(
   key: CredentialKey,
   env: Record<string, string>,
 ): Promise<string> {
-  return await new CompactEncrypt(enc.encode(JSON.stringify(env)))
-    .setProtectedHeader({ alg: "dir", enc: "A256GCM" })
-    .encrypt(key);
+  return encodeBase64Url(
+    await encryptAesGcm(key, enc.encode(JSON.stringify(env))),
+  );
 }
 
-/** Decrypt a compact JWE string back into an env record. */
+/** Decrypt a base64url blob back into an env record. */
 export async function decryptEnv(
   key: CredentialKey,
-  jwe: string,
+  encrypted: string,
 ): Promise<Record<string, string>> {
-  const { plaintext } = await compactDecrypt(jwe, key);
-  return JSON.parse(dec.decode(plaintext));
+  return JSON.parse(
+    dec.decode(await decryptAesGcm(key, decodeBase64Url(encrypted))),
+  );
 }

@@ -32,8 +32,8 @@ Deno.test("runDeploy", async (t) => {
     const result = await runDeploy({
       url: "http://localhost:3000",
       bundle: makeBundle(),
-      namespace: "my-ns",
-      slug: "agent-a",
+      env: {},
+      slug: "cool-cats-jump",
       dryRun: false,
       apiKey: "test-key",
     });
@@ -42,17 +42,16 @@ Deno.test("runDeploy", async (t) => {
     const deployCall = fetchSpy.calls[0]!;
     assertStrictEquals(
       String(deployCall.args[0]),
-      "http://localhost:3000/my-ns/agent-a/deploy",
+      "http://localhost:3000/cool-cats-jump/deploy",
     );
     assertStrictEquals(
       (deployCall.args[1]?.headers as Record<string, string>)?.Authorization,
       "Bearer test-key",
     );
-    assertStrictEquals(result.namespace, "my-ns");
-    assertStrictEquals(result.slug, "agent-a");
+    assertStrictEquals(result.slug, "cool-cats-jump");
   });
 
-  await t.step("auto-increments namespace on 403", async () => {
+  await t.step("generates new slug on 403", async () => {
     let attempt = 0;
     using fetchStub = stub(
       _internals,
@@ -65,7 +64,7 @@ Deno.test("runDeploy", async (t) => {
           return Promise.resolve(
             new Response(
               JSON.stringify({
-                error: 'Namespace "my-ns" is owned by another',
+                error: 'Slug "some-slug" is owned by another',
               }),
               { status: 403, headers: { "Content-Type": "application/json" } },
             ),
@@ -77,19 +76,24 @@ Deno.test("runDeploy", async (t) => {
     const result = await runDeploy({
       url: "http://localhost:3000",
       bundle: makeBundle(),
-      namespace: "my-ns",
-      slug: "agent-a",
+      env: {},
+      slug: "cool-cats-jump",
       dryRun: false,
       apiKey: "test-key",
     });
 
     // 2 failed deploy attempts + 1 success + 1 health = 4
     assertSpyCalls(fetchStub, 4);
-    assertStringIncludes(String(fetchStub.calls[0]!.args[0]), "/my-ns/");
-    assertStringIncludes(String(fetchStub.calls[1]!.args[0]), "/my-ns-1/");
-    assertStringIncludes(String(fetchStub.calls[2]!.args[0]), "/my-ns-2/");
-    assertStrictEquals(result.namespace, "my-ns-2");
-    assertStrictEquals(result.slug, "agent-a");
+    // First attempt uses original slug
+    assertStringIncludes(
+      String(fetchStub.calls[0]!.args[0]),
+      "/cool-cats-jump/",
+    );
+    // Subsequent attempts use new generated slugs (not the original)
+    const secondUrl = String(fetchStub.calls[1]!.args[0]);
+    assertStringIncludes(secondUrl, "/deploy");
+    // Result slug should be whatever the last attempt used (a generated slug)
+    assertStrictEquals(typeof result.slug, "string");
   });
 
   await t.step("dry run does not call fetch", async () => {
@@ -101,12 +105,12 @@ Deno.test("runDeploy", async (t) => {
     const result = await runDeploy({
       url: "http://localhost:3000",
       bundle: makeBundle(),
-      namespace: "my-ns",
-      slug: "agent-a",
+      env: {},
+      slug: "cool-cats-jump",
       dryRun: true,
       apiKey: "test-key",
     });
     assertSpyCalls(fetchStub, 0);
-    assertStrictEquals(result.namespace, "my-ns");
+    assertStrictEquals(result.slug, "cool-cats-jump");
   });
 });

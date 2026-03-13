@@ -29,10 +29,9 @@ export function silenceSteps(): {
 export function makeBundle(overrides?: Partial<BundleOutput>): BundleOutput {
   return {
     worker: "// worker",
-    client: "// client",
-    manifest: JSON.stringify({ env: { ASSEMBLYAI_API_KEY: "test" } }),
+    html: "<html>{{NAME}}{{BASE_PATH}}</html>",
+    manifest: JSON.stringify({ transport: ["websocket"] }),
     workerBytes: 9,
-    clientBytes: 9,
     ...overrides,
   };
 }

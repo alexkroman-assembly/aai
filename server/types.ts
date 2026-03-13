@@ -1,9 +1,8 @@
 // Copyright 2025 the AAI authors. MIT license.
-import { z } from "zod";
 import {
   DEFAULT_STT_SAMPLE_RATE,
   DEFAULT_TTS_SAMPLE_RATE,
-} from "@aai/core/protocol";
+} from "@aai/sdk/protocol";
 
 export type STTConfig = {
   sampleRate: number;
@@ -16,18 +15,6 @@ export type STTConfig = {
   vadThreshold: number;
   sttPrompt?: string | undefined;
 };
-
-export const STTConfigSchema: z.ZodType<STTConfig> = z.object({
-  sampleRate: z.number(),
-  speechModel: z.string(),
-  wssBase: z.string(),
-  tokenExpiresIn: z.number(),
-  formatTurns: z.boolean(),
-  minTurnSilence: z.number(),
-  maxTurnSilence: z.number(),
-  vadThreshold: z.number(),
-  sttPrompt: z.string().optional(),
-});
 
 export const DEFAULT_STT_CONFIG: STTConfig = {
   sampleRate: DEFAULT_STT_SAMPLE_RATE,
@@ -50,17 +37,6 @@ export type TTSConfig = {
   sampleRate: number;
   speedAlpha?: number | undefined;
 };
-
-export const TTSConfigSchema: z.ZodType<TTSConfig> = z.object({
-  wssUrl: z.string(),
-  apiKey: z.string(),
-  voice: z.string(),
-  modelId: z.string(),
-  audioFormat: z.string(),
-  samplingRate: z.number(),
-  sampleRate: z.number(),
-  speedAlpha: z.number().optional(),
-});
 
 export const DEFAULT_TTS_CONFIG: TTSConfig = {
   wssUrl: "wss://users-ws.rime.ai/ws",

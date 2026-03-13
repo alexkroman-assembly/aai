@@ -1,20 +1,33 @@
 {
   "name": "@aai/sdk",
-  "version": "0.1.55",
+  "version": "0.1.77",
   "exports": {
     ".": "./mod.ts",
     "./types": "./types.ts",
     "./define-agent": "./define_agent.ts",
     "./kv": "./kv.ts",
-    "./kv-tools": "./kv_tools.ts"
+    "./kv-tools": "./kv_tools.ts",
+    "./protocol": "./protocol.ts",
+    "./worker-entry": "./worker_entry.ts",
+    "./rpc": "./_rpc.ts",
+    "./worker-shim": "./_worker_shim.ts",
+    "./timeout": "./_timeout.ts",
+    "./testing": "./_mock_ws.ts"
   },
   "imports": {
-    "zod": "jsr:@zod/zod@^4.3.6"
+    "zod": "jsr:@zod/zod@^4.3.6",
+    "json-schema": "npm:@types/json-schema@^7.0.15"
   },
   "publish": {
     "exclude": [
       "*_test.ts"
     ]
   },
-  "lint": {}
+  "lint": {
+    "rules": {
+      "exclude": [
+        "require-await"
+      ]
+    }
+  }
 }

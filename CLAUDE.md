@@ -14,14 +14,28 @@ deno task setup          # Configure git hooks (run after clone)
 deno task check          # Full CI: type-check, lint, fmt, tests
 deno task test           # Run all tests
 deno task serve          # Run the orchestrator server directly
-deno task deploy         # Production deploy
-deno task new            # Scaffold a new agent from templates/
 deno task bump           # Auto-bump versions for changed packages
 deno lint                # Lint only
 deno fmt                 # Format only
 ```
 
 Run a single test file: `deno test --allow-all server/session_test.ts`
+
+### aai-dev CLI
+
+`aai-dev` is a locally-installed dev wrapper (`deno task install-dev`) that
+points at the monorepo source. It automatically resolves `@aai` packages from
+the local tree and targets the local server — no `--dev` or `--server` flags
+needed.
+
+```sh
+aai-dev deploy           # Bundle and deploy to the local server
+aai-dev deploy -y        # Deploy without prompts
+aai-dev new              # Scaffold a new agent
+```
+
+To deploy a template for testing:
+`cd templates/<name> && aai-dev deploy -y`
 
 ## Git Hooks
 
@@ -58,8 +72,8 @@ never on each other.
 - `cli.ts` — arg parsing, subcommands: new, build, deploy, types
 - `new.ts` / `deploy.ts` — Cliffy command definitions for subcommands
 - `_new.ts` / `_deploy.ts` — internal logic for new/deploy
-- `_bundler.ts` — esbuild bundling of `agent.ts`/`client.tsx` into
-  `worker.js`/`client.js`
+- `_bundler.ts` — generates Vite config at build time, bundles
+  `agent.ts`/`client.tsx` into `worker.js`/`index.html`
 - `_discover.ts` — imports `agent.ts` to extract config from `defineAgent()`
 - `_validate.ts` — build-time agent config validation
 
@@ -98,35 +112,38 @@ never on each other.
 ### Agent Isolation
 
 Agent code runs in Deno Workers with **all permissions false** (including
-`net: false`). The worker communicates with the host via Comlink over
-`MessagePort`. Custom tool `execute` functions run inside the worker; built-in
-tools run on the host.
+`net: false`). The worker communicates with the host via postMessage RPC
+(`server/_rpc.ts`). Custom tool `execute` functions run inside the worker;
+built-in tools run on the host.
 
 **Fetch proxy**: Since workers have no network access, `globalThis.fetch` is
-monkeypatched in the worker entry (`core/_worker_entry.ts`) to proxy HTTP
-requests through Comlink to the host process. The host handler
+monkeypatched in the worker shim (`sdk/_worker_shim.ts`) to proxy HTTP
+requests through RPC to the host process. The host handler
 (`server/worker_pool.ts`) validates each URL via `assertPublicUrl()`
 (`server/builtin_tools.ts`) to block requests to private/internal addresses
 (SSRF protection) before executing the real fetch.
 
-**Comlink architecture**: All worker ↔ host communication uses Comlink
-(`npm:comlink`) over `MessagePort` (structured clone), producing a `WorkerApi`
-interface via `createWorkerApi`.
-
-The `HostApi` type (fetch + kv proxy) is exposed to workers via a dedicated
-`MessageChannel` — the host calls `Comlink.expose(hostApi, port1)` and transfers
-`port2` to the worker.
+**RPC architecture**: All worker ↔ host communication uses a typed postMessage
+RPC protocol (structured clone) over `worker.postMessage` / `self.postMessage`.
+The host side (`server/_worker_entry.ts`) uses `createWorkerApi()` to produce a
+`WorkerApi` interface; the worker side (`sdk/_worker_shim.ts`) uses
+`initWorker()` to wire up handlers. Both directions share the same
+`RpcRequest`/`RpcResponse` message types from `sdk/_rpc.ts`.
 
 ## Conventions
 
 - **Runtime**: Deno (not Node). Use `@std/*` for standard library.
-- **Frameworks**: Preact (client UI)
+- **Frameworks**: Preact (client UI), Tailwind CSS v4 (PostCSS,
+  compiled at bundle time)
 - **Testing**: `Deno.test()` with `t.step()` + `@std/assert`. Test files
   are co-located: `foo.ts` → `foo_test.ts`
 - **Browser behavior**: CLI opens the browser only when scaffolding a new agent
-- **Agent API docs**: `cli/claude.md` is copied into user agent directories as
-  their CLAUDE.md. When modifying the agent API surface (`sdk/types.ts`), update
-  `cli/claude.md` to match.
-- **Templates**: `templates/` contains agent scaffolding templates
+- **Agent API docs**: `templates/_shared/CLAUDE.md` is copied into user
+  agent directories. When modifying the agent API surface (`sdk/types.ts`),
+  update it to match.
+- **Templates**: `templates/` (repo root) contains agent scaffolding templates.
+  Each template is self-contained with its own `agent.ts` and `client.tsx`.
+  `templates/_shared/` has non-code files common to all templates (config,
+  styles, docs — copied without overwriting template-specific files).
 - **Scripts**: `scripts/check_boundaries.ts` enforces the workspace dependency
   rule; `scripts/bump_versions.ts` handles version bumps

@@ -2,7 +2,7 @@
 /**
  * Preact UI components for the voice agent interface.
  *
- * Re-exports from _components.ts with explicit type annotations so JSR can
+ * Re-exports from _components/ with explicit type annotations so JSR can
  * generate .d.ts without needing to analyze source files.
  */
 
@@ -10,15 +10,13 @@ import type * as preact from "preact";
 import type { Signal } from "@preact/signals";
 import type { AgentState, Message, SessionError } from "./types.ts";
 
-import {
-  App as _App,
-  ChatView as _ChatView,
-  ErrorBanner as _ErrorBanner,
-  MessageBubble as _MessageBubble,
-  StateIndicator as _StateIndicator,
-  ThinkingIndicator as _ThinkingIndicator,
-  Transcript as _Transcript,
-} from "./_components.ts";
+import { App as _App } from "./_components/app.tsx";
+import { ChatView as _ChatView } from "./_components/chat_view.tsx";
+import { ErrorBanner as _ErrorBanner } from "./_components/error_banner.tsx";
+import { MessageBubble as _MessageBubble } from "./_components/message_bubble.tsx";
+import { StateIndicator as _StateIndicator } from "./_components/state_indicator.tsx";
+import { ThinkingIndicator as _ThinkingIndicator } from "./_components/thinking_indicator.tsx";
+import { Transcript as _Transcript } from "./_components/transcript.tsx";
 
 /** Displays the current agent state as a colored indicator. */
 export const StateIndicator: (

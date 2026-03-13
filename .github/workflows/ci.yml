@@ -24,7 +24,7 @@ jobs:
       - name: Compile binary
         run: |
           npm_includes=""
-          for pkg in preact @preact+signals @preact+signals-core goober esbuild-wasm; do
+          for pkg in preact @preact+signals @preact+signals-core; do
             dir=$(ls -d node_modules/.deno/${pkg}@* 2>/dev/null | head -1)
             [ -n "$dir" ] && npm_includes="$npm_includes --include $dir"
           done
@@ -33,11 +33,8 @@ jobs:
             --unstable-worker-options \
             --include templates/ \
             --include sdk/ \
-            --include core/ \
             --include ui/ \
-            --include cli/claude.md \
             --include cli/deno.json \
-            --include cli/_bundler_config.json \
             $npm_includes \
             --output dist/aai \
             cli/cli.ts

@@ -1,7 +1,7 @@
 // Copyright 2025 the AAI authors. MIT license.
 // Zod validation schemas for server-side use.
 // These validate untrusted input at HTTP/WebSocket boundaries.
-// Protocol schemas (ClientMessage, Twilio) live in @aai/core/protocol.
+// Protocol schemas (ClientMessage, Twilio) live in @aai/sdk/protocol.
 
 import { z } from "zod";
 import type {
@@ -11,7 +11,6 @@ import type {
   BuiltinTool,
   DeployBody,
   ToolChoice,
-  ToolSchema,
   Transport,
 } from "@aai/sdk/types";
 
@@ -19,8 +18,8 @@ export {
   ClientMessageSchema,
   ServerMessageSchema,
   TwilioMessageSchema,
-} from "@aai/core/protocol";
-import type { KvRequest } from "@aai/core/protocol";
+} from "@aai/sdk/protocol";
+import type { KvRequest } from "@aai/sdk/protocol";
 
 /** Zod schema for validating transport type values. */
 export const TransportSchema: z.ZodType<Transport> = z.enum([
@@ -60,15 +59,12 @@ export const AgentConfigSchema: z.ZodType<AgentConfig> = z.object({
   sttPrompt: z.string().min(1).optional(),
   maxSteps: z.number().int().positive().optional(),
   toolChoice: ToolChoiceSchema.optional(),
-  transport: z.union([
-    TransportSchema,
-    z.array(TransportSchema).min(1),
-  ]).optional(),
+  transport: z.array(TransportSchema).min(1).optional(),
   builtinTools: z.array(BuiltinToolSchema).optional(),
 });
 
 /** Zod schema for validating a tool's JSON schema definition. */
-export const ToolSchemaSchema: z.ZodType<ToolSchema> = z.object({
+export const ToolSchemaSchema = z.object({
   name: z.string().min(1),
   description: z.string().min(1),
   parameters: z.object({
@@ -80,13 +76,10 @@ export const ToolSchemaSchema: z.ZodType<ToolSchema> = z.object({
 
 /** Zod schema for validating the deploy request body. */
 export const DeployBodySchema: z.ZodType<DeployBody> = z.object({
-  env: z.record(z.string(), z.string()),
+  env: z.record(z.string(), z.string()).optional(),
   worker: z.string().min(1).max(10_000_000),
-  client: z.string().min(1).max(10_000_000),
-  transport: z.union([
-    TransportSchema,
-    z.array(TransportSchema),
-  ]).optional(),
+  html: z.string().min(1).max(10_000_000),
+  transport: z.array(TransportSchema).min(1).optional(),
 });
 
 /** Zod schema for validating agent environment variables (requires `ASSEMBLYAI_API_KEY`). */
@@ -109,8 +102,8 @@ export type AgentMetadata = {
   env: Record<string, string>;
   /** Supported transport types for this agent. */
   transport: readonly Transport[];
-  /** Account ID of the agent owner (used for KV scoping). */
-  "account_id"?: string | undefined;
+  /** SHA-256 hashes of API keys authorized to manage this agent. */
+  "credential_hashes": string[];
 };
 
 /** Zod schema for validating agent metadata from the bundle store. */
@@ -118,7 +111,7 @@ export const AgentMetadataSchema: z.ZodType<AgentMetadata> = z.object({
   slug: z.string(),
   env: z.record(z.string(), z.string()).default({}),
   transport: z.array(TransportSchema).default(["websocket"]),
-  "account_id": z.string().optional(),
+  credential_hashes: z.array(z.string()).default([]),
 });
 
 /**

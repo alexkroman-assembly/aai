@@ -8,7 +8,7 @@ import {
 } from "./scope_token.ts";
 
 Deno.test("scope tokens", async (t) => {
-  const scope: AgentScope = { accountId: "abc123", slug: "ns/my-agent" };
+  const scope: AgentScope = { keyHash: "abc123", slug: "my-agent" };
 
   await t.step("round-trips a scope", async () => {
     const key = await importScopeKey("test-secret");
@@ -34,7 +34,7 @@ Deno.test("scope tokens", async (t) => {
 
   await t.step("different scopes produce different tokens", async () => {
     const key = await importScopeKey("test-secret");
-    const other: AgentScope = { accountId: "abc123", slug: "ns/other-agent" };
+    const other: AgentScope = { keyHash: "abc123", slug: "other-agent" };
     assertNotEquals(
       await signScopeToken(key, scope),
       await signScopeToken(key, other),

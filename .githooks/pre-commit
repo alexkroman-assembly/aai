@@ -10,5 +10,31 @@ fi
 echo "Auto-bumping versions for changed packages..."
 deno task bump
 
+# Stage any version bumps so they're included in the commit
+git add */deno.json deno.lock 2>/dev/null
+
 echo "Running checks before commit..."
-deno task check
+deno task check || exit 1
+
+echo "Verifying binary compiles..."
+# --no-check: full type-checking already runs above (deno task check)
+# This just verifies the binary builds and runs correctly.
+npm_includes=""
+for pkg in preact @preact+signals @preact+signals-core; do
+  dir=$(ls -d node_modules/.deno/${pkg}@* 2>/dev/null | head -1)
+  [ -n "$dir" ] && npm_includes="$npm_includes --include $dir"
+done
+deno compile \
+  --no-check \
+  --allow-all \
+  --unstable-worker-options \
+  --include templates/ \
+  --include sdk/ \
+  --include ui/ \
+  --include cli/deno.json \
+  $npm_includes \
+  --output /tmp/aai-compile-check \
+  cli/cli.ts || exit 1
+/tmp/aai-compile-check --version || exit 1
+rm -f /tmp/aai-compile-check
+echo "Binary compile OK"

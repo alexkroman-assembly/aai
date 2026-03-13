@@ -1,20 +1,21 @@
 // Copyright 2025 the AAI authors. MIT license.
 /**
- * Scope tokens are HS256 JWTs encoding agent ownership.
- * Uses jose for signing and verification.
+ * Scope tokens are HMAC-SHA256 signed JWTs encoding agent ownership.
+ * Uses crypto.subtle directly — no external dependencies.
  */
 
-import { jwtVerify, SignJWT } from "jose";
+import { decodeBase64Url, encodeBase64Url } from "@std/encoding/base64url";
 
 export type AgentScope = {
-  accountId: string;
+  keyHash: string;
   slug: string;
 };
 
 /** Opaque key type for scope token operations. */
-export type ScopeKey = Uint8Array;
+export type ScopeKey = CryptoKey;
 
 const enc = new TextEncoder();
+const dec = new TextDecoder();
 
 export async function importScopeKey(secret: string): Promise<ScopeKey> {
   const ikm = await crypto.subtle.importKey(
@@ -34,16 +35,29 @@ export async function importScopeKey(secret: string): Promise<ScopeKey> {
     ikm,
     256,
   );
-  return new Uint8Array(bits);
+  return await crypto.subtle.importKey(
+    "raw",
+    bits,
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign", "verify"],
+  );
 }
+
+const HEADER = encodeBase64Url(
+  enc.encode(JSON.stringify({ alg: "HS256", typ: "JWT" })),
+);
 
 export async function signScopeToken(
   key: ScopeKey,
   scope: AgentScope,
 ): Promise<string> {
-  return await new SignJWT({ sub: scope.accountId, scope: scope.slug })
-    .setProtectedHeader({ alg: "HS256", typ: "JWT" })
-    .sign(key);
+  const payload = encodeBase64Url(
+    enc.encode(JSON.stringify({ sub: scope.keyHash, scope: scope.slug })),
+  );
+  const signingInput = `${HEADER}.${payload}`;
+  const sig = await crypto.subtle.sign("HMAC", key, enc.encode(signingInput));
+  return `${signingInput}.${encodeBase64Url(sig)}`;
 }
 
 export async function verifyScopeToken(
@@ -51,17 +65,27 @@ export async function verifyScopeToken(
   token: string,
 ): Promise<AgentScope | null> {
   try {
-    const { payload } = await jwtVerify(token, key, {
-      algorithms: ["HS256"],
-    });
-    const sub = payload.sub;
-    const scope = payload.scope;
+    const [header, payload, signature, ...rest] = token.split(".");
+    if (!header || !payload || !signature || rest.length > 0) return null;
+    const signingInput = `${header}.${payload}`;
+    const sig = decodeBase64Url(signature);
+    const valid = await crypto.subtle.verify(
+      "HMAC",
+      key,
+      sig,
+      enc.encode(signingInput),
+    );
+    if (!valid) return null;
+
+    const claims = JSON.parse(dec.decode(decodeBase64Url(payload)));
+    const sub = claims.sub;
+    const scope = claims.scope;
     if (
       typeof sub !== "string" || typeof scope !== "string" || !sub || !scope
     ) {
       return null;
     }
-    return { accountId: sub, slug: scope };
+    return { keyHash: sub, slug: scope };
   } catch {
     return null;
   }

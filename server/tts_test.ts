@@ -2,7 +2,7 @@
 import { assert, assertEquals, assertStrictEquals } from "@std/assert";
 import { createTtsConnection } from "./tts.ts";
 import { DEFAULT_TTS_CONFIG } from "./types.ts";
-import { installMockWebSocket } from "./_mock_ws.ts";
+import { installMockWebSocket } from "@aai/sdk/testing";
 import { flush } from "./_test_utils.ts";
 
 const config = { ...DEFAULT_TTS_CONFIG, apiKey: "test-tts-key" };

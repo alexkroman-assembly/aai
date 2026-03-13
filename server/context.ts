@@ -1,4 +1,5 @@
 // Copyright 2025 the AAI authors. MIT license.
+import { STATUS_CODE } from "@std/http/status";
 import type { AgentSlot } from "./worker_pool.ts";
 import type { BundleStore } from "./bundle_store_tigris.ts";
 import type { Session } from "./session.ts";
@@ -37,13 +38,13 @@ export function json(
   opts?: { status?: number; headers?: Record<string, string> },
 ): Response {
   return new Response(JSON.stringify(data), {
-    status: opts?.status ?? 200,
+    status: opts?.status ?? STATUS_CODE.OK,
     headers: { "Content-Type": "application/json", ...opts?.headers },
   });
 }
 
 /** Create an HTML response. */
-export function html(body: string, status = 200): Response {
+export function html(body: string, status = STATUS_CODE.OK): Response {
   return new Response(body, {
     status,
     headers: { "Content-Type": "text/html; charset=utf-8" },
@@ -51,7 +52,7 @@ export function html(body: string, status = 200): Response {
 }
 
 /** Create a plain text response. */
-export function text(body: string, status = 200): Response {
+export function text(body: string, status = STATUS_CODE.OK): Response {
   return new Response(body, {
     status,
     headers: { "Content-Type": "text/plain; charset=utf-8" },

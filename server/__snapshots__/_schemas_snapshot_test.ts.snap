@@ -87,26 +87,15 @@ snapshot[`AgentConfigSchema snapshot 1`] = `
       ],
     },
     transport: {
-      anyOf: [
-        {
-          enum: [
-            "websocket",
-            "twilio",
-          ],
-          type: "string",
-        },
-        {
-          items: {
-            enum: [
-              "websocket",
-              "twilio",
-            ],
-            type: "string",
-          },
-          minItems: 1,
-          type: "array",
-        },
-      ],
+      items: {
+        enum: [
+          "websocket",
+          "twilio",
+        ],
+        type: "string",
+      },
+      minItems: 1,
+      type: "array",
     },
     voice: {
       type: "string",
@@ -176,11 +165,6 @@ snapshot[`DeployBodySchema snapshot 1`] = `
   "\$schema": "https://json-schema.org/draft/2020-12/schema",
   additionalProperties: false,
   properties: {
-    client: {
-      maxLength: 10000000,
-      minLength: 1,
-      type: "string",
-    },
     env: {
       additionalProperties: {
         type: "string",
@@ -190,26 +174,21 @@ snapshot[`DeployBodySchema snapshot 1`] = `
       },
       type: "object",
     },
+    html: {
+      maxLength: 10000000,
+      minLength: 1,
+      type: "string",
+    },
     transport: {
-      anyOf: [
-        {
-          enum: [
-            "websocket",
-            "twilio",
-          ],
-          type: "string",
-        },
-        {
-          items: {
-            enum: [
-              "websocket",
-              "twilio",
-            ],
-            type: "string",
-          },
-          type: "array",
-        },
-      ],
+      items: {
+        enum: [
+          "websocket",
+          "twilio",
+        ],
+        type: "string",
+      },
+      minItems: 1,
+      type: "array",
     },
     worker: {
       maxLength: 10000000,
@@ -218,9 +197,8 @@ snapshot[`DeployBodySchema snapshot 1`] = `
     },
   },
   required: [
-    "env",
     "worker",
-    "client",
+    "html",
   ],
   type: "object",
 }

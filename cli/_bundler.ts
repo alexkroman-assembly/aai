@@ -1,20 +1,11 @@
 // Copyright 2025 the AAI authors. MIT license.
-import {
-  build,
-  type BuildOptions,
-  formatMessages,
-  initialize,
-  type Plugin,
-} from "esbuild";
-import type { InitializeOptions } from "esbuild-wasm-types";
-import { denoPlugin } from "@deno/esbuild-plugin";
-import { dirname, fromFileUrl, join, resolve } from "@std/path";
+import { join } from "@std/path";
 import type { AgentEntry } from "./_discover.ts";
 
 /**
- * Error thrown when esbuild bundling fails.
+ * Error thrown when bundling fails.
  *
- * @param message Human-readable error message (typically formatted esbuild output).
+ * @param message Human-readable error message (typically formatted build output).
  */
 export class BundleError extends Error {
   constructor(message: string) {
@@ -23,358 +14,303 @@ export class BundleError extends Error {
   }
 }
 
-async function buildWithCleanErrors(
-  options: BuildOptions,
-): ReturnType<typeof build> {
-  try {
-    return await build(options);
-  } catch (err: unknown) {
-    if (
-      err && typeof err === "object" && "errors" in err &&
-      Array.isArray((err as { errors: unknown[] }).errors)
-    ) {
-      const errors = (err as { errors: unknown[] }).errors as Parameters<
-        typeof formatMessages
-      >[0];
-      const formatted = await formatMessages(errors, {
-        kind: "error",
-        color: true,
-      });
-      throw new BundleError(formatted.join("\n"));
-    }
-    throw err;
-  }
-}
-
-let esbuildReady: Promise<void> | null = null;
-
-function ensureInit() {
-  if (!esbuildReady) {
-    esbuildReady = (async () => {
-      const esbuildDir = dirname(fromFileUrl(import.meta.resolve("esbuild")));
-      const wasmPath = join(esbuildDir, "..", "esbuild.wasm");
-      const wasmBytes = await Deno.readFile(wasmPath);
-      const wasmModule = new WebAssembly.Module(wasmBytes);
-      await initialize(
-        { wasmModule, worker: false } as unknown as InitializeOptions,
-      );
-    })().catch(() => {
-      esbuildReady = null;
-    });
-  }
-  return esbuildReady;
-}
-
-/** Absolute path to the AAI monorepo root directory. */
-export const AAI_ROOT = resolve(dirname(fromFileUrl(import.meta.url)), "..");
-
-function getConfigPath(): string {
-  const root = resolve(AAI_ROOT, "deno.json");
-  try {
-    Deno.statSync(root);
-    return root;
-  } catch {
-    return resolve(
-      dirname(fromFileUrl(import.meta.url)),
-      "_bundler_config.json",
-    );
-  }
-}
-
-/**
- * Resolves workspace package specifiers (@aai/sdk/*, @aai/core/*, @aai/ui)
- * to local file paths. The @deno/esbuild-plugin's Workspace resolver converts
- * these to jsr: specifiers that the WASM loader can't fetch, so we intercept
- * them first and point directly to the source files.
- */
-const WORKSPACE_ALIASES: Record<string, string> = {
-  "@aai/sdk": resolve(AAI_ROOT, "sdk/mod.ts"),
-  "@aai/sdk/types": resolve(AAI_ROOT, "sdk/types.ts"),
-  "@aai/sdk/define-agent": resolve(AAI_ROOT, "sdk/define_agent.ts"),
-  "@aai/sdk/kv": resolve(AAI_ROOT, "sdk/kv.ts"),
-  "@aai/core/worker-entry": resolve(AAI_ROOT, "core/_worker_entry.ts"),
-  "@aai/core/protocol": resolve(AAI_ROOT, "core/_protocol.ts"),
-  "@aai/core/deno-worker": resolve(AAI_ROOT, "core/_deno_worker.ts"),
-  "@aai/ui": resolve(AAI_ROOT, "ui/mod.ts"),
-  "@aai/ui/types": resolve(AAI_ROOT, "ui/types.ts"),
-  "@aai/ui/session": resolve(AAI_ROOT, "ui/session.ts"),
-  "@aai/ui/signals": resolve(AAI_ROOT, "ui/signals.ts"),
-  "@aai/ui/theme": resolve(AAI_ROOT, "ui/theme.ts"),
-  "@aai/ui/mount": resolve(AAI_ROOT, "ui/mount.ts"),
-  "@aai/ui/components": resolve(AAI_ROOT, "ui/_components.ts"),
-  "@aai/ui/audio": resolve(AAI_ROOT, "ui/audio.ts"),
-  "@aai/ui/resample": resolve(AAI_ROOT, "ui/resample.ts"),
-  "@aai/ui/html": resolve(AAI_ROOT, "ui/_html.ts"),
-};
-
-/**
- * Resolves an npm package name to its entry point file path under node_modules.
- * Returns undefined if the package cannot be found.
- */
-function resolveNpmPackage(
-  name: string,
-  subpath?: string,
-): string | undefined {
-  const pkgDir = join(AAI_ROOT, "node_modules", ...name.split("/"));
-  try {
-    if (subpath) {
-      // e.g. preact/hooks → node_modules/preact/hooks/index.js or hooks.js
-      const sub = join(pkgDir, subpath);
-      try {
-        const info = Deno.statSync(sub);
-        if (info.isDirectory) {
-          const pkgJson = join(sub, "package.json");
-          try {
-            const pkg = JSON.parse(Deno.readTextFileSync(pkgJson));
-            return resolve(sub, pkg.module || pkg.main || "index.js");
-          } catch {
-            return resolve(sub, "index.js");
-          }
-        }
-      } catch { /* not a directory */ }
-      // Try as a file
-      for (const ext of ["", ".js", ".mjs"]) {
-        try {
-          Deno.statSync(sub + ext);
-          return sub + ext;
-        } catch { /* try next */ }
-      }
-    }
-    const pkgJson = join(pkgDir, "package.json");
-    const pkg = JSON.parse(Deno.readTextFileSync(pkgJson));
-    return resolve(pkgDir, pkg.module || pkg.main || "index.js");
-  } catch {
-    // Deno stores transitive deps in .deno/ — search there as a fallback.
-    return resolveFromDenoStore(name);
-  }
-}
-
-/**
- * Search the .deno/ store for a package that isn't hoisted to node_modules.
- * Deno uses the layout: .deno/<scope>+<name>@<version>/node_modules/<scope>/<name>/
- */
-function resolveFromDenoStore(name: string): string | undefined {
-  const denoDir = join(AAI_ROOT, "node_modules", ".deno");
-  // Convert @preact/signals-core → @preact+signals-core
-  const storePrefix = name.replace("/", "+");
-  try {
-    for (const entry of Deno.readDirSync(denoDir)) {
-      if (!entry.isDirectory || !entry.name.startsWith(storePrefix + "@")) {
-        continue;
-      }
-      const pkgDir = join(
-        denoDir,
-        entry.name,
-        "node_modules",
-        ...name.split("/"),
-      );
-      try {
-        const pkgJson = join(pkgDir, "package.json");
-        const pkg = JSON.parse(Deno.readTextFileSync(pkgJson));
-        return resolve(pkgDir, pkg.module || pkg.main || "index.js");
-      } catch { /* try next version */ }
-    }
-  } catch { /* .deno dir doesn't exist */ }
-  return undefined;
-}
-
-/**
- * npm packages used by the framework (ui/, sdk/, core/).
- * Resolved directly to node_modules entry points so the deno esbuild plugin
- * doesn't need to find them — critical for compiled binaries where the deno
- * plugin's npm resolver can't locate node_modules.
- */
-const NPM_PACKAGE_NAMES = [
-  "preact",
-  "preact/hooks",
-  "@preact/signals",
-  "@preact/signals-core",
-  "htm",
-  "comlink",
-];
-
-function buildNpmAliases(): Record<string, string> {
-  const aliases: Record<string, string> = {};
-  for (const name of NPM_PACKAGE_NAMES) {
-    const parts = name.split("/");
-    const pkgName = name.startsWith("@")
-      ? parts.slice(0, 2).join("/")
-      : parts[0];
-    const subpath = name.startsWith("@")
-      ? parts.slice(2).join("/")
-      : parts.slice(1).join("/");
-    const resolved = resolveNpmPackage(pkgName!, subpath || undefined);
-    if (resolved) aliases[name] = resolved;
-  }
-  return aliases;
-}
-
-let npmAliases: Record<string, string> | null = null;
-
-function workspaceAliasPlugin(): Plugin {
-  if (!npmAliases) npmAliases = buildNpmAliases();
-  return {
-    name: "workspace-alias",
-    setup(build) {
-      build.onResolve({ filter: /^@aai\// }, (args) => {
-        const local = WORKSPACE_ALIASES[args.path];
-        if (local) return { path: local, namespace: "file" };
-        return null;
-      });
-      // Resolve framework npm packages directly to node_modules entry points.
-      // This avoids relying on the deno plugin's npm resolver, which fails in
-      // compiled binaries where node_modules aren't fully available.
-      build.onResolve(
-        { filter: /^(preact|@preact\/signals|htm|comlink)/ },
-        (args) => {
-          const resolved = npmAliases![args.path];
-          if (resolved) return { path: resolved, namespace: "file" };
-          return null;
-        },
-      );
-    },
-  };
-}
-
-const BASE: BuildOptions = {
-  bundle: true,
-  write: false,
-  format: "esm",
-  platform: "neutral",
-  mainFields: ["module", "main"],
-  target: "es2022",
-  treeShaking: true,
-  minify: true,
-  legalComments: "none",
-  define: { "process.env.NODE_ENV": '"production"' },
-  drop: ["debugger"],
-  logOverride: { "commonjs-variable-in-esm": "silent" },
-};
-
-function jsBytes(metafile: { outputs: Record<string, { bytes: number }> }) {
-  for (const [file, info] of Object.entries(metafile.outputs)) {
-    if (file.endsWith(".js")) return info.bytes;
-  }
-  return 0;
-}
-
-function getOutputText(
-  result: { outputFiles?: { path: string; text: string }[] | undefined },
-): string {
-  return result.outputFiles?.[0]?.text ?? "";
-}
-
-/** Internal helpers exposed for testing. Not part of the public API. */
-export const _internals = {
-  WORKSPACE_ALIASES,
-  BundleError,
-  getConfigPath,
-  getOutputText,
-  jsBytes,
-  buildNpmAliases,
-};
-
 /** Output artifacts produced by {@linkcode bundleAgent}. */
 export type BundleOutput = {
   /** Minified ESM JavaScript for the server-side Deno Worker. */
   worker: string;
-  /** Minified ESM JavaScript for the browser client. Empty string if skipped. */
-  client: string;
+  /** Single-file HTML page with inlined client JS and CSS. */
+  html: string;
   /** JSON manifest containing env var names and transport configuration. */
   manifest: string;
   /** Size of the worker bundle in bytes. */
   workerBytes: number;
-  /** Size of the client bundle in bytes. */
-  clientBytes: number;
+};
+
+/** Internal helpers exposed for testing. Not part of the public API. */
+export const _internals = {
+  BundleError,
 };
 
 /**
- * Bundles an agent's `agent.ts` and optional `client.ts`/`client.tsx` into
- * minified ESM JavaScript using esbuild. Resolves workspace packages (`@aai/*`)
- * and npm dependencies to local file paths.
+ * Deno build script generated at build time into `.aai/_build.mts`.
+ *
+ * Runs under Deno (not Node), so it can import JSR packages like @deno/loader
+ * directly. Uses Vite's JS API to build the worker + client bundles.
+ */
+const BUILD_SCRIPT = `\
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { isAbsolute } from "node:path";
+import { fileURLToPath } from "node:url";
+import { build } from "vite";
+import { Workspace, ResolutionMode, RequestedModuleType } from "@deno/loader";
+import { transform } from "esbuild";
+import preact from "@preact/preset-vite";
+import tailwindcss from "@tailwindcss/vite";
+import { viteSingleFile } from "vite-plugin-singlefile";
+import { dirname, resolve } from "node:path";
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const skipClient = Deno.env.get("AAI_SKIP_CLIENT") === "1";
+
+// --- @deno/loader plugin (same approach as Fresh) ---
+
+function denoLoader(loader) {
+  return {
+    name: "aai-deno",
+    enforce: "pre",
+    async resolveId(id, importer) {
+      if (id.startsWith("\\0")) return;
+
+      // Unwrap virtual deno specifier importers
+      if (importer && importer.startsWith("\\0deno::")) {
+        importer = importer.slice("\\0deno::".length);
+      }
+
+      // Let other pre-plugins resolve first (but skip vite:resolve)
+      const other = await this.resolve(id, importer, { skipSelf: true });
+      if (other && other.resolvedBy !== "vite:resolve") {
+        if (other.external || other.id.startsWith("\\0")) return other;
+        id = other.id;
+      }
+
+      if (isAbsolute(id)) id = "file://" + id;
+
+      try {
+        const ref = importer && !importer.startsWith("\\0") ? importer : undefined;
+        const resolved = await loader.resolve(id, ref, ResolutionMode.Import);
+
+        if (resolved.startsWith("node:"))
+          return { id: resolved, external: true };
+
+        // npm: → strip prefix + version, let Vite resolve from node_modules
+        if (resolved.startsWith("npm:")) {
+          let bare = resolved.replace(/^npm:\\//, "");
+          const vAt = bare.indexOf("@", bare.startsWith("@") ? 1 : 0);
+          if (vAt > 0) {
+            const after = bare.slice(vAt);
+            const slash = after.indexOf("/");
+            bare = bare.slice(0, vAt) + (slash > -1 ? after.slice(slash) : "");
+          }
+          return (await this.resolve(bare, undefined, { skipSelf: true })) ?? bare;
+        }
+
+        if (resolved.startsWith("file://")) return fileURLToPath(resolved);
+
+        // Remote (jsr:/https:) → virtual module for load()
+        return "\\0deno::" + resolved;
+      } catch {
+        // Not resolvable by Deno
+      }
+    },
+
+    async load(id) {
+      if (!id.startsWith("\\0deno::")) return;
+      const specifier = id.slice("\\0deno::".length);
+
+      const result = await loader.load(specifier, RequestedModuleType.Default);
+      if (result.kind === "external") return null;
+
+      const code = new TextDecoder().decode(result.code);
+      const ext = specifier.split(".").pop() || "";
+      const loaderMap = { ts: "ts", tsx: "tsx", jsx: "jsx", mts: "ts" };
+      const esbuildLoader = loaderMap[ext];
+      if (esbuildLoader) {
+        const out = await transform(code, {
+          format: "esm", loader: esbuildLoader, logLevel: "warning",
+        });
+        return { code: out.code, map: out.map || null };
+      }
+      return code;
+    },
+  };
+}
+
+// --- Virtual worker entry ---
+
+function workerEntry() {
+  const id = "virtual:worker-entry";
+  const resolved = "\\0" + id;
+  return {
+    name: "aai-worker-entry",
+    enforce: "pre",
+    resolveId(source) { if (source === id) return resolved; },
+    load(source) {
+      if (source === resolved) {
+        return [
+          \`import agent from "\${resolve(root, "agent.ts")}";\`,
+          \`import { initWorker } from "@aai/sdk";\`,
+          \`initWorker(agent);\`,
+        ].join("\\n");
+      }
+    },
+  };
+}
+
+// --- Build ---
+
+const loader = await new Workspace({
+  platform: "browser",
+  cachedOnly: true,
+}).createLoader();
+
+const deno = denoLoader(loader);
+
+// Pre-resolve @aai/ui sources to disk so Tailwind can scan them for class names.
+// @tailwindcss/vite only scans on-disk files, not virtual modules from the deno loader.
+async function writeUiSources() {
+  const sourcesDir = resolve(root, ".aai", "sources");
+  mkdirSync(sourcesDir, { recursive: true });
+  try {
+    const modUrl = await loader.resolve("@aai/ui", undefined, ResolutionMode.Import);
+    const queue = [modUrl];
+    const seen = new Set();
+    let count = 0;
+    while (queue.length > 0) {
+      const url = queue.shift();
+      if (seen.has(url)) continue;
+      seen.add(url);
+      try {
+        const result = await loader.load(url, RequestedModuleType.Default);
+        if (result.kind === "external") continue;
+        const code = new TextDecoder().decode(result.code);
+        writeFileSync(resolve(sourcesDir, \`mod\${count++}.ts\`), code);
+        // Follow relative imports
+        const baseUrl = url.replace(/\\/[^\\/]+$/, "");
+        for (const m of code.matchAll(/from\\s+['"](\\.\\/[^'"]+)['"]/g)) {
+          queue.push(baseUrl + "/" + m[1].replace(/^\\.\\//,""));
+        }
+      } catch { /* skip */ }
+    }
+  } catch { /* @aai/ui not resolvable */ }
+}
+
+function buildClient() {
+  return {
+    name: "aai-build-client",
+    async closeBundle() {
+      const hasClient = existsSync(resolve(root, "client.tsx"));
+      if (skipClient || !hasClient) return;
+      await writeUiSources();
+      await build({
+        configFile: false,
+        root: resolve(root, ".aai"),
+        plugins: [deno, preact(), tailwindcss(), viteSingleFile()],
+        build: {
+          outDir: resolve(root, ".aai/build"),
+          emptyOutDir: false,
+          minify: true,
+        },
+      });
+    },
+  };
+}
+
+await build({
+  configFile: false,
+  root,
+  plugins: [deno, workerEntry(), buildClient()],
+  build: {
+    outDir: resolve(root, ".aai/build"),
+    emptyOutDir: true,
+    minify: true,
+    target: "es2022",
+    rollupOptions: {
+      input: "virtual:worker-entry",
+      output: {
+        format: "es",
+        entryFileNames: "worker.js",
+        inlineDynamicImports: true,
+      },
+    },
+  },
+});
+`;
+
+/** Fallback HTML shell generated when no client.tsx exists. */
+const INDEX_HTML = `\
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <title>aai</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../styles.css" />
+  </head>
+  <body>
+    <main id="app"></main>
+    <script type="module" src="../client.tsx"></script>
+  </body>
+</html>
+`;
+
+/**
+ * Bundles an agent project into deployable artifacts using Vite.
+ *
+ * The CLI generates a temporary vite config in `.aai/` so users never
+ * need a `vite.config` in their project directory (like Vercel / Cloudflare).
  *
  * @param agent The discovered agent entry containing paths and configuration.
  * @param opts Optional settings. Set `skipClient` to omit the client bundle.
- * @returns The bundled worker code, client code, manifest, and byte sizes.
- * @throws {BundleError} If esbuild encounters a build error.
+ * @returns The bundled worker code, single-file HTML, manifest, and byte sizes.
+ * @throws {BundleError} If Vite encounters a build error.
  */
 export async function bundleAgent(
   agent: AgentEntry,
   opts?: { skipClient?: boolean },
 ): Promise<BundleOutput> {
-  await ensureInit();
+  const aaiDir = join(agent.dir, ".aai");
+  await Deno.mkdir(aaiDir, { recursive: true });
 
-  const agentAbsolute = resolve(agent.entryPoint);
-  const workerEntryAbsolute = resolve(AAI_ROOT, "core/_worker_entry.ts");
+  // Generate build script and HTML shell into .aai/
+  const buildScript = join(aaiDir, "_build.mts");
+  await Deno.writeTextFile(buildScript, BUILD_SCRIPT);
+  await Deno.writeTextFile(join(aaiDir, "index.html"), INDEX_HTML);
 
-  const alias = workspaceAliasPlugin();
-  const workerPlugins = [alias, denoPlugin({ configPath: getConfigPath() })];
-  const clientPlugins = [alias, denoPlugin({ configPath: getConfigPath() })];
-
-  const workerResult = await buildWithCleanErrors({
-    ...BASE,
-    plugins: workerPlugins,
-    nodePaths: [join(agent.dir, "node_modules")],
-
-    stdin: {
-      contents: `import agent from "${agentAbsolute}";\n` +
-        `import { startWorker } from "${workerEntryAbsolute}";\n` +
-        `const env: Record<string, string> = ${JSON.stringify(agent.env)};\n` +
-        `startWorker(agent, env);\n`,
-      loader: "ts",
-      resolveDir: AAI_ROOT,
-    },
-    outfile: "worker.js",
-    metafile: true,
-    loader: {
-      ".json": "json",
-      ".txt": "text",
-      ".md": "text",
-      ".csv": "text",
-      ".html": "text",
-    },
-  });
-
-  let client = "";
-  let clientBytes = 0;
-  if (!opts?.skipClient && agent.clientEntry) {
-    const clientEntry = `import { mount } from "@aai/ui";\n` +
-      `import App from "${resolve(agent.clientEntry)}";\n` +
-      `mount(App, { platformUrl: new URL(".", globalThis.location.href).href.replace(/\\/$/, "") });\n`;
-
-    const clientResult = await buildWithCleanErrors({
-      ...BASE,
-      plugins: clientPlugins,
-      nodePaths: [join(agent.dir, "node_modules")],
-
-      stdin: {
-        contents: clientEntry,
-        loader: "tsx",
-        resolveDir: AAI_ROOT,
-      },
-      outfile: "client.js",
-      jsx: "automatic",
-      jsxImportSource: "preact",
-      metafile: true,
-    });
-    client = getOutputText(clientResult);
-    clientBytes = jsBytes(clientResult.metafile!);
+  const skipClient = opts?.skipClient || !agent.clientEntry;
+  const env: Record<string, string> = { ...Deno.env.toObject() };
+  if (skipClient) {
+    env.AAI_SKIP_CLIENT = "1";
   }
 
+  const cmd = new Deno.Command(Deno.execPath(), {
+    args: ["run", "--allow-all", buildScript],
+    cwd: agent.dir,
+    stdout: "piped",
+    stderr: "piped",
+    env,
+  });
+
+  const { code, stdout, stderr } = await cmd.output();
+  if (code !== 0) {
+    throw new BundleError(
+      new TextDecoder().decode(stderr) ||
+        new TextDecoder().decode(stdout),
+    );
+  }
+
+  const worker = await Deno.readTextFile(
+    join(aaiDir, "build", "worker.js"),
+  );
+
+  const htmlPath = skipClient
+    ? join(aaiDir, "index.html")
+    : join(aaiDir, "build", "index.html");
+  const html = await Deno.readTextFile(htmlPath);
+
   const manifest = JSON.stringify(
-    {
-      env: agent.env,
-      transport: agent.transport,
-    },
+    { transport: agent.transport },
     null,
     2,
   );
 
   return {
-    worker: getOutputText(workerResult),
-    client,
+    worker,
+    html,
     manifest,
-    workerBytes: jsBytes(workerResult.metafile!),
-    clientBytes,
+    workerBytes: new TextEncoder().encode(worker).length,
   };
 }

@@ -1,5 +1,7 @@
 // Copyright 2025 the AAI authors. MIT license.
 import * as log from "@std/log";
+import { escape } from "@std/html";
+import { STATUS_CODE } from "@std/http/status";
 import { HttpError, type RouteContext } from "./context.ts";
 import { concat } from "@std/bytes/concat";
 import { decodeBase64, encodeBase64 } from "@std/encoding/base64";
@@ -10,7 +12,7 @@ import {
   DEFAULT_TTS_SAMPLE_RATE,
   ServerMessageSchema,
   TwilioMessageSchema,
-} from "@aai/core/protocol";
+} from "@aai/sdk/protocol";
 import { mulawToPcm16, pcm16ToMulaw, resample } from "./mulaw.ts";
 
 const MULAW_RATE = 8000;
@@ -155,7 +157,7 @@ export function handleTwilioVoice(
   }
 
   const host = ctx.req.headers.get("host") ?? "localhost";
-  const streamUrl = `wss://${host}/${slug}/twilio/stream`;
+  const streamUrl = escape(`wss://${host}/${slug}/twilio/stream`);
   log.info("Incoming call, connecting media stream", { slug, streamUrl });
   return new Response(
     `${TWIML_PREFIX}<Connect><Stream url="${streamUrl}" /></Connect>${TWIML_SUFFIX}`,
@@ -174,7 +176,7 @@ export async function handleTwilioStream(
   slug: string,
 ): Promise<Response> {
   const slot = getTwilioSlot(slug, ctx.state.slots);
-  if (!slot) throw new HttpError(404, "Not found");
+  if (!slot) throw new HttpError(STATUS_CODE.NotFound, "Not found");
 
   const setup = await prepareSession(slot, {
     slug,

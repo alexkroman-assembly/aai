@@ -1,14 +1,17 @@
 // Copyright 2025 the AAI authors. MIT license.
-import type { BundleStore, NamespaceOwner } from "./bundle_store_tigris.ts";
+import { deadline } from "@std/async/deadline";
+import { delay } from "@std/async/delay";
+import type { BundleStore } from "./bundle_store_tigris.ts";
 import { importScopeKey, type ScopeKey } from "./scope_token.ts";
 import type { KvStore } from "./kv.ts";
 import type { AgentMetadata, AgentSlot } from "./worker_pool.ts";
 import type { AgentConfig } from "@aai/sdk/types";
+import { sortAndPaginate } from "@aai/sdk/kv";
 import { AgentMetadataSchema } from "./_schemas.ts";
 import { createOrchestrator } from "./orchestrator.ts";
 
 export function flush(): Promise<void> {
-  return new Promise<void>((r) => setTimeout(r, 0));
+  return delay(0);
 }
 
 /** Poll `predicate` every tick until it returns true, or throw after `ms`. */
@@ -16,13 +19,12 @@ export async function waitFor(
   predicate: () => boolean,
   ms = 1000,
 ): Promise<void> {
-  const deadline = Date.now() + ms;
-  while (!predicate()) {
-    if (Date.now() > deadline) {
-      throw new Error("Timed out waiting for condition");
-    }
-    await flush();
-  }
+  await deadline(
+    (async () => {
+      while (!predicate()) await flush();
+    })(),
+    ms,
+  );
 }
 
 export const DUMMY_INFO: Deno.ServeHandlerInfo = {
@@ -54,17 +56,14 @@ export function createTestStore(): BundleStore {
         slug: bundle.slug,
         env: bundle.env,
         transport: bundle.transport,
-        ...(bundle.account_id ? { account_id: bundle.account_id } : {}),
+        "credential_hashes": bundle.credential_hashes,
       };
       objects.set(
         objectKey(bundle.slug, "manifest.json"),
         JSON.stringify(manifest),
       );
       objects.set(objectKey(bundle.slug, "worker.js"), bundle.worker);
-      objects.set(objectKey(bundle.slug, "client.js"), bundle.client);
-      if (bundle.client_map) {
-        objects.set(objectKey(bundle.slug, "client.js.map"), bundle.client_map);
-      }
+      objects.set(objectKey(bundle.slug, "index.html"), bundle.html);
       return Promise.resolve();
     },
 
@@ -79,8 +78,7 @@ export function createTestStore(): BundleStore {
     getFile(slug, file) {
       const fileNames: Record<string, string> = {
         worker: "worker.js",
-        client: "client.js",
-        "client_map": "client.js.map",
+        html: "index.html",
       };
       const fileName = fileNames[file];
       if (!fileName) return Promise.resolve(null);
@@ -94,33 +92,25 @@ export function createTestStore(): BundleStore {
       return Promise.resolve();
     },
 
-    getNamespaceOwner(namespace) {
-      const data = objects.get(`namespaces/${namespace}/owner.json`);
-      if (!data) return Promise.resolve(null);
-      try {
-        const parsed = JSON.parse(data);
-        if (!parsed.account_id || !Array.isArray(parsed.credential_hashes)) {
-          return Promise.resolve(null);
-        }
-        return Promise.resolve(parsed as NamespaceOwner);
-      } catch {
-        return Promise.resolve(null);
-      }
+    getEnv(slug) {
+      const data = objects.get(objectKey(slug, "manifest.json"));
+      if (data === undefined) return Promise.resolve(null);
+      const manifest = JSON.parse(data);
+      return Promise.resolve(manifest.env ?? null);
     },
 
-    putNamespaceOwner(namespace, owner) {
+    putEnv(slug, env) {
+      const data = objects.get(objectKey(slug, "manifest.json"));
+      if (data === undefined) {
+        return Promise.reject(new Error(`Agent ${slug} not found`));
+      }
+      const manifest = JSON.parse(data);
+      manifest.env = env;
       objects.set(
-        `namespaces/${namespace}/owner.json`,
-        JSON.stringify(owner),
+        objectKey(slug, "manifest.json"),
+        JSON.stringify(manifest),
       );
       return Promise.resolve();
-    },
-
-    claimIfUnclaimed(namespace, owner) {
-      const key = `namespaces/${namespace}/owner.json`;
-      if (objects.has(key)) return Promise.resolve(false);
-      objects.set(key, JSON.stringify(owner));
-      return Promise.resolve(true);
     },
 
     close() {},
@@ -146,9 +136,10 @@ export function makeConfig(overrides?: Partial<AgentConfig>): AgentConfig {
 /** Create a minimal AgentSlot for tests. */
 export function makeSlot(overrides?: Partial<AgentSlot>): AgentSlot {
   return {
-    slug: "ns/test-agent",
+    slug: "test-agent",
     env: VALID_ENV,
     transport: ["websocket"],
+    keyHash: "test-key-hash",
     ...overrides,
   };
 }
@@ -160,7 +151,8 @@ export function deployBody(
   return JSON.stringify({
     env: VALID_ENV,
     worker: "console.log('w');",
-    client: "console.log('c');",
+    html:
+      '<!DOCTYPE html><html><body><script>console.log("c");</script></body></html>',
     ...overrides,
   });
 }
@@ -183,17 +175,17 @@ export function createTestKvStore(): KvStore {
   const store = new Map<string, string>();
 
   function scopedKey(
-    scope: { accountId: string; slug: string },
+    scope: { keyHash: string; slug: string },
     key: string,
   ): string {
-    return `kv:${scope.accountId}:${scope.slug}:${key}`;
+    return `kv:${scope.keyHash}:${scope.slug}:${key}`;
   }
 
   function scopePrefix(scope: {
-    accountId: string;
+    keyHash: string;
     slug: string;
   }): string {
-    return `kv:${scope.accountId}:${scope.slug}:`;
+    return `kv:${scope.keyHash}:${scope.slug}:`;
   }
 
   return {
@@ -238,12 +230,7 @@ export function createTestKvStore(): KvStore {
           }
         }
       }
-      entries.sort((a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
-      if (options?.reverse) entries.reverse();
-      if (options?.limit && options.limit > 0) {
-        entries.length = Math.min(entries.length, options.limit);
-      }
-      return Promise.resolve(entries);
+      return Promise.resolve(sortAndPaginate(entries, options));
     },
   };
 }

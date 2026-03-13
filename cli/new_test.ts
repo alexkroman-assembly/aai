@@ -5,12 +5,19 @@ import {
   assertStrictEquals,
   assertStringIncludes,
 } from "@std/assert";
+import { exists } from "@std/fs/exists";
 import { join } from "@std/path";
 import { listTemplates, runNew } from "./_new.ts";
 import { silenceSteps, withTempDir } from "./_test_utils.ts";
 
 async function createFakeTemplates(dir: string): Promise<string> {
   const templatesDir = join(dir, "templates");
+
+  // shared files
+  const shared = join(templatesDir, "_shared");
+  await Deno.mkdir(shared, { recursive: true });
+  await Deno.writeTextFile(join(shared, "shared.txt"), "from shared");
+  await Deno.writeTextFile(join(shared, ".env.example"), "MY_KEY=");
 
   // simple template
   const simple = join(templatesDir, "simple");
@@ -31,29 +38,23 @@ async function createFakeTemplates(dir: string): Promise<string> {
   );
   await Deno.writeTextFile(join(sub, "helper.ts"), "// helper");
 
-  // template with excluded dirs
-  await Deno.mkdir(join(simple, "node_modules"), { recursive: true });
-  await Deno.writeTextFile(
-    join(simple, "node_modules", "pkg.js"),
-    "// should be skipped",
-  );
-  await Deno.writeTextFile(join(simple, "_deno.json"), "{}");
+  await Deno.writeTextFile(join(simple, "deno.json"), "{}");
 
-  // template with .env.example
+  // template with .env.example that overrides shared
   const withEnv = join(templatesDir, "with-env");
   await Deno.mkdir(withEnv, { recursive: true });
   await Deno.writeTextFile(
     join(withEnv, "agent.ts"),
     'export default defineAgent({ name: "Env Agent" });',
   );
-  await Deno.writeTextFile(join(withEnv, ".env.example"), "MY_KEY=");
+  await Deno.writeTextFile(join(withEnv, ".env.example"), "CUSTOM_KEY=");
 
   return templatesDir;
 }
 
 // --- listTemplates ---
 
-Deno.test("listTemplates returns sorted directory names", async () => {
+Deno.test("listTemplates returns sorted directory names excluding shared", async () => {
   await withTempDir(async (dir) => {
     const templatesDir = await createFakeTemplates(dir);
     const result = await listTemplates(templatesDir);
@@ -70,145 +71,156 @@ Deno.test("listTemplates returns empty for empty dir", async () => {
 
 // --- runNew ---
 
-Deno.test("runNew copies template files to target", async () => {
-  using _s = silenceSteps();
-  await withTempDir(async (dir) => {
-    const templatesDir = await createFakeTemplates(dir);
-    const target = join(dir, "output");
+Deno.test("runNew copies template and shared files to target", async () => {
+  const s = silenceSteps();
+  try {
+    await withTempDir(async (dir) => {
+      const templatesDir = await createFakeTemplates(dir);
+      const target = join(dir, "output");
 
-    await runNew({
-      targetDir: target,
-      template: "simple",
-      templatesDir,
+      await runNew({
+        targetDir: target,
+        template: "simple",
+        templatesDir,
+      });
+
+      const agent = await Deno.readTextFile(join(target, "agent.ts"));
+      assertStringIncludes(agent, "Default Name");
+
+      const readme = await Deno.readTextFile(join(target, "readme.txt"));
+      assertStrictEquals(readme, "hello");
+
+      // shared file should be present
+      const shared = await Deno.readTextFile(join(target, "shared.txt"));
+      assertStrictEquals(shared, "from shared");
     });
-
-    const agent = await Deno.readTextFile(join(target, "agent.ts"));
-    assertStringIncludes(agent, "Default Name");
-
-    const readme = await Deno.readTextFile(join(target, "readme.txt"));
-    assertStrictEquals(readme, "hello");
-  });
+  } finally {
+    s.restore();
+  }
 });
 
-Deno.test("runNew skips node_modules and _deno.json", async () => {
-  using _s = silenceSteps();
-  await withTempDir(async (dir) => {
-    const templatesDir = await createFakeTemplates(dir);
-    const target = join(dir, "output");
+Deno.test("runNew skips node_modules", async () => {
+  const s = silenceSteps();
+  try {
+    await withTempDir(async (dir) => {
+      const templatesDir = await createFakeTemplates(dir);
+      const target = join(dir, "output");
 
-    await runNew({
-      targetDir: target,
-      template: "simple",
-      templatesDir,
+      await runNew({
+        targetDir: target,
+        template: "simple",
+        templatesDir,
+      });
+
+      let hasNodeModules = false;
+      try {
+        await Deno.stat(join(target, "node_modules"));
+        hasNodeModules = true;
+      } catch { /* expected */ }
+      assertStrictEquals(hasNodeModules, false);
+
+      // deno.json should be copied (used for deps + config)
+      assert(await exists(join(target, "deno.json")));
     });
-
-    let hasNodeModules = false;
-    try {
-      await Deno.stat(join(target, "node_modules"));
-      hasNodeModules = true;
-    } catch { /* expected */ }
-    assertStrictEquals(hasNodeModules, false);
-
-    let hasDenoJson = false;
-    try {
-      await Deno.stat(join(target, "_deno.json"));
-      hasDenoJson = true;
-    } catch { /* expected */ }
-    assertStrictEquals(hasDenoJson, false);
-  });
+  } finally {
+    s.restore();
+  }
 });
 
-Deno.test("runNew replaces name in agent.ts", async () => {
-  using _s = silenceSteps();
-  await withTempDir(async (dir) => {
-    const templatesDir = await createFakeTemplates(dir);
-    const target = join(dir, "output");
+Deno.test("runNew template files take precedence over shared", async () => {
+  const s = silenceSteps();
+  try {
+    await withTempDir(async (dir) => {
+      const templatesDir = await createFakeTemplates(dir);
+      const target = join(dir, "output");
 
-    await runNew({
-      targetDir: target,
-      template: "simple",
-      templatesDir,
-      name: "Custom Bot",
+      // with-env has its own .env.example that should NOT be overwritten by shared
+      await runNew({
+        targetDir: target,
+        template: "with-env",
+        templatesDir,
+      });
+
+      const env = await Deno.readTextFile(join(target, ".env.example"));
+      assertStrictEquals(env, "CUSTOM_KEY=");
+
+      // .env should be copied from the template's .env.example
+      const dotEnv = await Deno.readTextFile(join(target, ".env"));
+      assertStrictEquals(dotEnv, "CUSTOM_KEY=");
     });
-
-    const agent = await Deno.readTextFile(join(target, "agent.ts"));
-    assertStringIncludes(agent, '"Custom Bot"');
-    assert(!agent.includes("Default Name"));
-  });
-});
-
-Deno.test("runNew escapes special characters in name", async () => {
-  using _s = silenceSteps();
-  await withTempDir(async (dir) => {
-    const templatesDir = await createFakeTemplates(dir);
-    const target = join(dir, "output");
-
-    await runNew({
-      targetDir: target,
-      template: "simple",
-      templatesDir,
-      name: 'He said "hello"',
-    });
-
-    const agent = await Deno.readTextFile(join(target, "agent.ts"));
-    assertStringIncludes(agent, 'He said \\"hello\\"');
-  });
+  } finally {
+    s.restore();
+  }
 });
 
 Deno.test("runNew copies subdirectories recursively", async () => {
-  using _s = silenceSteps();
-  await withTempDir(async (dir) => {
-    const templatesDir = await createFakeTemplates(dir);
-    const target = join(dir, "output");
+  const s = silenceSteps();
+  try {
+    await withTempDir(async (dir) => {
+      const templatesDir = await createFakeTemplates(dir);
+      const target = join(dir, "output");
 
-    await runNew({
-      targetDir: target,
-      template: "advanced",
-      templatesDir,
+      await runNew({
+        targetDir: target,
+        template: "advanced",
+        templatesDir,
+      });
+
+      const helper = await Deno.readTextFile(
+        join(target, "tools", "helper.ts"),
+      );
+      assertStrictEquals(helper, "// helper");
     });
-
-    const helper = await Deno.readTextFile(
-      join(target, "tools", "helper.ts"),
-    );
-    assertStrictEquals(helper, "// helper");
-  });
+  } finally {
+    s.restore();
+  }
 });
 
-Deno.test("runNew copies .env.example to .env", async () => {
-  using _s = silenceSteps();
-  await withTempDir(async (dir) => {
-    const templatesDir = await createFakeTemplates(dir);
-    const target = join(dir, "output");
+Deno.test("runNew copies .env.example to .env from shared", async () => {
+  const s = silenceSteps();
+  try {
+    await withTempDir(async (dir) => {
+      const templatesDir = await createFakeTemplates(dir);
+      const target = join(dir, "output");
 
-    await runNew({
-      targetDir: target,
-      template: "with-env",
-      templatesDir,
+      // simple doesn't have its own .env.example, so shared one is used
+      await runNew({
+        targetDir: target,
+        template: "simple",
+        templatesDir,
+      });
+
+      assert(await exists(join(target, ".env")));
+      const env = await Deno.readTextFile(join(target, ".env"));
+      assertStrictEquals(env, "MY_KEY=");
     });
-
-    const env = await Deno.readTextFile(join(target, ".env"));
-    assertStrictEquals(env, "MY_KEY=");
-  });
+  } finally {
+    s.restore();
+  }
 });
 
 Deno.test("runNew throws for unknown template", async () => {
-  using _s = silenceSteps();
-  await withTempDir(async (dir) => {
-    const templatesDir = await createFakeTemplates(dir);
-    const target = join(dir, "output");
+  const s = silenceSteps();
+  try {
+    await withTempDir(async (dir) => {
+      const templatesDir = await createFakeTemplates(dir);
+      const target = join(dir, "output");
 
-    let threw = false;
-    try {
-      await runNew({
-        targetDir: target,
-        template: "nonexistent",
-        templatesDir,
-      });
-    } catch (err) {
-      threw = true;
-      assertStringIncludes((err as Error).message, "unknown template");
-      assertStringIncludes((err as Error).message, "nonexistent");
-    }
-    assertStrictEquals(threw, true);
-  });
+      let threw = false;
+      try {
+        await runNew({
+          targetDir: target,
+          template: "nonexistent",
+          templatesDir,
+        });
+      } catch (err) {
+        threw = true;
+        assertStringIncludes((err as Error).message, "unknown template");
+        assertStringIncludes((err as Error).message, "nonexistent");
+      }
+      assertStrictEquals(threw, true);
+    });
+  } finally {
+    s.restore();
+  }
 });

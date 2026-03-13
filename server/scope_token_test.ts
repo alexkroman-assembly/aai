@@ -13,14 +13,14 @@ import {
 Deno.test("scope tokens", async (t) => {
   await t.step("sign and verify round-trip", async () => {
     const key = await importScopeKey("test-secret");
-    const scope = { accountId: "owner123", slug: "my-agent" };
+    const scope = { keyHash: "owner123", slug: "my-agent" };
     const token = await signScopeToken(key, scope);
     assertEquals(await verifyScopeToken(key, token), scope);
   });
 
   await t.step("verify returns null for tampered token", async () => {
     const key = await importScopeKey("test-secret");
-    const scope = { accountId: "owner123", slug: "my-agent" };
+    const scope = { keyHash: "owner123", slug: "my-agent" };
     const token = await signScopeToken(key, scope);
     const tampered = token.slice(0, -2) + "XX";
     assertStrictEquals(await verifyScopeToken(key, tampered), null);
@@ -39,7 +39,7 @@ Deno.test("scope tokens", async (t) => {
   await t.step("different secrets produce different tokens", async () => {
     const key1 = await importScopeKey("secret-a");
     const key2 = await importScopeKey("secret-b");
-    const scope = { accountId: "owner", slug: "agent" };
+    const scope = { keyHash: "owner", slug: "agent" };
     assertNotStrictEquals(
       await signScopeToken(key1, scope),
       await signScopeToken(key2, scope),
@@ -49,7 +49,7 @@ Deno.test("scope tokens", async (t) => {
   await t.step("token from different secret fails verification", async () => {
     const key1 = await importScopeKey("secret-a");
     const key2 = await importScopeKey("secret-b");
-    const token = await signScopeToken(key1, { accountId: "o", slug: "s" });
+    const token = await signScopeToken(key1, { keyHash: "o", slug: "s" });
     assertStrictEquals(await verifyScopeToken(key2, token), null);
   });
 });

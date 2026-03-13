@@ -1,0 +1,61 @@
+@import "tailwindcss";
+@source "./";
+@source "./components/";
+@source ".aai/sources/";
+
+@theme {
+  /* opencode dark theme */
+  --color-background: #101010;
+  --color-foreground: rgba(255, 255, 255, 0.936);
+  --color-card: #151515;
+  --color-card-foreground: rgba(255, 255, 255, 0.936);
+  --color-primary: #ededed;
+  --color-primary-foreground: #101010;
+  --color-secondary: rgba(255, 255, 255, 0.059);
+  --color-secondary-foreground: rgba(255, 255, 255, 0.936);
+  --color-muted: rgba(255, 255, 255, 0.031);
+  --color-muted-foreground: rgba(255, 255, 255, 0.422);
+  --color-accent: rgba(255, 255, 255, 0.078);
+  --color-accent-foreground: rgba(255, 255, 255, 0.936);
+  --color-destructive: #fc533a;
+  --color-border: #282828;
+  --color-ring: #9dbefe;
+  --color-surface: rgba(255, 255, 255, 0.031);
+  --color-surface-hover: rgba(255, 255, 255, 0.059);
+
+  /* aai component colors (used by @aai/ui components) */
+  --color-aai-bg: #101010;
+  --color-aai-surface: #151515;
+  --color-aai-surface-faint: rgba(255, 255, 255, 0.031);
+  --color-aai-surface-hover: rgba(255, 255, 255, 0.059);
+  --color-aai-border: #282828;
+  --color-aai-primary: #034cff;
+  --color-aai-text: rgba(255, 255, 255, 0.936);
+  --color-aai-text-secondary: rgba(255, 255, 255, 0.618);
+  --color-aai-text-muted: rgba(255, 255, 255, 0.284);
+  --color-aai-text-dim: rgba(255, 255, 255, 0.422);
+  --color-aai-error: #fc533a;
+  --color-aai-ring: #9dbefe;
+  --radius-aai: 6px;
+  --font-aai: "Inter", system-ui, -apple-system, sans-serif;
+  --font-aai-mono: "IBM Plex Mono", monospace;
+
+  /* aai state colors */
+  --color-aai-state-connecting: rgba(255, 255, 255, 0.422);
+  --color-aai-state-ready: #12c905;
+  --color-aai-state-listening: #9dbefe;
+  --color-aai-state-thinking: #fcd53a;
+  --color-aai-state-speaking: #fc533a;
+  --color-aai-state-error: #fc533a;
+}
+
+@keyframes aai-bounce {
+  0%, 80%, 100% {
+    opacity: 0.3;
+    transform: scale(0.8);
+  }
+  40% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}

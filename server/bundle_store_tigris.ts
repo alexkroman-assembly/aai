@@ -10,12 +10,7 @@ import type { AgentMetadata } from "./worker_pool.ts";
 import { AgentMetadataSchema } from "./_schemas.ts";
 import { type CredentialKey, decryptEnv, encryptEnv } from "./credentials.ts";
 
-export type FileKey = "worker" | "client" | "client_map";
-
-export type NamespaceOwner = {
-  "account_id": string;
-  "credential_hashes": string[];
-};
+export type FileKey = "worker" | "html";
 
 export type BundleStore = {
   putAgent(bundle: {
@@ -23,23 +18,16 @@ export type BundleStore = {
     env: Record<string, string>;
     transport: readonly ("websocket" | "twilio")[];
     worker: string;
-    client: string;
-    client_map?: string;
-    account_id?: string;
+    html: string;
+    credential_hashes: string[];
   }): Promise<void>;
   getManifest(slug: string): Promise<AgentMetadata | null>;
   getFile(slug: string, file: FileKey): Promise<string | null>;
   deleteAgent(slug: string): Promise<void>;
-  getNamespaceOwner(namespace: string): Promise<NamespaceOwner | null>;
-  putNamespaceOwner(
-    namespace: string,
-    owner: NamespaceOwner,
-  ): Promise<void>;
-  /** Atomically claim a namespace only if unclaimed. Returns true if claimed, false if already owned. */
-  claimIfUnclaimed(
-    namespace: string,
-    owner: NamespaceOwner,
-  ): Promise<boolean>;
+  /** Read env vars for a slug from the stored manifest. */
+  getEnv(slug: string): Promise<Record<string, string> | null>;
+  /** Update env vars for a slug without redeploying the worker. */
+  putEnv(slug: string, env: Record<string, string>): Promise<void>;
   close(): void;
   [Symbol.dispose](): void;
 };
@@ -51,8 +39,7 @@ type CacheEntry = {
 
 const FILE_NAMES: Record<FileKey, string> = {
   worker: "worker.js",
-  client: "client.js",
-  "client_map": "client.js.map",
+  html: "index.html",
 };
 
 function objectKey(slug: string, file: string): string {
@@ -175,7 +162,7 @@ export function createBundleStore(
         slug: bundle.slug,
         env: envValue,
         transport: bundle.transport,
-        ...(bundle.account_id ? { account_id: bundle.account_id } : {}),
+        "credential_hashes": bundle.credential_hashes,
         ...(credentialKey ? { envEncrypted: true } : {}),
       };
       await put(
@@ -190,21 +177,11 @@ export function createBundleStore(
         "application/javascript",
       );
 
-      if (bundle.client) {
-        await put(
-          objectKey(bundle.slug, "client.js"),
-          bundle.client,
-          "application/javascript",
-        );
-      }
-
-      if (bundle.client_map) {
-        await put(
-          objectKey(bundle.slug, "client.js.map"),
-          bundle.client_map,
-          "application/json",
-        );
-      }
+      await put(
+        objectKey(bundle.slug, "index.html"),
+        bundle.html,
+        "text/html",
+      );
     },
 
     async getManifest(slug) {
@@ -230,64 +207,30 @@ export function createBundleStore(
 
     deleteAgent,
 
-    async getNamespaceOwner(namespace: string): Promise<NamespaceOwner | null> {
-      const data = await get(`namespaces/${namespace}/owner.json`);
-      if (!data) return null;
-      try {
-        const parsed = JSON.parse(data);
-        // Migrate legacy format: { owner_hash } → { account_id, credential_hashes }
-        if (parsed.owner_hash && !parsed.account_id) {
-          return {
-            account_id: parsed.owner_hash,
-            credential_hashes: [parsed.owner_hash],
-          };
-        }
-        if (!parsed.account_id || !Array.isArray(parsed.credential_hashes)) {
-          return null;
-        }
-        return parsed as NamespaceOwner;
-      } catch {
-        return null;
+    async getEnv(slug) {
+      const data = await get(objectKey(slug, "manifest.json"));
+      if (data === null) return null;
+      const raw = JSON.parse(data);
+      if (raw.envEncrypted && credentialKey && typeof raw.env === "string") {
+        return await decryptEnv(credentialKey, raw.env);
       }
+      return raw.env ?? null;
     },
 
-    async putNamespaceOwner(
-      namespace: string,
-      owner: NamespaceOwner,
-    ): Promise<void> {
+    async putEnv(slug, env) {
+      // Read existing manifest, update env, write back
+      const data = await get(objectKey(slug, "manifest.json"));
+      if (data === null) throw new Error(`Agent ${slug} not found`);
+      const manifest = JSON.parse(data);
+
+      manifest.env = credentialKey ? await encryptEnv(credentialKey, env) : env;
+      if (credentialKey) manifest.envEncrypted = true;
+
       await put(
-        `namespaces/${namespace}/owner.json`,
-        JSON.stringify(owner),
+        objectKey(slug, "manifest.json"),
+        JSON.stringify(manifest),
         "application/json",
       );
-    },
-
-    async claimIfUnclaimed(
-      namespace: string,
-      owner: NamespaceOwner,
-    ): Promise<boolean> {
-      const key = `namespaces/${namespace}/owner.json`;
-      const body = JSON.stringify(owner);
-      try {
-        const result = await s3.send(
-          new PutObjectCommand({
-            Bucket: bucket,
-            Key: key,
-            Body: body,
-            ContentType: "application/json",
-            IfNoneMatch: "*",
-          }),
-        );
-        if (result.ETag) {
-          cache.set(key, { data: body, etag: result.ETag });
-        }
-        return true;
-      } catch (err: unknown) {
-        if (isS3Error(err, "PreconditionFailed") || isS3Error(err, "412")) {
-          return false;
-        }
-        throw err;
-      }
     },
 
     close() {

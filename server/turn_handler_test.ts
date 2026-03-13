@@ -18,11 +18,10 @@ function makeModel(
 ): LanguageModelV1 {
   let callIndex = 0;
   return new MockLanguageModelV1({
-    // deno-lint-ignore require-await
-    doGenerate: async () => {
+    doGenerate: () => {
       const resp = responses[callIndex++] ??
         { text: "Sorry, I couldn't generate a response." };
-      return {
+      return Promise.resolve({
         rawCall: { rawPrompt: "", rawSettings: {} },
         finishReason: resp.toolCalls?.length
           ? ("tool-calls" as const)
@@ -39,7 +38,7 @@ function makeModel(
             })),
           }
           : {}),
-      };
+      });
     },
   }) as LanguageModelV1;
 }

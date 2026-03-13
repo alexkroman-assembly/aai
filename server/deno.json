@@ -1,6 +1,6 @@
 {
   "name": "@aai/server",
-  "version": "0.1.110",
+  "version": "0.1.148",
   "exports": {
     ".": "./main.ts",
     "./types": "./types.ts",
@@ -8,21 +8,31 @@
   },
   "imports": {
     "@aai/sdk": "workspace:@aai/sdk",
-    "@aai/core": "workspace:@aai/core",
     "@aws-sdk/client-s3": "npm:@aws-sdk/client-s3@^3.1001.0",
     "@upstash/redis": "npm:@upstash/redis@^1.36.1",
     "ai": "npm:ai@^4",
     "ai/test": "npm:ai@^4/test",
     "@ai-sdk/openai": "npm:@ai-sdk/openai@^1",
     "openai": "npm:openai@^4.80.0",
-    "jose": "npm:jose@^6",
-    "assemblyai": "npm:assemblyai@^4"
+    "assemblyai": "npm:assemblyai@^4",
+    "preact": "npm:preact@^10.28.4",
+    "preact-render-to-string": "npm:preact-render-to-string@^6.5.13"
+  },
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "preact"
   },
   "publish": {
     "exclude": [
       "*_test.ts",
-      "_mock_ws.ts"
+      "*_test.tsx"
     ]
   },
-  "lint": {}
+  "lint": {
+    "rules": {
+      "exclude": [
+        "require-await"
+      ]
+    }
+  }
 }

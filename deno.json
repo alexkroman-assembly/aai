@@ -1,19 +1,20 @@
 {
-  "workspace": ["server", "ui", "cli", "sdk", "core"],
+  "workspace": ["server", "ui", "cli", "sdk", "scripts", "templates"],
+  "exclude": ["**/node_modules/"],
   "tasks": {
     "setup": "git config core.hooksPath .githooks",
     "deploy": "deno run --allow-net --allow-env --allow-read --allow-write --allow-run cli/cli.ts deploy",
     "new": "deno run --allow-net --allow-env --allow-read --allow-write --allow-run cli/cli.ts new",
     "serve": "deno run --allow-net --allow-env --allow-read --allow-write --unstable-worker-options server/main.ts",
     "test": "deno test --allow-net --allow-read --allow-write --allow-env --allow-run --unstable-worker-options",
-    "check": "deno check server/**/*.ts ui/**/*.ts cli/**/*.ts sdk/**/*.ts core/**/*.ts $(find templates -name '*.ts' ! -path 'templates/memory-agent/*') && deno lint && deno fmt --check && deno run -A npm:markdownlint-cli CLAUDE.md README.md cli/claude.md && deno task check:boundaries && deno task check:exports && deno task publish && deno test --quiet --allow-net --allow-read --allow-write --allow-env --allow-run --unstable-worker-options && deno task test:templates",
+    "check": "deno check server/**/*.ts server/**/*.tsx ui/**/*.ts ui/**/*.tsx cli/*.ts sdk/**/*.ts scripts/**/*.ts && deno lint && deno fmt --check && deno run -A npm:markdownlint-cli CLAUDE.md README.md templates/_shared/CLAUDE.md && deno task check:boundaries && deno task check:exports && deno task publish && deno test --quiet --allow-net --allow-read --allow-write --allow-env --allow-run --unstable-worker-options && deno task test:templates",
     "check:boundaries": "deno run --allow-read scripts/check_boundaries.ts",
     "check:exports": "deno run --allow-read scripts/check_export_names.ts",
     "bump": "deno run --allow-read --allow-write --allow-run scripts/bump_versions.ts",
-    "test:templates": "deno run --allow-all --unstable-worker-options cli/test_templates.ts",
+    "test:templates": "deno run --allow-all scripts/test_templates.ts",
     "install-dev": "echo '#!/bin/sh\nINIT_CWD=\"$(pwd)\" exec deno run --allow-all --unstable-worker-options '\"$(pwd)/cli/cli.ts\"' \"$@\"' > \"$HOME/.deno/bin/aai\" && chmod +x \"$HOME/.deno/bin/aai\" && echo 'Installed aai to ~/.deno/bin/aai'",
-    "publish": "cd sdk && deno publish --allow-dirty --dry-run && cd ../core && deno publish --allow-dirty --dry-run && cd ../ui && deno publish --allow-dirty --dry-run && cd ../cli && deno publish --allow-dirty --dry-run && cd ../server && deno publish --allow-dirty --dry-run && echo 'Dry run OK. Run deno task publish:live to publish.'",
-    "publish:live": "cd sdk && deno publish --allow-dirty && cd ../core && deno publish --allow-dirty && cd ../ui && deno publish --allow-dirty"
+    "publish": "cd sdk && deno publish --allow-dirty --dry-run && cd ../ui && deno publish --allow-dirty --dry-run && cd ../cli && deno publish --allow-dirty --dry-run && cd ../server && deno publish --allow-dirty --dry-run && echo 'Dry run OK. Run deno task publish:live to publish.'",
+    "publish:live": "cd sdk && deno publish --allow-dirty && cd ../ui && deno publish --allow-dirty"
   },
   "imports": {
     "@std/testing": "jsr:@std/testing@^1.0.17",
@@ -25,23 +26,26 @@
     "@std/dotenv": "jsr:@std/dotenv@0.225.6",
     "@std/html": "jsr:@std/html@^1.0.5",
     "@std/bytes": "jsr:@std/bytes@^1.0.6",
-    "@std/fs": "jsr:@std/fs@^1.0.17",
-    "@std/http": "jsr:@std/http@^1.0.18",
-    "@std/crypto": "jsr:@std/crypto@^1.0.4",
-    "@std/encoding": "jsr:@std/encoding@^1.0.7",
+    "@std/fs": "jsr:@std/fs@^1.0.23",
+    "@std/http": "jsr:@std/http@^1.0.25",
+    "@std/crypto": "jsr:@std/crypto@^1.0.5",
+    "@std/encoding": "jsr:@std/encoding@^1.0.10",
     "@std/log": "jsr:@std/log@^0.224.14",
     "@std/net": "jsr:@std/net@^1.0.6",
-    "@std/semver": "jsr:@std/semver@^1.0.6",
+    "@std/semver": "jsr:@std/semver@^1.0.8",
     "@std/text": "jsr:@std/text@^1.0.17",
-    "preact": "npm:preact@^10.28.4",
-    "preact/hooks": "npm:preact@^10.28.4/hooks",
-    "@preact/signals": "npm:@preact/signals@^2.8.1",
-    "htm": "npm:htm@^3.1.1",
+    "preact": "npm:preact@^10.29.0",
+    "preact/hooks": "npm:preact@^10.29.0/hooks",
+    "@preact/signals": "npm:@preact/signals@^2.8.2",
     "zod": "jsr:@zod/zod@^4.3.6",
-    "esbuild": "npm:esbuild-wasm@^0.27.3",
+    "@tailwindcss/postcss": "npm:@tailwindcss/postcss@^4",
+    "postcss": "npm:postcss@^8",
+    "tailwindcss": "npm:tailwindcss@^4",
     "markdownlint-cli": "npm:markdownlint-cli@^0.44.0",
-    "comlink": "npm:comlink@^4.4.2",
-    "turndown": "npm:turndown@^7.2.2"
+    "turndown": "npm:turndown@^7.2.2",
+    "human-id": "npm:human-id@^4.1.3",
+    "@aai/sdk": "./sdk/mod.ts",
+    "@aai/ui": "./ui/mod.ts"
   },
   "nodeModulesDir": "auto",
   "compilerOptions": {
@@ -67,9 +71,9 @@
       "ui/",
       "cli/",
       "sdk/",
-      "core/",
       "templates/"
-    ]
+    ],
+    "exclude": ["**/node_modules/"]
   },
   "lint": {
     "include": [
@@ -77,16 +81,17 @@
       "ui/",
       "cli/",
       "sdk/",
-      "core/",
-      "templates/"
+      "scripts/"
     ],
+    "exclude": ["**/node_modules/"],
     "rules": {
       "tags": ["recommended", "jsr", "react", "workspace"],
       "include": [
         "camelcase",
         "no-sync-fn-in-async-fn",
         "single-var-declarator",
-        "no-console"
+        "verbatim-module-syntax",
+        "no-unused-vars"
       ]
     },
     "plugins": ["./scripts/lint_plugin.ts"]

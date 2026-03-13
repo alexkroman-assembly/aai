@@ -39,7 +39,7 @@ function createMockKvStore() {
   };
 }
 
-const SCOPE = { slug: "test-agent", accountId: "abc" };
+const SCOPE = { slug: "test-agent", keyHash: "abc" };
 
 function makeCtx(body: unknown): RouteContext {
   return {

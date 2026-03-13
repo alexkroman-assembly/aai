@@ -11,6 +11,7 @@ Deno.test("registerSlot with valid env", () => {
     slug: "hello",
     env: VALID_ENV,
     transport: ["websocket"],
+    credential_hashes: ["hash1"],
   });
   assertStrictEquals(ok, true);
   assertStrictEquals(slots.has("hello"), true);
@@ -22,6 +23,7 @@ Deno.test("registerSlot returns false for invalid env", () => {
     slug: "bad",
     env: {},
     transport: ["websocket"],
+    credential_hashes: [],
   });
   assertStrictEquals(ok, false);
   assertStrictEquals(slots.has("bad"), false);
@@ -29,7 +31,17 @@ Deno.test("registerSlot returns false for invalid env", () => {
 
 Deno.test("registerSlot overwrites existing slot", () => {
   const slots = new Map<string, AgentSlot>();
-  registerSlot(slots, { slug: "x", env: VALID_ENV, transport: ["websocket"] });
-  registerSlot(slots, { slug: "x", env: VALID_ENV, transport: ["websocket"] });
+  registerSlot(slots, {
+    slug: "x",
+    env: VALID_ENV,
+    transport: ["websocket"],
+    credential_hashes: ["h"],
+  });
+  registerSlot(slots, {
+    slug: "x",
+    env: VALID_ENV,
+    transport: ["websocket"],
+    credential_hashes: ["h"],
+  });
   assertStrictEquals(slots.size, 1);
 });

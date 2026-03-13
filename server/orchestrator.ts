@@ -1,14 +1,15 @@
 // Copyright 2025 the AAI authors. MIT license.
 import * as log from "@std/log";
 import { type Route, route } from "@std/http/unstable-route";
+import { STATUS_CODE } from "@std/http/status";
 import { type AppState, html, HttpError, json, text } from "./context.ts";
-import { FAVICON_SVG, renderLandingPage } from "./html.ts";
+import { FAVICON_SVG, renderLandingPage } from "./html.tsx";
 import { INSTALL_SCRIPT } from "./install.ts";
 import { handleDeploy } from "./deploy.ts";
+import { handleEnvDelete, handleEnvList, handleEnvSet } from "./env_handler.ts";
 import {
   handleAgentHealth,
   handleAgentPage,
-  handleStaticFile,
   handleWebSocket,
 } from "./transport_websocket.ts";
 import type { BundleStore } from "./bundle_store_tigris.ts";
@@ -112,30 +113,65 @@ export function createOrchestrator(opts: {
       handler: () => text(INSTALL_SCRIPT),
     },
 
-    // --- Trailing-slash redirect ---
+    // --- Agent page (trailing slash is canonical for relative URL resolution) ---
     {
-      pattern: p("/:namespace/:slug/"),
+      pattern: p("/:slug"),
       method: "GET",
       handler: (req) => {
         const url = new URL(req.url);
-        url.pathname = url.pathname.replace(/\/+$/, "");
-        return Response.redirect(url.toString(), 301);
+        url.pathname += "/";
+        return Response.redirect(url.toString(), STATUS_CODE.MovedPermanently);
       },
     },
 
     // --- Agent routes ---
     {
-      pattern: p("/:namespace/:slug/deploy"),
+      pattern: p("/:slug/deploy"),
       method: "POST",
       handler: async (req, match, info) => {
         const c = ctx(req, match, info, state);
         const slug = validateSlug(c.params);
-        const accountId = await requireOwner(req, { slug, store: state.store });
-        return handleDeploy(c, { slug, accountId });
+        const keyHash = await requireOwner(req, {
+          slug,
+          store: state.store,
+        });
+        return handleDeploy(c, { slug, keyHash });
+      },
+    },
+    // --- Env management (like `vercel env`) ---
+    {
+      pattern: p("/:slug/env"),
+      method: "GET",
+      handler: async (req, match, info) => {
+        const c = ctx(req, match, info, state);
+        const slug = validateSlug(c.params);
+        await requireOwner(req, { slug, store: state.store });
+        return handleEnvList(c, slug);
       },
     },
     {
-      pattern: p("/:namespace/:slug/kv"),
+      pattern: p("/:slug/env"),
+      method: "PUT",
+      handler: async (req, match, info) => {
+        const c = ctx(req, match, info, state);
+        const slug = validateSlug(c.params);
+        await requireOwner(req, { slug, store: state.store });
+        return handleEnvSet(c, slug);
+      },
+    },
+    {
+      pattern: p("/:slug/env/:key"),
+      method: "DELETE",
+      handler: async (req, match, info) => {
+        const c = ctx(req, match, info, state);
+        const slug = validateSlug(c.params);
+        await requireOwner(req, { slug, store: state.store });
+        const key = c.params.key!;
+        return handleEnvDelete(c, { slug, key });
+      },
+    },
+    {
+      pattern: p("/:slug/kv"),
       method: "POST",
       handler: async (req, match, info) => {
         requireInternal(req, info!);
@@ -146,7 +182,7 @@ export function createOrchestrator(opts: {
       },
     },
     {
-      pattern: p("/:namespace/:slug/twilio/voice"),
+      pattern: p("/:slug/twilio/voice"),
       method: "POST",
       handler: (req, match, info) => {
         const c = ctx(req, match, info, state);
@@ -155,7 +191,7 @@ export function createOrchestrator(opts: {
       },
     },
     {
-      pattern: p("/:namespace/:slug/twilio/stream"),
+      pattern: p("/:slug/twilio/stream"),
       handler: (req, match, info) => {
         requireUpgrade(req);
         const c = ctx(req, match, info, state);
@@ -164,7 +200,7 @@ export function createOrchestrator(opts: {
       },
     },
     {
-      pattern: p("/:namespace/:slug/metrics"),
+      pattern: p("/:slug/metrics"),
       method: "GET",
       handler: async (req, match, info) => {
         const c = ctx(req, match, info, state);
@@ -176,7 +212,7 @@ export function createOrchestrator(opts: {
       },
     },
     {
-      pattern: p("/:namespace/:slug/health"),
+      pattern: p("/:slug/health"),
       method: "GET",
       handler: (req, match, info) => {
         const c = ctx(req, match, info, state);
@@ -185,7 +221,7 @@ export function createOrchestrator(opts: {
       },
     },
     {
-      pattern: p("/:namespace/:slug/websocket"),
+      pattern: p("/:slug/websocket"),
       handler: (req, match, info) => {
         requireUpgrade(req);
         const c = ctx(req, match, info, state);
@@ -193,26 +229,9 @@ export function createOrchestrator(opts: {
         return handleWebSocket(c, slug);
       },
     },
+    // --- Agent page (served at trailing-slash so relative URLs resolve correctly) ---
     {
-      pattern: p("/:namespace/:slug/client.js"),
-      method: "GET",
-      handler: (req, match, info) => {
-        const c = ctx(req, match, info, state);
-        const slug = validateSlug(c.params);
-        return handleStaticFile(c, { slug, file: "client.js" });
-      },
-    },
-    {
-      pattern: p("/:namespace/:slug/client.js.map"),
-      method: "GET",
-      handler: (req, match, info) => {
-        const c = ctx(req, match, info, state);
-        const slug = validateSlug(c.params);
-        return handleStaticFile(c, { slug, file: "client.js.map" });
-      },
-    },
-    {
-      pattern: p("/:namespace/:slug"),
+      pattern: p("/:slug/"),
       method: "GET",
       handler: (req, match, info) => {
         const c = ctx(req, match, info, state);
@@ -224,7 +243,7 @@ export function createOrchestrator(opts: {
 
   const handler = route(
     routes,
-    () => json({ error: "Not found" }, { status: 404 }),
+    () => json({ error: "Not found" }, { status: STATUS_CODE.NotFound }),
   );
 
   return async (req: Request, info: Deno.ServeHandlerInfo) => {
@@ -246,7 +265,9 @@ export function createOrchestrator(opts: {
         path: new URL(req.url).pathname,
       });
       return applyGlobalHeaders(
-        json({ error: "Internal server error" }, { status: 500 }),
+        json({ error: "Internal server error" }, {
+          status: STATUS_CODE.InternalServerError,
+        }),
       );
     }
   };

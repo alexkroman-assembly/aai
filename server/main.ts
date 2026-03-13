@@ -1,6 +1,5 @@
 // Copyright 2025 the AAI authors. MIT license.
 import * as log from "@std/log";
-import { deadline } from "@std/async/deadline";
 import { createOrchestrator } from "./orchestrator.ts";
 import { createBundleStore, createS3Client } from "./bundle_store_tigris.ts";
 import { createKvStore } from "./kv.ts";
@@ -64,5 +63,5 @@ const server = Deno.serve(
 
 log.info(`http://localhost:${port}`);
 
-await deadline(server.finished, 5_000).catch(() => {});
+await server.finished;
 log.info("Shutdown complete");

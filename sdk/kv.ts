@@ -96,7 +96,20 @@ export type Kv = {
   ): Promise<KvEntry<T>[]>;
 };
 
-const MAX_VALUE_SIZE = 65_536;
+export const MAX_VALUE_SIZE = 65_536;
+
+/** Sort entries by key and apply reverse/limit options. Mutates the array. */
+export function sortAndPaginate<T extends { key: string }>(
+  entries: T[],
+  options?: { limit?: number; reverse?: boolean },
+): T[] {
+  entries.sort((a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
+  if (options?.reverse) entries.reverse();
+  if (options?.limit && options.limit > 0) {
+    entries.length = Math.min(entries.length, options.limit);
+  }
+  return entries;
+}
 
 /**
  * Create an in-memory KV store (useful for testing and local development).
@@ -178,12 +191,7 @@ export function createMemoryKv(): Kv {
           entries.push({ key, value: JSON.parse(entry.raw) as T });
         }
       }
-      entries.sort((a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
-      if (options?.reverse) entries.reverse();
-      if (options?.limit && options.limit > 0) {
-        entries.length = Math.min(entries.length, options.limit);
-      }
-      return Promise.resolve(entries);
+      return Promise.resolve(sortAndPaginate(entries, options));
     },
   };
 }

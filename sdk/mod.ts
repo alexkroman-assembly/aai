@@ -4,7 +4,8 @@
  *
  * @example
  * ```ts
- * import { defineAgent, z } from "@aai/sdk";
+ * import { defineAgent } from "@aai/sdk";
+ * import { z } from "zod";
  *
  * export default defineAgent({
  *   name: "my-agent",
@@ -23,25 +24,13 @@
  */
 
 export { defineAgent } from "./define_agent.ts";
+export { initWorker } from "./_worker_shim.ts";
 export { createMemoryKv } from "./kv.ts";
 export { kvTools } from "./kv_tools.ts";
 
-/**
- * Re-export of the Zod schema library for defining tool parameters.
- *
- * @example
- * ```ts
- * import { z } from "@aai/sdk";
- *
- * const params = z.object({
- *   query: z.string().describe("Search query"),
- *   limit: z.number().optional(),
- * });
- * ```
- */
-export { z } from "zod";
 export type {
   AgentOptions,
+  BeforeStepResult,
   HookContext,
   Message,
   ToolContext,

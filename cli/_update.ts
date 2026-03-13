@@ -1,7 +1,7 @@
 // Copyright 2025 the AAI authors. MIT license.
 import { deadline } from "@std/async/deadline";
 import { bold, brightBlue, dim, yellow } from "@std/fmt/colors";
-import * as log from "@std/log";
+import { error as logError, info, step } from "./_output.ts";
 import { greaterThan, parse } from "@std/semver";
 
 const REPO = "alexkroman/aai";
@@ -34,12 +34,12 @@ async function doUpgrade(newVersion: string): Promise<boolean> {
   const url =
     `https://github.com/${REPO}/releases/download/latest/${target}.tar.gz`;
 
-  log.info(`Downloading aai ${newVersion}...`);
+  step("Download", `aai ${newVersion}`);
 
   try {
     const resp = await fetch(url);
     if (!resp.ok) {
-      log.error(`Download failed: ${resp.status} ${resp.statusText}`);
+      logError(`Download failed: ${resp.status} ${resp.statusText}`);
       return false;
     }
 
@@ -53,7 +53,7 @@ async function doUpgrade(newVersion: string): Promise<boolean> {
     });
     const tarResult = await tar.output();
     if (!tarResult.success) {
-      log.error("Failed to extract archive");
+      logError("Failed to extract archive");
       return false;
     }
 
@@ -66,10 +66,10 @@ async function doUpgrade(newVersion: string): Promise<boolean> {
     await Deno.chmod(binPath, 0o755);
     await Deno.remove(tmp, { recursive: true });
 
-    log.info(`Updated aai to ${newVersion}`);
+    step("Updated", `aai to ${newVersion}`);
     return true;
   } catch (err) {
-    log.error(`Upgrade failed: ${err}`);
+    logError(`Upgrade failed: ${err}`);
     return false;
   }
 }
@@ -87,20 +87,20 @@ export async function promptUpgradeIfAvailable(
   const newVersion = await checkForUpdate(currentVersion);
   if (!newVersion) return;
 
-  log.info(
+  console.log(
     `\n${yellow("Update available:")} ${dim(currentVersion)} → ${
       bold(brightBlue(newVersion))
     }`,
   );
   const confirmed = confirm("Upgrade now?");
   if (!confirmed) {
-    log.info(dim(`Run aai again to upgrade later.\n`));
+    info(dim(`Run aai again to upgrade later.`));
     return;
   }
 
   const ok = await doUpgrade(newVersion);
   if (ok) {
-    log.info("Restart aai to use the new version.\n");
+    info("Restart aai to use the new version.");
     Deno.exit(0);
   }
 }

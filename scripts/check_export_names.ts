@@ -1,4 +1,3 @@
-// deno-lint-ignore-file no-console
 // Copyright 2018-2026 the Deno authors. MIT license.
 
 /**
@@ -100,6 +99,7 @@ const denoJsonList = Promise.all(
 let failed = false;
 
 for (const denoJson of await denoJsonList) {
+  if (!denoJson.exports) continue;
   const namedExports = Array.from(Object.keys(denoJson.exports))
     .filter((name) => name !== ".");
 

@@ -55,6 +55,7 @@ export function rootHelp(version: string): string {
   const cmds: [string, string, string][] = [
     ["new", "[dir]", "Scaffold a new agent project"],
     ["deploy", "", "Bundle and deploy to production"],
+    ["env", "<cmd>", "Manage environment variables"],
   ];
 
   for (const [name, args, desc] of cmds) {

@@ -1,4 +1,5 @@
-import { defineAgent, z } from "@aai/sdk";
+import { defineAgent } from "@aai/sdk";
+import { z } from "zod";
 import type { ToolContext } from "@aai/sdk";
 
 type GameState = {
@@ -10,8 +11,8 @@ type GameState = {
   history: string[];
 };
 
-function s(ctx: ToolContext): GameState {
-  return ctx.state as GameState;
+function s(ctx: ToolContext<GameState>): GameState {
+  return ctx.state;
 }
 
 export default defineAgent({
@@ -77,7 +78,7 @@ ATMOSPHERE:
     game_state_get: {
       description:
         "Read the current game state including inventory, current room, score, moves, flags, and recent history.",
-      execute: (_args: Record<string, unknown>, ctx: ToolContext) => {
+      execute: (_args, ctx) => {
         const g = s(ctx);
         return {
           currentRoom: g.currentRoom,

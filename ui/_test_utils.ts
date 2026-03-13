@@ -1,20 +1,19 @@
 // Copyright 2025 the AAI authors. MIT license.
+import { delay } from "@std/async/delay";
 import { FakeTime } from "@std/testing/time";
 import { render } from "preact";
-import { installDomShim } from "./_dom_shim.ts";
-import { DOMParser } from "@b-fuze/deno-dom";
+import { DOMParser, installDomShim } from "./_dom_shim.ts";
 import { signal } from "@preact/signals";
 import { createVoiceSession, type VoiceSession } from "./session.ts";
 import { createSessionControls, type SessionSignals } from "./signals.ts";
 import type { AgentState, Message, SessionError } from "./types.ts";
-export { installMockWebSocket, MockWebSocket } from "../core/_mock_ws.ts";
-import { installMockWebSocket } from "../core/_mock_ws.ts";
+export { installMockWebSocket, MockWebSocket } from "@aai/sdk/testing";
+import { installMockWebSocket } from "@aai/sdk/testing";
 
 const HTML =
   `<!DOCTYPE html><html><head></head><body><div id="app"></div></body></html>`;
 
-// deno-lint-ignore no-explicit-any
-const g = globalThis as any;
+const g = globalThis as unknown as Record<string, unknown>;
 
 export function setupDOM() {
   installDomShim();
@@ -152,7 +151,9 @@ export function withAudioMocks(
   return async () => {
     const origAudioContext = globalThis.AudioContext;
     const origAudioWorkletNode = globalThis.AudioWorkletNode;
-    const nav = g.navigator;
+    const nav = g.navigator as
+      | { mediaDevices?: { getUserMedia?: unknown } }
+      | undefined;
     const origGetUserMedia = nav?.mediaDevices?.getUserMedia;
 
     let _lastContext: MockAudioContext;
@@ -172,8 +173,8 @@ export function withAudioMocks(
       }
     };
 
-    if (!nav.mediaDevices) nav.mediaDevices = {};
-    nav.mediaDevices.getUserMedia = () =>
+    if (!nav!.mediaDevices) nav!.mediaDevices = {};
+    nav!.mediaDevices!.getUserMedia = () =>
       Promise.resolve(new MockMediaStream());
 
     try {
@@ -185,7 +186,7 @@ export function withAudioMocks(
       globalThis.AudioContext = origAudioContext;
       globalThis.AudioWorkletNode = origAudioWorkletNode;
       if (origGetUserMedia) {
-        nav.mediaDevices.getUserMedia = origGetUserMedia;
+        nav!.mediaDevices!.getUserMedia = origGetUserMedia;
       }
     }
   };
@@ -208,18 +209,14 @@ export function withDOM(
   fn: (container: Element) => void | Promise<void>,
 ): () => Promise<void> {
   return async () => {
-    const time = new FakeTime();
+    using time = new FakeTime();
+    setupDOM();
+    const container = getContainer();
     try {
-      setupDOM();
-      const container = getContainer();
-      try {
-        await fn(container);
-      } finally {
-        render(null, container);
-        await time.tickAsync(100);
-      }
+      await fn(container);
     } finally {
-      time.restore();
+      render(null, container);
+      await time.tickAsync(100);
     }
   };
 }
@@ -239,7 +236,7 @@ export function withMountEnv(
     } finally {
       const app = globalThis.document.querySelector("#app");
       if (app) render(null, app as Element);
-      await new Promise<void>((r) => setTimeout(r, 0));
+      await delay(0);
       mock.restore();
     }
   };

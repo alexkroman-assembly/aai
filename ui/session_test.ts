@@ -184,27 +184,6 @@ Deno.test("VoiceSession", async (t) => {
         session.disconnect();
       }),
     );
-
-    await t.step(
-      "uses __AAI_WS__ for WebSocket path when set",
-      withSessionEnv(async (mock) => {
-        // deno-lint-ignore no-explicit-any
-        const g = globalThis as any;
-        g.__AAI_WS__ = "/ns/agent/ws";
-        try {
-          const { session, ws } = await connectSession(mock, {
-            platformUrl: "https://example.com/ns/agent",
-          });
-          assertStrictEquals(
-            ws.url.toString(),
-            "wss://example.com/ns/agent/ws",
-          );
-          session.disconnect();
-        } finally {
-          delete g.__AAI_WS__;
-        }
-      }),
-    );
   });
 
   await t.step("handleServerMessage", async (t) => {

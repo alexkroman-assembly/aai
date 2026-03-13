@@ -6,7 +6,11 @@
  */
 
 import { z } from "zod";
+import type { JSONSchema7 } from "json-schema";
 import type { Kv } from "./kv.ts";
+
+/** Result of the {@linkcode AgentOptions.onBeforeStep} hook. */
+export type BeforeStepResult = { activeTools?: string[] } | void;
 
 /**
  * Transport protocol for client-server communication.
@@ -101,7 +105,7 @@ export type AgentConfig = {
   sttPrompt?: string | undefined;
   maxSteps?: number | undefined;
   toolChoice?: ToolChoice | undefined;
-  transport?: Transport | readonly Transport[] | undefined;
+  transport?: readonly Transport[] | undefined;
   builtinTools?: readonly BuiltinTool[] | undefined;
 };
 
@@ -113,12 +117,7 @@ export type AgentConfig = {
 export type ToolSchema = {
   name: string;
   description: string;
-  parameters: {
-    type: "object";
-    properties?: Record<string, unknown> | undefined;
-    required?: readonly string[] | undefined;
-    [key: string]: unknown;
-  };
+  parameters: JSONSchema7;
 };
 
 /**
@@ -127,10 +126,11 @@ export type ToolSchema = {
  * Sent by the CLI to the server when deploying a bundled agent.
  */
 export type DeployBody = {
-  env: Readonly<Record<string, string>>;
+  /** Env vars are optional at deploy time — set separately via `aai env add`. */
+  env?: Readonly<Record<string, string>> | undefined;
   worker: string;
-  client: string;
-  transport?: Transport | Transport[] | undefined;
+  html: string;
+  transport?: readonly Transport[] | undefined;
 };
 
 /** Environment variables required by the agent runtime. */
@@ -140,7 +140,7 @@ export type AgentEnv = {
   [key: string]: string | undefined;
 };
 
-/** Config returned by the worker via Comlink RPC. */
+/** Config returned by the worker via RPC. */
 export type WorkerConfig = {
   config: AgentConfig;
   toolSchemas: ToolSchema[];
@@ -170,7 +170,8 @@ export type Message = {
  *
  * @example
  * ```ts
- * import { z, type ToolDef } from "@aai/sdk";
+ * import { type ToolDef } from "@aai/sdk";
+ * import { z } from "zod";
  *
  * const myTool: ToolDef = {
  *   description: "Look up a value from the KV store",
@@ -230,7 +231,8 @@ export type HookContext<S = Record<string, unknown>> = {
  *
  * @example
  * ```ts
- * import { z, type ToolDef } from "@aai/sdk";
+ * import { type ToolDef } from "@aai/sdk";
+ * import { z } from "zod";
  *
  * const weatherTool: ToolDef<typeof params> = {
  *   description: "Get current weather for a city",
@@ -246,17 +248,20 @@ export type HookContext<S = Record<string, unknown>> = {
  * const params = z.object({ city: z.string() });
  * ```
  */
-// deno-lint-ignore no-explicit-any
-export type ToolDef<P extends z.ZodObject<z.ZodRawShape> = any> = {
+export type ToolDef<
+  // deno-lint-ignore no-explicit-any
+  P extends z.ZodObject<z.ZodRawShape> = any,
+  S = Record<string, unknown>,
+> = {
   /** Human-readable description shown to the LLM. */
   description: string;
   /** Zod schema for the tool's parameters. */
-  parameters?: P;
+  parameters?: P | undefined;
   /** Function that executes the tool and returns a result. */
-  execute: (
+  execute(
     args: z.infer<P>,
-    ctx: ToolContext,
-  ) => Promise<unknown> | unknown;
+    ctx: ToolContext<S>,
+  ): Promise<unknown> | unknown;
 };
 
 /**
@@ -313,7 +318,8 @@ export type StepInfo = {
  *
  * @example
  * ```ts
- * import { defineAgent, z } from "@aai/sdk";
+ * import { defineAgent } from "@aai/sdk";
+ * import { z } from "zod";
  *
  * export default defineAgent({
  *   name: "research-bot",
@@ -376,7 +382,8 @@ export type AgentOptions<S = any> = {
   /** Built-in tools to enable (e.g. `"web_search"`, `"run_code"`). */
   builtinTools?: readonly BuiltinTool[];
   /** Custom tools the agent can invoke. */
-  tools?: Readonly<Record<string, ToolDef>>;
+  // deno-lint-ignore no-explicit-any
+  tools?: Readonly<Record<string, ToolDef<any, NoInfer<S>>>>;
   /** Factory that creates fresh per-session state. Called once per connection. */
   state?: () => S;
   /** Called when a new session connects. */
@@ -398,10 +405,7 @@ export type AgentOptions<S = any> = {
   onBeforeStep?: (
     stepNumber: number,
     ctx: HookContext<S>,
-  ) =>
-    | { activeTools?: string[] }
-    | void
-    | Promise<{ activeTools?: string[] } | void>;
+  ) => BeforeStepResult | Promise<BeforeStepResult>;
 };
 
 /**
@@ -467,7 +471,7 @@ export function agentToolsToSchemas(
     description: def.description,
     parameters: z.toJSONSchema(
       def.parameters ?? EMPTY_PARAMS,
-    ) as ToolSchema["parameters"],
+    ) as JSONSchema7,
   }));
 }
 

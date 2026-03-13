@@ -1,28 +1,9 @@
 // Copyright 2025 the AAI authors. MIT license.
 import { batch, type Signal, signal } from "@preact/signals";
-import * as log from "@std/log";
-import {
-  DEFAULT_STT_SAMPLE_RATE,
-  DEFAULT_TTS_SAMPLE_RATE,
-  PROTOCOL_VERSION,
-  type ServerMessage as _ServerMessage,
-} from "@aai/core/protocol";
+import { PROTOCOL_VERSION, type ServerMessage } from "@aai/sdk/protocol";
 
 const SUPPORTED_PROTOCOL_VERSION = PROTOCOL_VERSION;
 const SUPPORTED_AUDIO_FORMATS = new Set(["pcm16"]);
-
-// Client-side variant: protocol_version and audio_format are optional for
-// backwards compatibility with older servers that don't send them.
-type ServerMessage =
-  | Omit<
-    Extract<_ServerMessage, { type: "ready" }>,
-    "protocol_version" | "audio_format"
-  >
-    & {
-      protocol_version?: number;
-      audio_format?: string;
-    }
-  | Exclude<_ServerMessage, { type: "ready" }>;
 
 import {
   type AgentState,
@@ -84,12 +65,12 @@ export function createReconnect(
     },
     schedule(cb) {
       if (attempts >= maxAttempts) return false;
-      const delay = Math.min(initialBackoff * 2 ** attempts, maxBackoff);
+      const ms = Math.min(initialBackoff * 2 ** attempts, maxBackoff);
       attempts++;
       timer = setTimeout(() => {
         timer = null;
         cb();
-      }, delay);
+      }, ms);
       return true;
     },
     cancel() {
@@ -245,7 +226,7 @@ export function createVoiceSession(options: SessionOptions): VoiceSession {
   ): Promise<void> {
     if (audioSetupInFlight) return;
 
-    // Protocol version check — reject incompatible servers
+    // Protocol version check — reject incompatible servers (undefined = old server, allow)
     const serverVersion = msg.protocol_version;
     if (
       serverVersion !== undefined &&
@@ -262,7 +243,7 @@ export function createVoiceSession(options: SessionOptions): VoiceSession {
       return;
     }
 
-    // Audio format check — reject unknown formats
+    // Audio format check — reject unknown formats (undefined = old server, default to pcm16)
     const audioFormat = msg.audio_format ?? "pcm16";
     if (!SUPPORTED_AUDIO_FORMATS.has(audioFormat)) {
       batch(() => {
@@ -293,8 +274,8 @@ export function createVoiceSession(options: SessionOptions): VoiceSession {
       ]);
       const currentWs = ws!;
       const io = await createVoiceIO({
-        sttSampleRate: msg.sample_rate ?? DEFAULT_STT_SAMPLE_RATE,
-        ttsSampleRate: msg.tts_sample_rate ?? DEFAULT_TTS_SAMPLE_RATE,
+        sttSampleRate: msg.sample_rate,
+        ttsSampleRate: msg.tts_sample_rate,
         captureWorkletSrc: captureWorklet,
         playbackWorkletSrc: playbackWorklet,
         onMicData: (pcm16: ArrayBuffer) => {
@@ -383,7 +364,7 @@ export function createVoiceSession(options: SessionOptions): VoiceSession {
           const fullMessage = details?.length
             ? `${msg.message}: ${details.join(", ")}`
             : msg.message;
-          log.error("Agent error:", fullMessage);
+          console.error("Agent error:", fullMessage);
           error.value = { code: "protocol", message: fullMessage };
           state.value = "error";
           break;
@@ -406,9 +387,7 @@ export function createVoiceSession(options: SessionOptions): VoiceSession {
     }
 
     const base = options.platformUrl;
-    // deno-lint-ignore no-explicit-any
-    const wsPath = (globalThis as any).__AAI_WS__ as string ?? "websocket";
-    const wsUrl = new URL(wsPath, base.endsWith("/") ? base : base + "/");
+    const wsUrl = new URL("websocket", base.endsWith("/") ? base : base + "/");
     wsUrl.protocol = wsUrl.protocol === "https:" ? "wss:" : "ws:";
     if (hasConnected) wsUrl.searchParams.set("resume", "1");
     const socket = new WebSocket(wsUrl);

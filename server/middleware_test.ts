@@ -30,7 +30,7 @@ Deno.test("orchestrator returns 400 on deploy without auth", async () => {
   const kvStore = createTestKvStore();
   const handler = createOrchestrator({ store, scopeKey, kvStore });
   const res = await handler(
-    new Request("http://localhost/ns/agent/deploy", { method: "POST" }),
+    new Request("http://localhost/my-agent/deploy", { method: "POST" }),
     DUMMY_INFO,
   );
   assertEquals(res.status, 401);

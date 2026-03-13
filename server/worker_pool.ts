@@ -8,11 +8,11 @@ import {
   createWorkerApi,
   type HostApi,
   type WorkerApi,
-} from "@aai/core/worker-entry";
-import type { ExecuteTool } from "@aai/core/worker-entry";
+} from "./_worker_entry.ts";
+import type { ExecuteTool } from "./_worker_entry.ts";
 import type { BundleStore } from "./bundle_store_tigris.ts";
 import type { AgentMetadata } from "./_schemas.ts";
-import { createDenoWorker, LOCKED_PERMISSIONS } from "@aai/core/deno-worker";
+import { createDenoWorker, LOCKED_PERMISSIONS } from "./_deno_worker.ts";
 import { assertPublicUrl, getBuiltinToolSchemas } from "./builtin_tools.ts";
 import type { KvStore } from "./kv.ts";
 import type { AgentScope } from "./scope_token.ts";
@@ -37,9 +37,9 @@ export type AgentSlot = {
   name?: string;
   /** Cached tool schemas extracted from the worker. */
   toolSchemas?: ToolSchema[];
-  /** Account ID of the agent owner (for KV scoping). */
-  accountId?: string;
-  /** Active worker handle and Comlink API proxy. */
+  /** Credential hash of the agent owner (for KV scoping). */
+  keyHash: string;
+  /** Active worker handle and RPC API proxy. */
   worker?: { handle: { terminate(): void }; api: WorkerApi };
   /** Promise that resolves when the worker is done initializing. */
   initializing?: Promise<void>;
@@ -243,9 +243,7 @@ export function registerSlot(
     slug: metadata.slug,
     env: metadata.env,
     transport: metadata.transport,
-    ...(metadata.account_id !== undefined && {
-      accountId: metadata.account_id,
-    }),
+    keyHash: metadata.credential_hashes[0] ?? "",
   });
   return true;
 }
@@ -284,12 +282,10 @@ export async function prepareSession(
   opts: { slug: string; store: BundleStore; kvStore: KvStore },
 ): Promise<SessionSetup> {
   const { slug, store, kvStore } = opts;
-  const kvCtx = slot.accountId
-    ? { kvStore, scope: { accountId: slot.accountId, slug } }
-    : undefined;
+  const kvCtx = { kvStore, scope: { keyHash: slot.keyHash, slug } };
   const getWorkerCode = (s: string) => store.getFile(s, "worker");
   const getWorkerApi = async () => {
-    await ensureAgent(slot, { getWorkerCode, ...(kvCtx && { kvCtx }) });
+    await ensureAgent(slot, { getWorkerCode, kvCtx });
     return slot.worker!.api;
   };
   const executeTool: ExecuteTool = async (name, args, sessionId, messages) => {

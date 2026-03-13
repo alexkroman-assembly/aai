@@ -1,5 +1,6 @@
 // Copyright 2025 the AAI authors. MIT license.
 import * as log from "@std/log";
+import { STATUS_CODE } from "@std/http/status";
 import { HttpError, json, type RouteContext } from "./context.ts";
 import { type KvHttpRequest, KvHttpRequestSchema } from "./_schemas.ts";
 import type { AgentScope } from "./scope_token.ts";
@@ -19,7 +20,7 @@ export async function handleKv(
   try {
     msg = KvHttpRequestSchema.parse(await ctx.req.json());
   } catch {
-    throw new HttpError(400, "Invalid request");
+    throw new HttpError(STATUS_CODE.BadRequest, "Invalid request");
   }
 
   try {
@@ -49,6 +50,8 @@ export async function handleKv(
       slug: scope.slug,
       error: message,
     });
-    return json({ error: `KV operation failed: ${message}` }, { status: 500 });
+    return json({ error: `KV operation failed: ${message}` }, {
+      status: STATUS_CODE.InternalServerError,
+    });
   }
 }

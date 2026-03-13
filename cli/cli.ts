@@ -1,10 +1,10 @@
 // Copyright 2025 the AAI authors. MIT license.
 import { parseArgs } from "@std/cli/parse-args";
-import * as log from "@std/log";
 import { error } from "./_output.ts";
 import { promptUpgradeIfAvailable } from "./_update.ts";
 import { runNewCommand } from "./new.ts";
 import { runDeployCommand } from "./deploy.ts";
+import { runEnvCommand } from "./env.ts";
 import { rootHelp } from "./_help.ts";
 
 const denoConfig = await import("./deno.json", { with: { type: "json" } });
@@ -24,12 +24,12 @@ async function main(args: string[]): Promise<void> {
   });
 
   if (parsed.version) {
-    log.info(VERSION);
+    console.log(VERSION);
     return;
   }
 
   if (parsed.help && parsed._.length === 0) {
-    log.info(rootHelp(VERSION));
+    console.log(rootHelp(VERSION));
     return;
   }
 
@@ -43,16 +43,19 @@ async function main(args: string[]): Promise<void> {
     case "deploy":
       await runDeployCommand(subArgs, VERSION);
       return;
+    case "env":
+      await runEnvCommand(subArgs, VERSION);
+      return;
     case "help":
-      log.info(rootHelp(VERSION));
+      console.log(rootHelp(VERSION));
       return;
     case undefined:
-      // Default to "new" command
-      await runNewCommand(args, VERSION);
+      // Default: scaffold (if needed) + deploy
+      await runDeployCommand(args, VERSION);
       return;
     default:
       error(`Unknown command: ${subcommand}`);
-      log.info(rootHelp(VERSION));
+      console.log(rootHelp(VERSION));
       Deno.exit(1);
   }
 }

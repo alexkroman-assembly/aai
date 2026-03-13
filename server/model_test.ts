@@ -5,8 +5,27 @@ import { _internals } from "./model.ts";
 const { gatewayBugMiddleware, createGatewayFetch, GatewayResponseSchema } =
   _internals;
 
-// deno-lint-ignore no-explicit-any
-type Any = any;
+/** Content part shape used in test assertions. */
+type TestContentPart = { type: string; args?: unknown; text?: string };
+
+/** Shape of the params returned by transformParams in tests. */
+type TransformResult = {
+  prompt: {
+    role: string;
+    content: string | TestContentPart[];
+  }[];
+  [key: string]: unknown;
+};
+
+/** Extract content parts array from a TransformResult message. */
+function contentParts(
+  result: TransformResult,
+  msgIdx: number,
+): TestContentPart[] {
+  const content = result.prompt[msgIdx]!.content;
+  if (typeof content === "string") throw new Error("Expected array content");
+  return content;
+}
 
 // --- gatewayBugMiddleware.transformParams ---
 
@@ -21,10 +40,10 @@ Deno.test("gatewayBugMiddleware: replaces empty {} args with {_:''}", async () =
       },
     ],
   };
-  const result: Any = await gatewayBugMiddleware.transformParams!(
+  const result = await gatewayBugMiddleware.transformParams!(
     { params } as never,
-  );
-  assertEquals(result.prompt[0].content[0].args, { _: "" });
+  ) as TransformResult;
+  assertEquals(contentParts(result, 0)[0]!.args, { _: "" });
 });
 
 Deno.test("gatewayBugMiddleware: leaves non-empty args unchanged", async () => {
@@ -43,10 +62,10 @@ Deno.test("gatewayBugMiddleware: leaves non-empty args unchanged", async () => {
       },
     ],
   };
-  const result: Any = await gatewayBugMiddleware.transformParams!(
+  const result = await gatewayBugMiddleware.transformParams!(
     { params } as never,
-  );
-  assertEquals(result.prompt[0].content[0].args, { city: "NYC" });
+  ) as TransformResult;
+  assertEquals(contentParts(result, 0)[0]!.args, { city: "NYC" });
 });
 
 Deno.test("gatewayBugMiddleware: skips non-assistant messages", async () => {
@@ -61,11 +80,11 @@ Deno.test("gatewayBugMiddleware: skips non-assistant messages", async () => {
       },
     ],
   };
-  const result: Any = await gatewayBugMiddleware.transformParams!(
+  const result = await gatewayBugMiddleware.transformParams!(
     { params } as never,
-  );
+  ) as TransformResult;
   assertEquals(result.prompt[0], { role: "user", content: "hello" });
-  assertEquals(result.prompt[1].content[0].args, { _: "" });
+  assertEquals(contentParts(result, 1)[0]!.args, { _: "" });
 });
 
 Deno.test("gatewayBugMiddleware: skips non-tool-call content parts", async () => {
@@ -80,21 +99,21 @@ Deno.test("gatewayBugMiddleware: skips non-tool-call content parts", async () =>
       },
     ],
   };
-  const result: Any = await gatewayBugMiddleware.transformParams!(
+  const result = await gatewayBugMiddleware.transformParams!(
     { params } as never,
-  );
-  assertEquals(result.prompt[0].content[0], {
+  ) as TransformResult;
+  assertEquals(contentParts(result, 0)[0]!, {
     type: "text",
     text: "thinking...",
   });
-  assertEquals(result.prompt[0].content[1].args, { _: "" });
+  assertEquals(contentParts(result, 0)[1]!.args, { _: "" });
 });
 
 Deno.test("gatewayBugMiddleware: returns params unchanged when prompt is not array", async () => {
   const params = { prompt: "not an array", model: "test" };
-  const result: Any = await gatewayBugMiddleware.transformParams!(
+  const result = await gatewayBugMiddleware.transformParams!(
     { params } as never,
-  );
+  ) as Record<string, unknown>;
   assertEquals(result, params);
 });
 
@@ -109,10 +128,10 @@ Deno.test("gatewayBugMiddleware: does not patch array args", async () => {
       },
     ],
   };
-  const result: Any = await gatewayBugMiddleware.transformParams!(
+  const result = await gatewayBugMiddleware.transformParams!(
     { params } as never,
-  );
-  assertEquals(result.prompt[0].content[0].args, []);
+  ) as TransformResult;
+  assertEquals(contentParts(result, 0)[0]!.args, []);
 });
 
 // --- createGatewayFetch ---

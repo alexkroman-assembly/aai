@@ -24,15 +24,18 @@ const rootConfig = JSON.parse(await Deno.readTextFile("deno.json"));
 const PACKAGES: string[] = rootConfig.workspace;
 
 // When a package changes, these dependents must also be bumped.
-// Based on the dependency graph: cli/, server/, ui/ depend on sdk/ and core/.
+// Based on the dependency graph: cli/, server/, ui/ depend on sdk/.
 const DEPENDENTS: Record<string, string[]> = {
-  sdk: ["cli", "core", "server", "ui"],
-  core: ["cli", "server", "ui"],
+  sdk: ["cli", "server", "ui"],
   ui: ["cli"],
 };
 
 function bumpPatch(version: string): string {
-  const [major, minor, patch] = version.split(".").map(Number);
+  const [major, minor, patch] = version.split(".").map(Number) as [
+    number,
+    number,
+    number,
+  ];
   return `${major}.${minor}.${patch + 1}`;
 }
 

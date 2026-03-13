@@ -1,0 +1,33 @@
+{
+  "imports": {
+    "@aai/sdk": "../sdk/mod.ts",
+    "@aai/sdk/types": "../sdk/types.ts",
+    "@aai/ui": "../ui/mod.ts",
+    "zod": "jsr:@zod/zod@^4",
+    "preact/hooks": "npm:preact@^10/hooks",
+    "preact/compat": "npm:preact@^10/compat",
+    "react": "npm:preact@^10/compat",
+    "react-dom": "npm:preact@^10/compat",
+    "@preact/signals": "npm:@preact/signals@^2",
+    "vite": "npm:vite@^6",
+    "@preact/preset-vite": "npm:@preact/preset-vite@^2",
+    "@tailwindcss/vite": "npm:@tailwindcss/vite@^4",
+    "vite-plugin-singlefile": "npm:vite-plugin-singlefile@^2",
+    "@deno/loader": "jsr:@deno/loader@^0.3",
+    "esbuild": "npm:esbuild@^0.25"
+  },
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "preact"
+  },
+  "lint": {
+    "rules": {
+      "tags": ["recommended"]
+    }
+  },
+  "fmt": {
+    "semiColons": true,
+    "singleQuote": false,
+    "indentWidth": 2
+  }
+}

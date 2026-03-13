@@ -1,8 +1,8 @@
 // Copyright 2025 the AAI authors. MIT license.
 import * as log from "@std/log";
+import { STATUS_CODE } from "@std/http/status";
 import { json, type RouteContext } from "./context.ts";
 import { loadPlatformConfig } from "./config.ts";
-import { normalizeTransport } from "@aai/sdk/types";
 import type { DeployBody } from "@aai/sdk/types";
 import { HttpError } from "./context.ts";
 import { DeployBodySchema } from "./_schemas.ts";
@@ -13,24 +13,29 @@ export { hashApiKey } from "./auth.ts";
 /**
  * Handler for the agent deploy endpoint (`POST /:slug/deploy`).
  *
- * Validates platform config, terminates any existing worker for the slug,
- * persists the new bundle to the store, and registers the agent slot.
+ * Env vars are managed separately via the /env endpoints (like `vercel env`).
+ * If env is provided in the deploy body, it's merged with any existing
+ * stored env. If not provided, the existing stored env is preserved.
  */
 export async function handleDeploy(
   ctx: RouteContext,
-  opts: { slug: string; accountId: string },
+  opts: { slug: string; keyHash: string },
 ): Promise<Response> {
   const { state } = ctx;
-  const { slug, accountId } = opts;
+  const { slug, keyHash } = opts;
   let body: DeployBody;
   try {
     body = DeployBodySchema.parse(await ctx.req.json());
   } catch {
-    throw new HttpError(400, "Invalid deploy body");
+    throw new HttpError(STATUS_CODE.BadRequest, "Invalid deploy body");
   }
 
+  // Merge env: deploy body env takes precedence, then stored env
+  const storedEnv = await state.store.getEnv(slug) ?? {};
+  const env = body.env ? { ...storedEnv, ...body.env } : storedEnv;
+
   try {
-    loadPlatformConfig(body.env);
+    loadPlatformConfig(env);
   } catch (err: unknown) {
     return json(
       {
@@ -38,7 +43,7 @@ export async function handleDeploy(
           err instanceof Error ? err.message : String(err)
         }`,
       },
-      { status: 400 },
+      { status: STATUS_CODE.BadRequest },
     );
   }
 
@@ -50,22 +55,22 @@ export async function handleDeploy(
     delete existing.initializing;
   }
 
-  const transport = normalizeTransport(body.transport);
+  const transport = body.transport ?? ["websocket"];
 
   await state.store.putAgent({
     slug,
-    env: body.env,
+    env,
     transport,
     worker: body.worker,
-    client: body.client,
-    account_id: accountId,
+    html: body.html,
+    credential_hashes: [keyHash],
   });
 
   const slot: AgentSlot = {
     slug,
-    env: body.env,
+    env,
     transport,
-    accountId,
+    keyHash,
   };
   state.slots.set(slug, slot);
 

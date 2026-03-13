@@ -30,6 +30,14 @@ esac
 ARTIFACT="aai-\${os}-\${arch}"
 URL="https://github.com/\$REPO/releases/download/latest/\${ARTIFACT}.tar.gz"
 
+# Install Deno if not present (required runtime)
+if ! command -v deno >/dev/null 2>&1; then
+  echo "Installing Deno..."
+  curl -fsSL https://deno.land/install.sh | sh
+  export DENO_INSTALL="\$HOME/.deno"
+  export PATH="\$DENO_INSTALL/bin:\$PATH"
+fi
+
 echo "Installing aai (\$os/\$arch)..."
 
 # Download and extract

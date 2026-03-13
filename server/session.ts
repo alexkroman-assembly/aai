@@ -2,7 +2,7 @@
 import * as log from "@std/log";
 import type { PlatformConfig } from "./config.ts";
 import { createModel } from "./model.ts";
-import type { ExecuteTool } from "@aai/core/worker-entry";
+import type { ExecuteTool } from "./_worker_entry.ts";
 import { createSttConnection, type SttConnection } from "./stt.ts";
 import { createTtsConnection, type TtsConnection } from "./tts.ts";
 import { getBuiltinVercelTools } from "./builtin_tools.ts";
@@ -10,7 +10,7 @@ import { executeTurn } from "./turn_handler.ts";
 import type { STTConfig, TTSConfig } from "./types.ts";
 import type { AgentConfig } from "@aai/sdk/types";
 import type { ToolSchema } from "@aai/sdk/types";
-import type { WorkerApi } from "@aai/core/worker-entry";
+import type { WorkerApi } from "./_worker_entry.ts";
 import { buildSystemPrompt } from "./system_prompt.ts";
 import {
   type CoreAssistantMessage,
@@ -24,7 +24,7 @@ import {
 } from "ai";
 import type { Message } from "@aai/sdk/types";
 import * as metrics from "./metrics.ts";
-import { AUDIO_FORMAT, PROTOCOL_VERSION } from "@aai/core/protocol";
+import { AUDIO_FORMAT, PROTOCOL_VERSION } from "@aai/sdk/protocol";
 
 /** Transport abstraction for sending data to a connected client. */
 export type SessionTransport = {
@@ -247,20 +247,16 @@ export function createSession(opts: SessionOptions): Session {
       handle.onTurn = ({ text, turnOrder }) => {
         log.info("turn", { text, turnOrder });
         const prev = turnPromise;
-        // deno-lint-ignore prefer-const
-        let next!: Promise<void>;
-        next = (async () => {
+        const next: Promise<void> = (async () => {
           try {
             await prev;
           } catch (e) {
             log.warn("previous turn failed", e);
           }
-          try {
-            await handleTurn(text, turnOrder);
-          } finally {
-            if (turnPromise === next) turnPromise = null;
-          }
-        })();
+          await handleTurn(text, turnOrder);
+        })().finally(() => {
+          if (turnPromise === next) turnPromise = null;
+        });
         turnPromise = next;
       };
 
@@ -429,9 +425,7 @@ export function createSession(opts: SessionOptions): Session {
     const abort = new AbortController();
     turnAbort = abort;
     const signal = AbortSignal.any([sessionAbort.signal, abort.signal]);
-    // deno-lint-ignore prefer-const
-    let p!: Promise<void>;
-    p = (async () => {
+    const p: Promise<void> = (async () => {
       try {
         await tts.synthesizeStream(text, (chunk) => trySend(chunk), signal);
         if (!signal.aborted) trySendJson({ type: "tts_done" });
@@ -442,9 +436,10 @@ export function createSession(opts: SessionOptions): Session {
         trySendJson({ type: "error", message: msg });
       } finally {
         if (turnAbort === abort) turnAbort = null;
-        if (turnPromise === p) turnPromise = null;
       }
-    })();
+    })().finally(() => {
+      if (turnPromise === p) turnPromise = null;
+    });
     turnPromise = p;
   }
 
