@@ -6,6 +6,7 @@ import { wireSessionSocket } from "./ws_handler.ts";
 import { createSession } from "./session.ts";
 import { type AgentSlot, prepareSession, registerSlot } from "./worker_pool.ts";
 import type { BundleStore } from "./bundle_store_tigris.ts";
+import { AUDIO_FORMAT, PROTOCOL_VERSION } from "@aai/sdk/protocol";
 
 export const _internals = { prepareSession };
 
@@ -94,6 +95,7 @@ export async function handleWebSocket(
 
   const { socket, response } = Deno.upgradeWebSocket(ctx.req);
 
+  const isSttOnly = setup.agentConfig.mode === "stt-only";
   wireSessionSocket(socket, {
     sessions: ctx.state.sessions,
     createSession: (sessionId, client) =>
@@ -104,6 +106,13 @@ export async function handleWebSocket(
         ...setup,
         skipGreeting: resume,
       }),
+    readyConfig: {
+      protocol_version: PROTOCOL_VERSION,
+      audio_format: AUDIO_FORMAT,
+      sample_rate: setup.platformConfig.sttConfig.sampleRate,
+      tts_sample_rate: setup.platformConfig.ttsConfig.sampleRate,
+      ...(isSttOnly ? { mode: "stt-only" } : {}),
+    },
     logContext: { slug },
   });
 

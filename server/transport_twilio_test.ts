@@ -153,7 +153,6 @@ Deno.test("createTwilioClientSink", async (t) => {
   await t.step("text methods are no-ops for Twilio", () => {
     const { ws, sent } = mockWs();
     const sink = createTwilioClientSink(ws);
-    sink.ready({ protocol_version: 1, audio_format: "pcm16", sample_rate: 16000, tts_sample_rate: 24000 });
     sink.partialTranscript("hello");
     sink.finalTranscript("hello");
     sink.turn("hello");

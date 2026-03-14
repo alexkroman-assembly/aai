@@ -3,12 +3,23 @@ import * as log from "@std/log";
 import { newWebSocketRpcSession, RpcTarget } from "capnweb";
 import type { ClientSink, Session } from "./session.ts";
 
+/** Protocol-level session config returned to the client on connect. */
+export type ReadyConfig = {
+  protocol_version: number;
+  audio_format: string;
+  sample_rate: number;
+  tts_sample_rate: number;
+  mode?: string;
+};
+
 /** Options for wiring a WebSocket to a session. */
 export type WsSessionOptions = {
   /** Map of active sessions (session is added on open, removed on close). */
   sessions: Map<string, Session>;
   /** Factory function to create a session for a given ID and client sink. */
   createSession: (sessionId: string, client: ClientSink) => Session;
+  /** Protocol config the client can pull via getConfig() — avoids server push. */
+  readyConfig: ReadyConfig;
   /** Additional key-value pairs included in log messages. */
   logContext?: Record<string, string>;
   /** Callback invoked when the WebSocket connection opens. */
@@ -25,13 +36,6 @@ export type WsSessionOptions = {
  * interface used by the session layer.
  */
 export interface ClientRpcApi {
-  ready(config: {
-    protocol_version: number;
-    audio_format: string;
-    sample_rate: number;
-    tts_sample_rate: number;
-    mode?: string;
-  }): void;
   partialTranscript(text: string): void;
   finalTranscript(text: string, turnOrder?: number): void;
   turn(text: string, turnOrder?: number): void;
@@ -51,10 +55,17 @@ export interface ClientRpcApi {
  */
 class SessionTarget extends RpcTarget {
   #session: Session;
+  #readyConfig: ReadyConfig;
 
-  constructor(session: Session) {
+  constructor(session: Session, readyConfig: ReadyConfig) {
     super();
     this.#session = session;
+    this.#readyConfig = readyConfig;
+  }
+
+  /** Returns protocol config — client pipelines this with authenticate(). */
+  getConfig(): ReadyConfig {
+    return this.#readyConfig;
   }
 
   audioReady(): void {
@@ -105,6 +116,7 @@ class SessionGate extends RpcTarget {
   #createSession: (sessionId: string, client: ClientSink) => Session;
   #sessions: Map<string, Session>;
   #onSession: (session: Session) => void;
+  #readyConfig: ReadyConfig;
   #authenticated = false;
 
   constructor(opts: {
@@ -113,6 +125,7 @@ class SessionGate extends RpcTarget {
     createSession: (sessionId: string, client: ClientSink) => Session;
     sessions: Map<string, Session>;
     onSession: (session: Session) => void;
+    readyConfig: ReadyConfig;
   }) {
     super();
     this.#sessionId = opts.sessionId;
@@ -120,6 +133,7 @@ class SessionGate extends RpcTarget {
     this.#createSession = opts.createSession;
     this.#sessions = opts.sessions;
     this.#onSession = opts.onSession;
+    this.#readyConfig = opts.readyConfig;
   }
 
   /** Set the client stub after the RPC session is established. */
@@ -149,7 +163,7 @@ class SessionGate extends RpcTarget {
     this.#onSession(session);
 
     void session.start();
-    return new SessionTarget(session);
+    return new SessionTarget(session, this.#readyConfig);
   }
 }
 
@@ -170,9 +184,6 @@ function createClientSink(
   return {
     get open() {
       return ws.readyState === WebSocket.OPEN;
-    },
-    ready(config) {
-      fire(() => stub.ready(config));
     },
     partialTranscript(text) {
       fire(() => stub.partialTranscript(text));
@@ -233,6 +244,7 @@ export function wireSessionSocket(
       ws,
       createSession: opts.createSession,
       sessions,
+      readyConfig: opts.readyConfig,
       onSession: (s) => {
         session = s;
       },

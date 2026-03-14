@@ -34,16 +34,12 @@ export type ExecuteTurnOptions = {
   maxSteps?: number | undefined;
   /** Tool choice strategy passed to the LLM (default: "auto"). */
   toolChoice?: ToolChoice | undefined;
-  /** Callback invoked after each LLM step completes. */
+  /** Callback invoked after each LLM step completes (fire-and-forget). */
   onStep?:
-    | ((step: StepResult<ToolSet>) => void | Promise<void>)
+    | ((step: StepResult<ToolSet>) => void)
     | undefined;
-  /** Hook called before each step to optionally filter active tools. */
-  resolveBeforeStep?:
-    | ((
-      stepNumber: number,
-    ) => Promise<{ activeTools?: string[] } | null>)
-    | undefined;
+  /** Pre-resolved active tool filter (resolved once at turn start). */
+  activeTools?: string[] | undefined;
 };
 
 /**
@@ -83,35 +79,30 @@ export async function executeTurn(
     toolChoice,
     maxSteps,
     abortSignal: signal,
-    experimental_prepareStep: async ({ stepNumber }) => {
+    experimental_prepareStep: ({ stepNumber }) => {
       // On the last step, force final_answer so we don't get stuck
       if (stepNumber === maxSteps - 1) {
         return {
           toolChoice: { type: "tool", toolName: FINAL_ANSWER_TOOL },
         };
       }
-      // Let the agent's onBeforeStep filter active tools
-      if (opts.resolveBeforeStep) {
-        const result = await opts.resolveBeforeStep(stepNumber);
-        if (result?.activeTools) {
-          return {
-            toolChoice,
-            experimental_activeTools: result.activeTools,
-          };
-        }
+      // Apply pre-resolved active tool filter
+      if (opts.activeTools) {
+        return {
+          toolChoice,
+          experimental_activeTools: opts.activeTools,
+        };
       }
       return undefined;
     },
-    onStepFinish: async (step: StepResult<ToolSet>) => {
+    onStepFinish: (step: StepResult<ToolSet>) => {
       if (step.toolCalls) {
         for (const tc of step.toolCalls) {
           log.info("tool call", { tool: tc.toolName, agent });
           metrics.toolDuration.observe(0, { agent, tool: tc.toolName });
         }
       }
-      if (opts.onStep) {
-        await opts.onStep(step);
-      }
+      opts.onStep?.(step);
     },
   });
 

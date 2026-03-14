@@ -24,7 +24,6 @@ import {
 } from "ai";
 import type { Message } from "@aai/sdk/types";
 import * as metrics from "./metrics.ts";
-import { AUDIO_FORMAT, PROTOCOL_VERSION } from "@aai/sdk/protocol";
 
 /**
  * Typed interface for pushing session events to a connected client.
@@ -35,14 +34,6 @@ import { AUDIO_FORMAT, PROTOCOL_VERSION } from "@aai/sdk/protocol";
 export interface ClientSink {
   /** Whether the underlying connection is open and accepting calls. */
   readonly open: boolean;
-  /** Notify the client that the session is ready with negotiated config. */
-  ready(config: {
-    protocol_version: number;
-    audio_format: string;
-    sample_rate: number;
-    tts_sample_rate: number;
-    mode?: string;
-  }): void;
   /** Send a partial (in-progress) STT transcript. */
   partialTranscript(text: string): void;
   /** Send a finalized STT transcript. */
@@ -108,7 +99,7 @@ type AgentState = (typeof AgentState)[keyof typeof AgentState];
 
 /** A voice session managing the STT -> LLM -> TTS pipeline for one connection. */
 export type Session = {
-  /** Initializes the session, connects to STT, and sends the ready message. */
+  /** Initializes the session and connects to STT. */
   start(): Promise<void>;
   /** Gracefully stops the session, aborting any in-flight turn and closing STT/TTS. */
   stop(): Promise<void>;
@@ -149,6 +140,8 @@ export function createSession(opts: SessionOptions): Session {
   let pendingGreeting: string | null = null;
   let messages: CoreMessage[] = [];
   let cachedWorkerApi: WorkerApi | undefined;
+  /** Pre-resolved dynamic maxSteps (prefetched at connect time). */
+  let prefetchedMaxSteps: Promise<number | null> | null = null;
 
   const sessionAbort = new AbortController();
 
@@ -334,16 +327,28 @@ export function createSession(opts: SessionOptions): Session {
 
     try {
       let maxSteps = agentConfig.maxSteps;
-      if (maxSteps === undefined && getWorkerApi) {
+      if (maxSteps === undefined && prefetchedMaxSteps) {
         try {
-          cachedWorkerApi ??= await getWorkerApi();
-          const resolved = await cachedWorkerApi.resolveMaxSteps(
-            id,
-            5_000,
-          );
+          const resolved = await prefetchedMaxSteps;
           if (resolved !== null) maxSteps = resolved;
         } catch (err: unknown) {
           log.warn("resolveMaxSteps failed, using default", { err });
+        }
+      }
+
+      // Resolve active tools once upfront (not per-step)
+      let activeTools: string[] | undefined;
+      if (getWorkerApi) {
+        try {
+          cachedWorkerApi ??= await getWorkerApi();
+          const result = await cachedWorkerApi.resolveBeforeStep(
+            id,
+            0,
+            5_000,
+          );
+          activeTools = result?.activeTools;
+        } catch (err: unknown) {
+          log.warn("resolveBeforeStep failed", { err });
         }
       }
 
@@ -356,8 +361,9 @@ export function createSession(opts: SessionOptions): Session {
         signal,
         maxSteps,
         toolChoice: agentConfig.toolChoice,
+        activeTools,
         onStep: getWorkerApi
-          ? async (step: StepResult<ToolSet>) => {
+          ? (step: StepResult<ToolSet>) => {
             const stepInfo = {
               stepNumber: step.stepType === "initial" ? 0 : -1,
               toolCalls: (step.toolCalls ?? []).map((tc) => ({
@@ -366,23 +372,8 @@ export function createSession(opts: SessionOptions): Session {
               })),
               text: step.text ?? "",
             };
-            await callHook("onStep", (api) =>
-              api.onStep(id, stepInfo, 5_000));
-          }
-          : undefined,
-        resolveBeforeStep: getWorkerApi
-          ? async (stepNumber: number) => {
-            try {
-              cachedWorkerApi ??= await getWorkerApi!();
-              return await cachedWorkerApi.resolveBeforeStep(
-                id,
-                stepNumber,
-                5_000,
-              );
-            } catch (err: unknown) {
-              log.warn("resolveBeforeStep failed", { err });
-              return null;
-            }
+            // Fire-and-forget — onStep is informational, don't block the turn
+            callHook("onStep", (api) => api.onStep(id, stepInfo, 5_000));
           }
           : undefined,
       });
@@ -497,18 +488,23 @@ export function createSession(opts: SessionOptions): Session {
       }
 
       callHook("onConnect", (api) => api.onConnect(id, 5_000));
+
+      // Prefetch dynamic maxSteps so it's ready before the first turn
+      if (agentConfig.maxSteps === undefined && getWorkerApi) {
+        prefetchedMaxSteps = (async () => {
+          try {
+            cachedWorkerApi ??= await getWorkerApi!();
+            return await cachedWorkerApi.resolveMaxSteps(id, 5_000);
+          } catch (err: unknown) {
+            log.warn("resolveMaxSteps prefetch failed", { err });
+            return null;
+          }
+        })();
+      }
+
       await connectStt();
 
       conn = ConnState.Ready;
-      trySend(() =>
-        client.ready({
-          protocol_version: PROTOCOL_VERSION,
-          audio_format: AUDIO_FORMAT,
-          sample_rate: config.sttConfig.sampleRate,
-          tts_sample_rate: config.ttsConfig.sampleRate,
-          ...(isSttOnly ? { mode: "stt-only" } : {}),
-        })
-      );
     },
 
     async stop(): Promise<void> {

@@ -47,7 +47,6 @@ export function createTwilioClientSink(ws: WsSink): ClientSink & {
     },
 
     // Text events — log only, Twilio doesn't display text
-    ready() {},
     partialTranscript() {},
     finalTranscript() {},
     turn() {},

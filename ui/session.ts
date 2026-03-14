@@ -29,6 +29,13 @@ interface GateRpcApi {
  * Provides the actual session control methods (audio, cancel, reset, etc.).
  */
 interface SessionRpcApi {
+  getConfig(): Promise<{
+    protocol_version: number;
+    audio_format: string;
+    sample_rate: number;
+    tts_sample_rate: number;
+    mode?: string;
+  }>;
   audioReady(): void;
   cancel(): void;
   resetSession(): void;
@@ -89,28 +96,12 @@ class ClientRpcTarget extends RpcTarget {
   #transcript: Signal<string>;
   #error: Signal<SessionError | null>;
   #voiceIO: () => VoiceIO | null;
-  #onReady: (
-    msg: {
-      protocol_version: number;
-      audio_format: string;
-      sample_rate: number;
-      tts_sample_rate: number;
-      mode?: string;
-    },
-  ) => Promise<void>;
   constructor(opts: {
     state: Signal<AgentState>;
     messages: Signal<Message[]>;
     transcript: Signal<string>;
     error: Signal<SessionError | null>;
     voiceIO: () => VoiceIO | null;
-    onReady: (msg: {
-      protocol_version: number;
-      audio_format: string;
-      sample_rate: number;
-      tts_sample_rate: number;
-      mode?: string;
-    }) => Promise<void>;
   }) {
     super();
     this.#state = opts.state;
@@ -118,17 +109,6 @@ class ClientRpcTarget extends RpcTarget {
     this.#transcript = opts.transcript;
     this.#error = opts.error;
     this.#voiceIO = opts.voiceIO;
-    this.#onReady = opts.onReady;
-  }
-
-  ready(config: {
-    protocol_version: number;
-    audio_format: string;
-    sample_rate: number;
-    tts_sample_rate: number;
-    mode?: string;
-  }): void {
-    void this.#onReady(config);
   }
 
   partialTranscript(text: string): void {
@@ -383,10 +363,6 @@ export function createVoiceSession(options: SessionOptions): VoiceSession {
         transcript,
         error,
         voiceIO: () => voiceIO,
-        onReady: async (msg) => {
-          hasConnected = true;
-          await handleReady(msg);
-        },
       });
 
       // Initialize capnweb RPC session — server exposes a gate
@@ -400,6 +376,18 @@ export function createVoiceSession(options: SessionOptions): VoiceSession {
       // are batched with the authenticate call in one round trip.
       sessionStub = gate.authenticate() as unknown as
         import("capnweb").RpcStub<SessionRpcApi>;
+
+      // Pull config from server — pipelined with authenticate (same round trip)
+      void (sessionStub.getConfig() as Promise<{
+        protocol_version: number;
+        audio_format: string;
+        sample_rate: number;
+        tts_sample_rate: number;
+        mode?: string;
+      }>).then(async (config) => {
+        hasConnected = true;
+        await handleReady(config);
+      }).catch(() => {});
 
       // Send history if reconnecting (pipelined with authenticate)
       if (hasConnected && messages.value.length > 0) {

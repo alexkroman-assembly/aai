@@ -192,17 +192,21 @@ export function createWorkerApi(
   const stub = newMessagePortRpcSession<WorkerRpcApi>(port, hostTarget);
 
   // Set env once via capability pattern — returns a scoped stub.
-  // All session calls pipeline through this; getConfig uses the base stub.
+  // Both withEnv and getConfig are issued in the same microtask,
+  // so capnweb batches them in a single postMessage round trip.
   const scoped = env
     ? stub.withEnv(env) as unknown as import("capnweb").RpcStub<WorkerRpcApi>
     : stub;
 
+  // Eagerly start getConfig — pipelined with withEnv in the same batch.
+  const configPromise = withTimeout(
+    stub.getConfig() as Promise<import("@aai/sdk/types").WorkerConfig>,
+    5_000,
+  );
+
   return {
     async getConfig() {
-      return await withTimeout(
-        stub.getConfig() as Promise<import("@aai/sdk/types").WorkerConfig>,
-        5_000,
-      );
+      return await configPromise;
     },
     async executeTool(name, args, sessionId, timeoutMs, messages) {
       const raw = await withTimeout(

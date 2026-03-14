@@ -18,9 +18,6 @@ function createMockClientSink(): ClientSink & {
   return {
     calls,
     open: true,
-    ready(...args) {
-      calls.push({ method: "ready", args });
-    },
     partialTranscript(...args) {
       calls.push({ method: "partialTranscript", args });
     },
@@ -219,16 +216,11 @@ function filterCalls(
   return client.calls.filter((c) => c.method === method);
 }
 
-Deno.test("start sends ready with protocol metadata", async () => {
+Deno.test("start connects STT without sending ready", async () => {
   const ctx = setup();
   await ctx.session.start();
-  const call = findCall(ctx.client, "ready");
-  assert(call !== undefined);
-  const config = call!.args[0] as Record<string, unknown>;
-  assertStrictEquals(config.protocol_version, 1);
-  assertStrictEquals(config.audio_format, "pcm16");
-  assert(config.sample_rate !== undefined);
-  assert(config.tts_sample_rate !== undefined);
+  // ready() is no longer pushed — client pulls config via SessionTarget.getConfig()
+  assertStrictEquals(findCall(ctx.client, "ready"), undefined);
 });
 
 Deno.test("start defers greeting until onAudioReady", () => {
