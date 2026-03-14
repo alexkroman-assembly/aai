@@ -23,7 +23,23 @@ import {
   type ToolSet,
 } from "ai";
 import type { Message } from "@aai/sdk/types";
+import type { TurnConfig } from "./_worker_entry.ts";
 import * as metrics from "./metrics.ts";
+
+/**
+ * Discriminated union of all server→client session events.
+ *
+ * Sent via a single `event()` RPC method instead of one method per type.
+ */
+export type ClientEvent =
+  | { type: "transcript"; text: string; isFinal: false }
+  | { type: "transcript"; text: string; isFinal: true; turnOrder?: number }
+  | { type: "turn"; text: string; turnOrder?: number }
+  | { type: "chat"; text: string }
+  | { type: "tts_done" }
+  | { type: "cancelled" }
+  | { type: "reset" }
+  | { type: "error"; message: string };
 
 /**
  * Typed interface for pushing session events to a connected client.
@@ -34,22 +50,8 @@ import * as metrics from "./metrics.ts";
 export interface ClientSink {
   /** Whether the underlying connection is open and accepting calls. */
   readonly open: boolean;
-  /** Send a partial (in-progress) STT transcript. */
-  partialTranscript(text: string): void;
-  /** Send a finalized STT transcript. */
-  finalTranscript(text: string, turnOrder?: number): void;
-  /** Notify the client that a user turn was committed. */
-  turn(text: string, turnOrder?: number): void;
-  /** Send an assistant chat message. */
-  chat(text: string): void;
-  /** Signal that TTS playback is complete. */
-  ttsDone(): void;
-  /** Signal that the current turn was cancelled. */
-  cancelled(): void;
-  /** Signal that the session was reset. */
-  resetNotify(): void;
-  /** Report an error to the client. */
-  error(message: string): void;
+  /** Push a session event to the client. */
+  event(e: ClientEvent): void;
   /** Stream TTS audio to the client as a ReadableStream. */
   playAudioStream(stream: ReadableStream<Uint8Array>): void;
 }
@@ -140,8 +142,8 @@ export function createSession(opts: SessionOptions): Session {
   let pendingGreeting: string | null = null;
   let messages: CoreMessage[] = [];
   let cachedWorkerApi: WorkerApi | undefined;
-  /** Pre-resolved dynamic maxSteps (prefetched at connect time). */
-  let prefetchedMaxSteps: Promise<number | null> | null = null;
+  /** Pre-resolved turn config (maxSteps + activeTools, prefetched at connect time). */
+  let prefetchedTurnConfig: Promise<TurnConfig | null> | null = null;
 
   const sessionAbort = new AbortController();
 
@@ -245,9 +247,9 @@ export function createSession(opts: SessionOptions): Session {
       handle.onTranscript = ({ text, isFinal, turnOrder }) => {
         log.info("transcript", { text, isFinal, turnOrder });
         if (isFinal) {
-          trySend(() => client.finalTranscript(text, turnOrder));
+          trySend(() => client.event({ type: "transcript", text, isFinal: true, turnOrder }));
         } else {
-          trySend(() => client.partialTranscript(text));
+          trySend(() => client.event({ type: "transcript", text, isFinal: false }));
         }
       };
 
@@ -269,7 +271,7 @@ export function createSession(opts: SessionOptions): Session {
 
       handle.onError = (err) => {
         log.error("STT error:", err.message);
-        trySend(() => client.error(err.message));
+        trySend(() => client.event({ type: "error", message: err.message }));
       };
 
       handle.onClose = async () => {
@@ -282,7 +284,7 @@ export function createSession(opts: SessionOptions): Session {
           } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
             log.error("STT reconnect failed:", msg);
-            trySend(() => client.error(msg));
+            trySend(() => client.event({ type: "error", message: msg }));
           }
         }
       };
@@ -291,7 +293,7 @@ export function createSession(opts: SessionOptions): Session {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       log.error("STT connect failed:", msg);
-      trySend(() => client.error(msg));
+      trySend(() => client.event({ type: "error", message: msg }));
     }
   }
 
@@ -307,12 +309,12 @@ export function createSession(opts: SessionOptions): Session {
     metrics.turnsTotal.inc(agentLabel);
     const turnStart = performance.now();
 
-    trySend(() => client.turn(text, turnOrder));
+    trySend(() => client.event({ type: "turn", text, turnOrder }));
 
     callHook("onTurn", (api) => api.onTurn(id, text, 5_000));
 
     if (isSttOnly) {
-      trySend(() => client.ttsDone());
+      trySend(() => client.event({ type: "tts_done" }));
       metrics.turnDuration.observe(
         (performance.now() - turnStart) / 1000,
         agentLabel,
@@ -327,28 +329,19 @@ export function createSession(opts: SessionOptions): Session {
 
     try {
       let maxSteps = agentConfig.maxSteps;
-      if (maxSteps === undefined && prefetchedMaxSteps) {
-        try {
-          const resolved = await prefetchedMaxSteps;
-          if (resolved !== null) maxSteps = resolved;
-        } catch (err: unknown) {
-          log.warn("resolveMaxSteps failed, using default", { err });
-        }
-      }
-
-      // Resolve active tools once upfront (not per-step)
       let activeTools: string[] | undefined;
-      if (getWorkerApi) {
+
+      if (prefetchedTurnConfig) {
         try {
-          cachedWorkerApi ??= await getWorkerApi();
-          const result = await cachedWorkerApi.resolveBeforeStep(
-            id,
-            0,
-            5_000,
-          );
-          activeTools = result?.activeTools;
+          const resolved = await prefetchedTurnConfig;
+          if (resolved) {
+            if (maxSteps === undefined && resolved.maxSteps !== undefined) {
+              maxSteps = resolved.maxSteps;
+            }
+            activeTools = resolved.activeTools;
+          }
         } catch (err: unknown) {
-          log.warn("resolveBeforeStep failed", { err });
+          log.warn("resolveTurnConfig failed, using defaults", { err });
         }
       }
 
@@ -380,7 +373,7 @@ export function createSession(opts: SessionOptions): Session {
       if (signal.aborted) return;
 
       if (result) {
-        trySend(() => client.chat(result));
+        trySend(() => client.event({ type: "chat", text: result }));
         // Wrap TTS callback-based output as a ReadableStream
         let controller: ReadableStreamDefaultController<Uint8Array>;
         const audioStream = new ReadableStream<Uint8Array>({
@@ -401,9 +394,9 @@ export function createSession(opts: SessionOptions): Session {
         try {
           controller!.close();
         } catch { /* already closed */ }
-        if (!signal.aborted) trySend(() => client.ttsDone());
+        if (!signal.aborted) trySend(() => client.event({ type: "tts_done" }));
       } else {
-        trySend(() => client.ttsDone());
+        trySend(() => client.event({ type: "tts_done" }));
       }
     } catch (err: unknown) {
       if (signal.aborted) return;
@@ -421,7 +414,7 @@ export function createSession(opts: SessionOptions): Session {
         log.error("Turn failed:", msg);
       }
       metrics.errorsTotal.inc({ ...agentLabel, component: "turn" });
-      trySend(() => client.error(msg));
+      trySend(() => client.event({ type: "error", message: msg }));
     } finally {
       if (turnAbort === abort) turnAbort = null;
       metrics.turnDuration.observe(
@@ -460,12 +453,12 @@ export function createSession(opts: SessionOptions): Session {
         try {
           controller!.close();
         } catch { /* already closed */ }
-        if (!signal.aborted) trySend(() => client.ttsDone());
+        if (!signal.aborted) trySend(() => client.event({ type: "tts_done" }));
       } catch (err: unknown) {
         if (signal.aborted) return;
         const msg = err instanceof Error ? err.message : String(err);
         log.error("TTS failed:", msg);
-        trySend(() => client.error(msg));
+        trySend(() => client.event({ type: "error", message: msg }));
       } finally {
         if (turnAbort === abort) turnAbort = null;
       }
@@ -489,14 +482,14 @@ export function createSession(opts: SessionOptions): Session {
 
       callHook("onConnect", (api) => api.onConnect(id, 5_000));
 
-      // Prefetch dynamic maxSteps so it's ready before the first turn
-      if (agentConfig.maxSteps === undefined && getWorkerApi) {
-        prefetchedMaxSteps = (async () => {
+      // Prefetch turn config (maxSteps + activeTools) so it's ready before the first turn
+      if (getWorkerApi) {
+        prefetchedTurnConfig = (async () => {
           try {
             cachedWorkerApi ??= await getWorkerApi!();
-            return await cachedWorkerApi.resolveMaxSteps(id, 5_000);
+            return await cachedWorkerApi.resolveTurnConfig(id, 5_000);
           } catch (err: unknown) {
-            log.warn("resolveMaxSteps prefetch failed", { err });
+            log.warn("resolveTurnConfig prefetch failed", { err });
             return null;
           }
         })();
@@ -538,7 +531,7 @@ export function createSession(opts: SessionOptions): Session {
       agent = AgentState.Listening;
 
       if (pendingGreeting) {
-        trySend(() => client.chat(pendingGreeting!));
+        trySend(() => client.event({ type: "chat", text: pendingGreeting! }));
         speakText(pendingGreeting);
         pendingGreeting = null;
       }
@@ -547,7 +540,7 @@ export function createSession(opts: SessionOptions): Session {
     onCancel(): void {
       cancelInflight();
       stt?.clear();
-      trySend(() => client.cancelled());
+      trySend(() => client.event({ type: "cancelled" }));
 
       if (agent === AgentState.Processing) {
         agent = AgentState.Listening;
@@ -559,10 +552,10 @@ export function createSession(opts: SessionOptions): Session {
       stt?.clear();
       messages = [];
       agent = AgentState.Listening;
-      trySend(() => client.resetNotify());
+      trySend(() => client.event({ type: "reset" }));
 
       if (agentConfig.greeting) {
-        trySend(() => client.chat(agentConfig.greeting));
+        trySend(() => client.event({ type: "chat", text: agentConfig.greeting }));
         speakText(agentConfig.greeting);
       }
     },

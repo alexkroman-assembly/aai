@@ -150,18 +150,18 @@ Deno.test("createTwilioClientSink", async (t) => {
     };
   }
 
-  await t.step("text methods are no-ops for Twilio", () => {
+  await t.step("event method does not send to ws for text events", () => {
     const { ws, sent } = mockWs();
     const sink = createTwilioClientSink(ws);
-    sink.partialTranscript("hello");
-    sink.finalTranscript("hello");
-    sink.turn("hello");
-    sink.ttsDone();
-    sink.cancelled();
-    sink.resetNotify();
+    sink.event({ type: "transcript", text: "hello", isFinal: false });
+    sink.event({ type: "transcript", text: "hello", isFinal: true });
+    sink.event({ type: "turn", text: "hello" });
+    sink.event({ type: "tts_done" });
+    sink.event({ type: "cancelled" });
+    sink.event({ type: "reset" });
     // chat and error just log, no ws send
-    sink.chat("hi");
-    sink.error("oops");
+    sink.event({ type: "chat", text: "hi" });
+    sink.event({ type: "error", message: "oops" });
     assertStrictEquals(sent.length, 0);
   });
 

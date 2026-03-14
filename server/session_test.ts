@@ -2,6 +2,7 @@
 import { assert, assertStrictEquals } from "@std/assert";
 import { assertSpyCalls, spy } from "@std/testing/mock";
 import {
+  type ClientEvent,
   type ClientSink,
   createSession,
   type SessionOptions,
@@ -18,29 +19,8 @@ function createMockClientSink(): ClientSink & {
   return {
     calls,
     open: true,
-    partialTranscript(...args) {
-      calls.push({ method: "partialTranscript", args });
-    },
-    finalTranscript(...args) {
-      calls.push({ method: "finalTranscript", args });
-    },
-    turn(...args) {
-      calls.push({ method: "turn", args });
-    },
-    chat(...args) {
-      calls.push({ method: "chat", args });
-    },
-    ttsDone() {
-      calls.push({ method: "ttsDone", args: [] });
-    },
-    cancelled() {
-      calls.push({ method: "cancelled", args: [] });
-    },
-    resetNotify() {
-      calls.push({ method: "resetNotify", args: [] });
-    },
-    error(...args) {
-      calls.push({ method: "error", args });
+    event(e: ClientEvent) {
+      calls.push({ method: "event", args: [e] });
     },
     playAudioStream(...args) {
       calls.push({ method: "playAudioStream", args });
@@ -216,6 +196,26 @@ function filterCalls(
   return client.calls.filter((c) => c.method === method);
 }
 
+/** Find the first event() call with the given type. */
+function findEvent(
+  client: ReturnType<typeof createMockClientSink>,
+  type: string,
+) {
+  return client.calls.find(
+    (c) => c.method === "event" && (c.args[0] as ClientEvent).type === type,
+  );
+}
+
+/** Filter event() calls with the given type. */
+function filterEvents(
+  client: ReturnType<typeof createMockClientSink>,
+  type: string,
+) {
+  return client.calls.filter(
+    (c) => c.method === "event" && (c.args[0] as ClientEvent).type === type,
+  );
+}
+
 Deno.test("start connects STT without sending ready", async () => {
   const ctx = setup();
   await ctx.session.start();
@@ -226,7 +226,7 @@ Deno.test("start connects STT without sending ready", async () => {
 Deno.test("start defers greeting until onAudioReady", () => {
   const ctx = setup();
   ctx.session.start();
-  assertStrictEquals(filterCalls(ctx.client, "chat").length, 0);
+  assertStrictEquals(filterEvents(ctx.client, "chat").length, 0);
 });
 
 Deno.test("start sends error on STT connection failure", async () => {
@@ -245,15 +245,15 @@ Deno.test("start sends error on STT connection failure", async () => {
     }),
   });
   await ctx.session.start();
-  assert(findCall(ctx.client, "error") !== undefined);
+  assert(findEvent(ctx.client, "error") !== undefined);
 });
 
 Deno.test("onAudioReady sends greeting and starts TTS", async () => {
   const ctx = setup();
   await ctx.session.start();
   ctx.session.onAudioReady();
-  const call = findCall(ctx.client, "chat");
-  assertStrictEquals(call!.args[0], "Hi there!");
+  const call = findEvent(ctx.client, "chat");
+  assertStrictEquals((call!.args[0] as { text: string }).text, "Hi there!");
   assert(ctx.ttsClient.synthesizeStream.calls.length > 0);
 });
 
@@ -297,41 +297,51 @@ Deno.test("onCancel clears STT and sends cancelled", async () => {
   await ctx.session.start();
   ctx.session.onCancel();
   assertSpyCalls(ctx.sttHandle.clear, 1);
-  assert(findCall(ctx.client, "cancelled") !== undefined);
+  assert(findEvent(ctx.client, "cancelled") !== undefined);
 });
 
-Deno.test("onReset sends resetNotify and re-sends greeting", async () => {
+Deno.test("onReset sends reset and re-sends greeting", async () => {
   const ctx = setup();
   await ctx.session.start();
   ctx.session.onReset();
   assertSpyCalls(ctx.sttHandle.clear, 1);
-  assert(findCall(ctx.client, "resetNotify") !== undefined);
-  assert(filterCalls(ctx.client, "chat").length > 0);
+  assert(findEvent(ctx.client, "reset") !== undefined);
+  assert(filterEvents(ctx.client, "chat").length > 0);
 });
 
 Deno.test("relays STT partial transcript to client", async () => {
   const ctx = setupWithSttHandle();
   await ctx.session.start();
   ctx.handle.onTranscript!({ text: "partial text", isFinal: false });
-  const call = findCall(ctx.client, "partialTranscript");
-  assertStrictEquals(call!.args[0], "partial text");
+  const call = findEvent(ctx.client, "transcript");
+  const ev = call!.args[0] as { text: string; isFinal: boolean };
+  assertStrictEquals(ev.text, "partial text");
+  assertStrictEquals(ev.isFinal, false);
 });
 
 Deno.test("relays STT final transcript to client", async () => {
   const ctx = setupWithSttHandle();
   await ctx.session.start();
   ctx.handle.onTranscript!({ text: "done", isFinal: true, turnOrder: 3 });
-  const call = findCall(ctx.client, "finalTranscript");
-  assertStrictEquals(call!.args[0], "done");
-  assertStrictEquals(call!.args[1], 3);
+  const calls = filterEvents(ctx.client, "transcript");
+  const finalCall = calls.find(
+    (c) => (c.args[0] as { isFinal: boolean }).isFinal,
+  );
+  const ev = finalCall!.args[0] as { text: string; isFinal: true; turnOrder?: number };
+  assertStrictEquals(ev.text, "done");
+  assertStrictEquals(ev.turnOrder, 3);
 });
 
 Deno.test("omits turnOrder on final transcript when undefined", async () => {
   const ctx = setupWithSttHandle();
   await ctx.session.start();
   ctx.handle.onTranscript!({ text: "done", isFinal: true });
-  const call = findCall(ctx.client, "finalTranscript");
-  assertStrictEquals(call!.args[1], undefined);
+  const calls = filterEvents(ctx.client, "transcript");
+  const finalCall = calls.find(
+    (c) => (c.args[0] as { isFinal: boolean }).isFinal,
+  );
+  const ev = finalCall!.args[0] as { turnOrder?: number };
+  assertStrictEquals(ev.turnOrder, undefined);
 });
 
 Deno.test("forwards turnOrder in turn messages", async () => {
@@ -339,8 +349,8 @@ Deno.test("forwards turnOrder in turn messages", async () => {
   await ctx.session.start();
   ctx.handle.onTurn!({ text: "What is the weather?", turnOrder: 5 });
   await new Promise((r) => setTimeout(r, 10));
-  const call = findCall(ctx.client, "turn");
-  assertStrictEquals(call!.args[1], 5);
+  const call = findEvent(ctx.client, "turn");
+  assertStrictEquals((call!.args[0] as { turnOrder?: number }).turnOrder, 5);
   await ctx.session.stop();
 });
 
@@ -389,5 +399,5 @@ Deno.test("skipGreeting suppresses greeting on start", async () => {
   await session.start();
   session.onAudioReady();
   const client = mocks.opts.client as ReturnType<typeof createMockClientSink>;
-  assertStrictEquals(filterCalls(client, "chat").length, 0);
+  assertStrictEquals(filterEvents(client, "chat").length, 0);
 });

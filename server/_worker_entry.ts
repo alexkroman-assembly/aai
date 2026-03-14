@@ -125,16 +125,17 @@ export type WorkerApi = {
     step: StepInfoRpc,
     timeoutMs?: number,
   ): Promise<void>;
-  resolveMaxSteps(
+  resolveTurnConfig(
     sessionId: string,
     timeoutMs?: number,
-  ): Promise<number | null>;
-  resolveBeforeStep(
-    sessionId: string,
-    stepNumber: number,
-    timeoutMs?: number,
-  ): Promise<{ activeTools?: string[] } | null>;
+  ): Promise<TurnConfig | null>;
   dispose?: () => void;
+};
+
+/** Combined turn configuration resolved from the worker before a turn starts. */
+export type TurnConfig = {
+  maxSteps?: number;
+  activeTools?: string[];
 };
 
 /**
@@ -155,11 +156,7 @@ interface WorkerRpcApi {
   onTurn(sessionId: string, text: string): Promise<void>;
   onError(sessionId: string, error: string): void;
   onStep(sessionId: string, step: StepInfoRpc): Promise<void>;
-  resolveMaxSteps(sessionId: string): Promise<number | null>;
-  resolveBeforeStep(
-    sessionId: string,
-    stepNumber: number,
-  ): Promise<{ activeTools?: string[] } | null>;
+  resolveTurnConfig(sessionId: string): Promise<TurnConfig | null>;
 }
 
 /**
@@ -245,17 +242,9 @@ export function createWorkerApi(
         timeoutMs,
       );
     },
-    async resolveMaxSteps(sessionId, timeoutMs) {
+    async resolveTurnConfig(sessionId, timeoutMs) {
       return await withTimeout(
-        scoped.resolveMaxSteps(sessionId) as Promise<number | null>,
-        timeoutMs ?? 5_000,
-      );
-    },
-    async resolveBeforeStep(sessionId, stepNumber, timeoutMs) {
-      return await withTimeout(
-        scoped.resolveBeforeStep(sessionId, stepNumber) as Promise<
-          { activeTools?: string[] } | null
-        >,
+        scoped.resolveTurnConfig(sessionId) as Promise<TurnConfig | null>,
         timeoutMs ?? 5_000,
       );
     },

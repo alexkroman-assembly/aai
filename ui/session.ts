@@ -111,61 +111,62 @@ class ClientRpcTarget extends RpcTarget {
     this.#voiceIO = opts.voiceIO;
   }
 
-  partialTranscript(text: string): void {
-    this.#transcript.value = text;
-  }
-
-  finalTranscript(text: string, _turnOrder?: number): void {
-    this.#transcript.value = text;
-  }
-
-  turn(text: string, _turnOrder?: number): void {
-    batch(() => {
-      this.#transcript.value = "";
-      this.#messages.value = [
-        ...this.#messages.value,
-        { role: "user", text },
-      ];
-      this.#state.value = "thinking";
-    });
-  }
-
-  chat(text: string): void {
-    batch(() => {
-      this.#messages.value = [
-        ...this.#messages.value,
-        { role: "assistant", text },
-      ];
-      this.#state.value = "speaking";
-    });
-  }
-
-  ttsDone(): void {
-    this.#voiceIO()?.done();
-    this.#state.value = "listening";
-  }
-
-  cancelled(): void {
-    this.#voiceIO()?.flush();
-    this.#state.value = "listening";
-  }
-
-  resetNotify(): void {
-    const io = this.#voiceIO();
-    io?.flush();
-    batch(() => {
-      this.#messages.value = [];
-      this.#transcript.value = "";
-      this.#error.value = null;
-    });
-  }
-
-  error(message: string): void {
-    console.error("Agent error:", message);
-    batch(() => {
-      this.#error.value = { code: "protocol", message };
-      this.#state.value = "error";
-    });
+  /** Single entry point for all server→client session events. */
+  event(e: {
+    type: string;
+    text?: string;
+    isFinal?: boolean;
+    turnOrder?: number;
+    message?: string;
+  }): void {
+    switch (e.type) {
+      case "transcript":
+        this.#transcript.value = e.text!;
+        break;
+      case "turn":
+        batch(() => {
+          this.#transcript.value = "";
+          this.#messages.value = [
+            ...this.#messages.value,
+            { role: "user", text: e.text! },
+          ];
+          this.#state.value = "thinking";
+        });
+        break;
+      case "chat":
+        batch(() => {
+          this.#messages.value = [
+            ...this.#messages.value,
+            { role: "assistant", text: e.text! },
+          ];
+          this.#state.value = "speaking";
+        });
+        break;
+      case "tts_done":
+        this.#voiceIO()?.done();
+        this.#state.value = "listening";
+        break;
+      case "cancelled":
+        this.#voiceIO()?.flush();
+        this.#state.value = "listening";
+        break;
+      case "reset": {
+        this.#voiceIO()?.flush();
+        batch(() => {
+          this.#messages.value = [];
+          this.#transcript.value = "";
+          this.#error.value = null;
+        });
+        break;
+      }
+      case "error":
+        console.error("Agent error:", e.message);
+        batch(() => {
+          this.#error.value = { code: "protocol", message: e.message! };
+          this.#state.value = "error";
+        });
+        break;
+    }
   }
 
   playAudioStream(stream: ReadableStream<Uint8Array>): void {

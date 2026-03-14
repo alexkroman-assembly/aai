@@ -1,7 +1,7 @@
 // Copyright 2025 the AAI authors. MIT license.
 import * as log from "@std/log";
 import { newWebSocketRpcSession, RpcTarget } from "capnweb";
-import type { ClientSink, Session } from "./session.ts";
+import type { ClientEvent, ClientSink, Session } from "./session.ts";
 
 /** Protocol-level session config returned to the client on connect. */
 export type ReadyConfig = {
@@ -31,19 +31,11 @@ export type WsSessionOptions = {
 /**
  * Interface for server→client RPC calls.
  *
- * The server calls these methods on the client stub to push messages
- * and audio to the browser. This matches the {@linkcode ClientSink}
- * interface used by the session layer.
+ * Uses a single discriminated-union `event()` method instead of one
+ * method per event type. Audio is streamed via `playAudioStream()`.
  */
 export interface ClientRpcApi {
-  partialTranscript(text: string): void;
-  finalTranscript(text: string, turnOrder?: number): void;
-  turn(text: string, turnOrder?: number): void;
-  chat(text: string): void;
-  ttsDone(): void;
-  cancelled(): void;
-  resetNotify(): void;
-  error(message: string): void;
+  event(e: ClientEvent): void;
   playAudioStream(stream: ReadableStream<Uint8Array>): void;
 }
 
@@ -170,8 +162,8 @@ class SessionGate extends RpcTarget {
 /**
  * Wraps a capnweb client stub as a {@linkcode ClientSink}.
  *
- * The stub methods already match the ClientSink interface — this just
- * adds the `open` check and fire-and-forget error handling.
+ * Adds the `open` check and fire-and-forget error handling so the
+ * session layer doesn't need to worry about RPC promise management.
  */
 function createClientSink(
   stub: import("capnweb").RpcStub<ClientRpcApi>,
@@ -185,29 +177,8 @@ function createClientSink(
     get open() {
       return ws.readyState === WebSocket.OPEN;
     },
-    partialTranscript(text) {
-      fire(() => stub.partialTranscript(text));
-    },
-    finalTranscript(text, turnOrder) {
-      fire(() => stub.finalTranscript(text, turnOrder));
-    },
-    turn(text, turnOrder) {
-      fire(() => stub.turn(text, turnOrder));
-    },
-    chat(text) {
-      fire(() => stub.chat(text));
-    },
-    ttsDone() {
-      fire(() => stub.ttsDone());
-    },
-    cancelled() {
-      fire(() => stub.cancelled());
-    },
-    resetNotify() {
-      fire(() => stub.resetNotify());
-    },
-    error(message) {
-      fire(() => stub.error(message));
+    event(e) {
+      fire(() => stub.event(e));
     },
     playAudioStream(stream) {
       fire(() => stub.playAudioStream(stream));

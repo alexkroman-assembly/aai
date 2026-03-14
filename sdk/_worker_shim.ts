@@ -266,21 +266,27 @@ class AgentWorkerTarget extends RpcTarget {
     await this.#agent.onStep?.(step, this.#makeCtx(sessionId));
   }
 
-  async resolveMaxSteps(sessionId: string): Promise<number | null> {
-    if (typeof this.#agent.maxSteps !== "function") return null;
-    return this.#agent.maxSteps(this.#makeCtx(sessionId));
-  }
-
-  async resolveBeforeStep(
+  async resolveTurnConfig(
     sessionId: string,
-    stepNumber: number,
-  ): Promise<{ activeTools?: string[] } | null> {
-    if (!this.#agent.onBeforeStep) return null;
-    const result = await this.#agent.onBeforeStep(
-      stepNumber,
-      this.#makeCtx(sessionId),
-    );
-    return result ?? null;
+  ): Promise<{ maxSteps?: number; activeTools?: string[] } | null> {
+    let maxSteps: number | undefined;
+    let activeTools: string[] | undefined;
+
+    if (typeof this.#agent.maxSteps === "function") {
+      maxSteps = await this.#agent.maxSteps(this.#makeCtx(sessionId)) ??
+        undefined;
+    }
+
+    if (this.#agent.onBeforeStep) {
+      const result = await this.#agent.onBeforeStep(
+        0,
+        this.#makeCtx(sessionId),
+      );
+      activeTools = result?.activeTools;
+    }
+
+    if (maxSteps === undefined && activeTools === undefined) return null;
+    return { maxSteps, activeTools };
   }
 
   #getState(sessionId: string): unknown {

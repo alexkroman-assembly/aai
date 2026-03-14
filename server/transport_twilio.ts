@@ -6,7 +6,7 @@ import { HttpError, type RouteContext } from "./context.ts";
 import { concat } from "@std/bytes/concat";
 import { decodeBase64, encodeBase64 } from "@std/encoding/base64";
 import { type AgentSlot, prepareSession } from "./worker_pool.ts";
-import { type ClientSink, createSession } from "./session.ts";
+import { type ClientEvent, type ClientSink, createSession } from "./session.ts";
 import {
   DEFAULT_STT_SAMPLE_RATE,
   DEFAULT_TTS_SAMPLE_RATE,
@@ -47,17 +47,9 @@ export function createTwilioClientSink(ws: WsSink): ClientSink & {
     },
 
     // Text events — log only, Twilio doesn't display text
-    partialTranscript() {},
-    finalTranscript() {},
-    turn() {},
-    ttsDone() {},
-    cancelled() {},
-    resetNotify() {},
-    chat(text) {
-      log.info("Agent response", { text: text.slice(0, 100) });
-    },
-    error(message) {
-      log.error("Session error", { message });
+    event(e) {
+      if (e.type === "chat") log.info("Agent response", { text: e.text.slice(0, 100) });
+      else if (e.type === "error") log.error("Session error", { message: e.message });
     },
 
     // Audio — consume ReadableStream, convert PCM16 to mu-law Twilio frames
