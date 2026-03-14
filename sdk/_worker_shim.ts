@@ -180,8 +180,16 @@ class AgentWorkerTarget extends RpcTarget {
     installFetchProxy(hostStub);
   }
 
-  setEnv(env: Record<string, string>): void {
+  /**
+   * Set environment variables and return this target as a scoped capability.
+   *
+   * The host calls this once after session creation. Returning `this`
+   * passes it by reference via capnweb — the host gets a stub that
+   * guarantees env is set before any pipelined calls execute.
+   */
+  withEnv(env: Record<string, string>): this {
     this.#mergedEnv = { ...this.#mergedEnv, ...env };
+    return this;
   }
 
   getConfig(): WorkerConfig {

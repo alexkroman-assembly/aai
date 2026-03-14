@@ -158,14 +158,6 @@ export function createSession(opts: SessionOptions): Session {
   const agentLabel = { agent: opts.agent };
   const env = { ...opts.env };
   const getWorkerApi = opts.getWorkerApi;
-  const slotEnv = opts.env
-    ? Object.fromEntries(
-      Object.entries(opts.env).filter((e): e is [string, string] =>
-        e[1] !== undefined
-      ),
-    )
-    : undefined;
-
   const agentConfig = opts.skipGreeting
     ? { ...opts.agentConfig, greeting: "" }
     : opts.agentConfig;
@@ -324,7 +316,7 @@ export function createSession(opts: SessionOptions): Session {
 
     trySend(() => client.turn(text, turnOrder));
 
-    callHook("onTurn", (api) => api.onTurn(id, text, 5_000, slotEnv));
+    callHook("onTurn", (api) => api.onTurn(id, text, 5_000));
 
     if (isSttOnly) {
       trySend(() => client.ttsDone());
@@ -348,7 +340,6 @@ export function createSession(opts: SessionOptions): Session {
           const resolved = await cachedWorkerApi.resolveMaxSteps(
             id,
             5_000,
-            slotEnv,
           );
           if (resolved !== null) maxSteps = resolved;
         } catch (err: unknown) {
@@ -376,7 +367,7 @@ export function createSession(opts: SessionOptions): Session {
               text: step.text ?? "",
             };
             await callHook("onStep", (api) =>
-              api.onStep(id, stepInfo, 5_000, slotEnv));
+              api.onStep(id, stepInfo, 5_000));
           }
           : undefined,
         resolveBeforeStep: getWorkerApi
@@ -387,7 +378,6 @@ export function createSession(opts: SessionOptions): Session {
                 id,
                 stepNumber,
                 5_000,
-                slotEnv,
               );
             } catch (err: unknown) {
               log.warn("resolveBeforeStep failed", { err });
@@ -477,7 +467,7 @@ export function createSession(opts: SessionOptions): Session {
         pendingGreeting = agentConfig.greeting;
       }
 
-      callHook("onConnect", (api) => api.onConnect(id, 5_000, slotEnv));
+      callHook("onConnect", (api) => api.onConnect(id, 5_000));
       await connectStt();
 
       conn = ConnState.Ready;
@@ -504,7 +494,7 @@ export function createSession(opts: SessionOptions): Session {
       stt?.close();
       tts?.close();
 
-      callHook("onDisconnect", (api) => api.onDisconnect(id, 5_000, slotEnv));
+      callHook("onDisconnect", (api) => api.onDisconnect(id, 5_000));
     },
 
     onAudio(data: Uint8Array): void {

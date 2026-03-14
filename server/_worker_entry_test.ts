@@ -47,6 +47,7 @@ function createPairedChannel() {
 function setupWorker(
   agent: Parameters<typeof initWorker>[0],
   hostApiVal?: HostApi,
+  env?: Record<string, string>,
 ) {
   const { workerSide, hostSide } = createPairedChannel();
 
@@ -68,7 +69,7 @@ function setupWorker(
   });
 
   // Host side uses the other port — capnweb handles the RPC protocol
-  const api = createWorkerApi(hostSide, hostApiVal);
+  const api = createWorkerApi(hostSide, hostApiVal, env);
   return { api };
 }
 
@@ -566,7 +567,7 @@ Deno.test("createWorkerApi with hostApi", async (t) => {
     },
   );
 
-  await t.step("setEnv sends env to worker", async () => {
+  await t.step("withEnv sets env once at creation", async () => {
     let capturedEnv: Record<string, string> | undefined;
     const { api } = setupWorker(
       {
@@ -589,9 +590,10 @@ Deno.test("createWorkerApi with hostApi", async (t) => {
         },
       },
       dummyHostApi(),
+      { KEY: "val" },
     );
 
-    await api.executeTool("check_env", {}, "s1", 5000, { KEY: "val" });
+    await api.executeTool("check_env", {}, "s1", 5000);
     assertStrictEquals(capturedEnv?.KEY, "val");
     api.dispose?.();
   });

@@ -96,7 +96,8 @@ class HostApiTarget extends RpcTarget {
  * High-level API for communicating with a sandboxed agent worker.
  *
  * This is the host-side interface returned by {@linkcode createWorkerApi}.
- * All methods support optional RPC timeouts.
+ * All methods support optional RPC timeouts. Environment variables are
+ * set once at creation via the `withEnv` capability — no per-call env.
  */
 export type WorkerApi = {
   getConfig(): Promise<import("@aai/sdk/types").WorkerConfig>;
@@ -105,47 +106,33 @@ export type WorkerApi = {
     args: Readonly<Record<string, unknown>>,
     sessionId?: string,
     timeoutMs?: number,
-    env?: Record<string, string>,
     messages?: readonly Message[],
   ): Promise<string>;
-  onConnect(
-    sessionId: string,
-    timeoutMs?: number,
-    env?: Record<string, string>,
-  ): Promise<void>;
-  onDisconnect(
-    sessionId: string,
-    timeoutMs?: number,
-    env?: Record<string, string>,
-  ): Promise<void>;
+  onConnect(sessionId: string, timeoutMs?: number): Promise<void>;
+  onDisconnect(sessionId: string, timeoutMs?: number): Promise<void>;
   onTurn(
     sessionId: string,
     text: string,
     timeoutMs?: number,
-    env?: Record<string, string>,
   ): Promise<void>;
   onError(
     sessionId: string,
     error: string,
     timeoutMs?: number,
-    env?: Record<string, string>,
   ): Promise<void>;
   onStep(
     sessionId: string,
     step: StepInfoRpc,
     timeoutMs?: number,
-    env?: Record<string, string>,
   ): Promise<void>;
   resolveMaxSteps(
     sessionId: string,
     timeoutMs?: number,
-    env?: Record<string, string>,
   ): Promise<number | null>;
   resolveBeforeStep(
     sessionId: string,
     stepNumber: number,
     timeoutMs?: number,
-    env?: Record<string, string>,
   ): Promise<{ activeTools?: string[] } | null>;
   dispose?: () => void;
 };
@@ -155,7 +142,7 @@ export type WorkerApi = {
  * This matches the methods exposed by AgentWorkerTarget in the worker.
  */
 interface WorkerRpcApi {
-  setEnv(env: Record<string, string>): void;
+  withEnv(env: Record<string, string>): WorkerRpcApi;
   getConfig(): Promise<import("@aai/sdk/types").WorkerConfig>;
   executeTool(
     name: string,
@@ -182,8 +169,13 @@ interface WorkerRpcApi {
  * {@linkcode HostApiTarget} and receives a stub for the worker's
  * {@linkcode AgentWorkerTarget}. No separate init handshake is needed.
  *
+ * If `env` is provided, the host calls `withEnv(env)` once to obtain
+ * a scoped capability with env baked in. All subsequent calls are
+ * pipelined through this scoped stub — no per-call env parameter.
+ *
  * @param worker - The Worker (or any object with `postMessage` and event listeners).
  * @param hostApi - Optional host-side API to expose to the worker for fetch/kv proxy.
+ * @param env - Optional environment variables to set once on the worker.
  * @returns A {@linkcode WorkerApi} instance with timeout-wrapped RPC methods.
  */
 export function createWorkerApi(
@@ -193,17 +185,17 @@ export function createWorkerApi(
     removeEventListener(type: string, listener: (event: Event) => void): void;
   },
   hostApi?: HostApi,
+  env?: Record<string, string>,
 ): WorkerApi {
   const port = asMessagePort(worker);
   const hostTarget = hostApi ? new HostApiTarget(hostApi) : undefined;
   const stub = newMessagePortRpcSession<WorkerRpcApi>(port, hostTarget);
 
-  function sendEnv(env?: Record<string, string>): void {
-    if (env) {
-      // Fire-and-forget — setEnv doesn't return a value
-      void (stub.setEnv(env) as Promise<void>).catch(() => {});
-    }
-  }
+  // Set env once via capability pattern — returns a scoped stub.
+  // All session calls pipeline through this; getConfig uses the base stub.
+  const scoped = env
+    ? stub.withEnv(env) as unknown as import("capnweb").RpcStub<WorkerRpcApi>
+    : stub;
 
   return {
     async getConfig() {
@@ -212,60 +204,52 @@ export function createWorkerApi(
         5_000,
       );
     },
-    async executeTool(name, args, sessionId, timeoutMs, env, messages) {
-      sendEnv(env);
+    async executeTool(name, args, sessionId, timeoutMs, messages) {
       const raw = await withTimeout(
-        stub.executeTool(name, args, sessionId, messages) as Promise<string>,
+        scoped.executeTool(name, args, sessionId, messages) as Promise<string>,
         timeoutMs,
       );
       return typeof raw === "string" ? raw : String(raw ?? "");
     },
-    async onConnect(sessionId, timeoutMs, env) {
-      sendEnv(env);
+    async onConnect(sessionId, timeoutMs) {
       await withTimeout(
-        stub.onConnect(sessionId) as Promise<void>,
+        scoped.onConnect(sessionId) as Promise<void>,
         timeoutMs,
       );
     },
-    async onDisconnect(sessionId, timeoutMs, env) {
-      sendEnv(env);
+    async onDisconnect(sessionId, timeoutMs) {
       await withTimeout(
-        stub.onDisconnect(sessionId) as Promise<void>,
+        scoped.onDisconnect(sessionId) as Promise<void>,
         timeoutMs,
       );
     },
-    async onTurn(sessionId, text, timeoutMs, env) {
-      sendEnv(env);
+    async onTurn(sessionId, text, timeoutMs) {
       await withTimeout(
-        stub.onTurn(sessionId, text) as Promise<void>,
+        scoped.onTurn(sessionId, text) as Promise<void>,
         timeoutMs,
       );
     },
-    async onError(sessionId, error, timeoutMs, env) {
-      sendEnv(env);
+    async onError(sessionId, error, timeoutMs) {
       await withTimeout(
-        stub.onError(sessionId, error) as Promise<void>,
+        scoped.onError(sessionId, error) as Promise<void>,
         timeoutMs,
       );
     },
-    async onStep(sessionId, step, timeoutMs, env) {
-      sendEnv(env);
+    async onStep(sessionId, step, timeoutMs) {
       await withTimeout(
-        stub.onStep(sessionId, step) as Promise<void>,
+        scoped.onStep(sessionId, step) as Promise<void>,
         timeoutMs,
       );
     },
-    async resolveMaxSteps(sessionId, timeoutMs, env) {
-      sendEnv(env);
+    async resolveMaxSteps(sessionId, timeoutMs) {
       return await withTimeout(
-        stub.resolveMaxSteps(sessionId) as Promise<number | null>,
+        scoped.resolveMaxSteps(sessionId) as Promise<number | null>,
         timeoutMs ?? 5_000,
       );
     },
-    async resolveBeforeStep(sessionId, stepNumber, timeoutMs, env) {
-      sendEnv(env);
+    async resolveBeforeStep(sessionId, stepNumber, timeoutMs) {
       return await withTimeout(
-        stub.resolveBeforeStep(sessionId, stepNumber) as Promise<
+        scoped.resolveBeforeStep(sessionId, stepNumber) as Promise<
           { activeTools?: string[] } | null
         >,
         timeoutMs ?? 5_000,
