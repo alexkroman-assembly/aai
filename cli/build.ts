@@ -1,7 +1,7 @@
 // Copyright 2025 the AAI authors. MIT license.
 import { join } from "@std/path";
 import { error as logError, step } from "./_output.ts";
-import { type AgentEntry, loadAgent } from "./_discover.ts";
+import { type AgentEntry, denoExec, loadAgent } from "./_discover.ts";
 import { bundleAgent, BundleError, type BundleOutput } from "./_bundler.ts";
 
 export type { BundleOutput } from "./_bundler.ts";
@@ -56,7 +56,7 @@ async function checkAgent(agentDir: string): Promise<void> {
     { args: ["fmt", "--check", ...userFiles], label: "Format" },
   ];
   for (const { args, label } of checks) {
-    const cmd = new Deno.Command(Deno.execPath(), {
+    const cmd = new Deno.Command(denoExec(), {
       args,
       cwd: agentDir,
       stdout: "piped",

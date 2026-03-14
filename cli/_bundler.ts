@@ -1,5 +1,6 @@
 // Copyright 2025 the AAI authors. MIT license.
 import { join } from "@std/path";
+import { denoExec } from "./_discover.ts";
 import type { AgentEntry } from "./_discover.ts";
 
 /**
@@ -276,7 +277,7 @@ export async function bundleAgent(
     env.AAI_SKIP_CLIENT = "1";
   }
 
-  const cmd = new Deno.Command(Deno.execPath(), {
+  const cmd = new Deno.Command(denoExec(), {
     args: ["run", "--allow-all", buildScript],
     cwd: agent.dir,
     stdout: "piped",

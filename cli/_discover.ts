@@ -6,6 +6,16 @@ import { humanId } from "human-id";
 import { step } from "./_output.ts";
 
 /**
+ * Returns the path to the `deno` executable. When running as a compiled
+ * binary, `Deno.execPath()` returns the binary itself (e.g. `aai`), so
+ * we fall back to `"deno"` which must be on PATH.
+ */
+export function denoExec(): string {
+  const p = Deno.execPath();
+  return p.endsWith("deno") ? p : "deno";
+}
+
+/**
  * Generates a human-readable slug using human-id.
  */
 export function generateSlug(): string {
@@ -190,7 +200,7 @@ export async function ensureDependencies(
 ): Promise<void> {
   if (!await exists(join(targetDir, "node_modules"))) {
     step("Install", "dependencies");
-    const cmd = new Deno.Command(Deno.execPath(), {
+    const cmd = new Deno.Command(denoExec(), {
       args: ["install"],
       cwd: targetDir,
       stdout: "inherit",
