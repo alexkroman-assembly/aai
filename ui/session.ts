@@ -17,11 +17,18 @@ import {
 import type { VoiceIO } from "./audio.ts";
 
 /**
- * Interface for server→client RPC calls.
- * The server calls these methods on the client target to push
- * session state updates and audio.
+ * Gate interface — the initial capability exposed by the server.
+ * The client must call `authenticate()` to obtain a session capability.
  */
-interface ServerRpcApi {
+interface GateRpcApi {
+  authenticate(): SessionRpcApi;
+}
+
+/**
+ * Session interface — returned by `authenticate()`.
+ * Provides the actual session control methods (audio, cancel, reset, etc.).
+ */
+interface SessionRpcApi {
   audioReady(): void;
   cancel(): void;
   resetSession(): void;
@@ -206,7 +213,8 @@ export function createVoiceSession(options: SessionOptions): VoiceSession {
 
   let ws: PartySocket | null = null;
   let voiceIO: VoiceIO | null = null;
-  let serverStub: import("capnweb").RpcStub<ServerRpcApi> | null = null;
+  /** Session stub obtained via gate.authenticate() — supports pipelining. */
+  let sessionStub: import("capnweb").RpcStub<SessionRpcApi> | null = null;
   let connectionController: AbortController | null = null;
   let hasConnected = false;
   let audioSetupInFlight = false;
@@ -288,10 +296,9 @@ export function createVoiceSession(options: SessionOptions): VoiceSession {
         playbackWorkletSrc: playbackWorklet,
         onMicData: (pcm16: ArrayBuffer) => {
           // Send audio via capnweb RPC
-          if (serverStub) {
-            void Promise.resolve(
-              serverStub.sendAudio(new Uint8Array(pcm16)),
-            ).catch(() => {});
+          if (sessionStub) {
+            void (sessionStub.sendAudio(new Uint8Array(pcm16)) as
+              Promise<void>).catch(() => {});
           }
         },
       });
@@ -301,8 +308,8 @@ export function createVoiceSession(options: SessionOptions): VoiceSession {
       }
       voiceIO = io;
       // Notify server that audio is ready
-      if (serverStub) {
-        void Promise.resolve(serverStub.audioReady()).catch(() => {});
+      if (sessionStub) {
+        void (sessionStub.audioReady() as Promise<void>).catch(() => {});
       }
       state.value = "listening";
     } catch (err: unknown) {
@@ -357,22 +364,26 @@ export function createVoiceSession(options: SessionOptions): VoiceSession {
         },
       });
 
-      // Initialize capnweb RPC session over this WebSocket
-      serverStub = newWebSocketRpcSession<ServerRpcApi>(
+      // Initialize capnweb RPC session — server exposes a gate
+      const gate = newWebSocketRpcSession<GateRpcApi>(
         socket as unknown as WebSocket,
         clientTarget,
       );
 
-      // Send history if reconnecting
-      if (hasConnected && messages.value.length > 0 && serverStub) {
-        void Promise.resolve(
-          serverStub.sendHistory(
-            messages.value.map((m) => ({
-              role: m.role,
-              text: m.text,
-            })),
-          ),
-        ).catch(() => {});
+      // Authenticate to get the session capability.
+      // This is pipelined — subsequent calls on sessionStub
+      // are batched with the authenticate call in one round trip.
+      sessionStub = gate.authenticate() as unknown as
+        import("capnweb").RpcStub<SessionRpcApi>;
+
+      // Send history if reconnecting (pipelined with authenticate)
+      if (hasConnected && messages.value.length > 0) {
+        void (sessionStub.sendHistory(
+          messages.value.map((m) => ({
+            role: m.role,
+            text: m.text,
+          })),
+        ) as Promise<void>).catch(() => {});
       }
 
       state.value = "ready";
@@ -386,7 +397,7 @@ export function createVoiceSession(options: SessionOptions): VoiceSession {
       controller.abort();
       disconnected.value = { intentional: false };
       cleanupAudio();
-      serverStub = null;
+      sessionStub = null;
       // PartySocket handles reconnection automatically
       state.value = "connecting";
     }, { signal: sig });
@@ -395,15 +406,15 @@ export function createVoiceSession(options: SessionOptions): VoiceSession {
   function cancel(): void {
     voiceIO?.flush();
     state.value = "listening";
-    if (serverStub) {
-      void Promise.resolve(serverStub.cancel()).catch(() => {});
+    if (sessionStub) {
+      void (sessionStub.cancel() as Promise<void>).catch(() => {});
     }
   }
 
   function reset(): void {
     voiceIO?.flush();
-    if (serverStub) {
-      void Promise.resolve(serverStub.resetSession()).catch(() => {});
+    if (sessionStub) {
+      void (sessionStub.resetSession() as Promise<void>).catch(() => {});
       return;
     }
     resetState();
@@ -415,7 +426,7 @@ export function createVoiceSession(options: SessionOptions): VoiceSession {
     connectionController?.abort();
     connectionController = null;
     cleanupAudio();
-    serverStub = null;
+    sessionStub = null;
     ws?.close();
     ws = null;
     state.value = "connecting";

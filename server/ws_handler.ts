@@ -44,78 +44,101 @@ export interface ClientRpcApi {
 }
 
 /**
- * Cap'n Web RPC target for the server-side session.
+ * Cap'n Web RPC target for the session API surface.
  *
- * Handles client→server requests: audio data, control messages (cancel,
- * reset, history), and keepalive pings.
+ * Returned by {@linkcode SessionGate.authenticate} — the client can
+ * only interact with the session after a successful authenticate call.
  */
-class SessionServerTarget extends RpcTarget {
-  #session: Session | null = null;
-  #pendingMessages: Array<{ method: string; args: unknown[] }> = [];
-  #ready = false;
+class SessionTarget extends RpcTarget {
+  #session: Session;
 
-  setSession(session: Session): void {
+  constructor(session: Session) {
+    super();
     this.#session = session;
   }
 
-  setReady(): void {
-    this.#ready = true;
-    for (const { method, args } of this.#pendingMessages) {
-      this.#dispatch(method, args);
-    }
-    this.#pendingMessages.length = 0;
-  }
-
   audioReady(): void {
-    this.#enqueue("audioReady", []);
+    this.#session.onAudioReady();
   }
 
   cancel(): void {
-    this.#enqueue("cancel", []);
+    this.#session.onCancel();
   }
 
   resetSession(): void {
-    this.#enqueue("reset", []);
+    this.#session.onReset();
   }
 
   sendHistory(
     messages: readonly { role: "user" | "assistant"; text: string }[],
   ): void {
-    this.#enqueue("history", [messages]);
+    this.#session.onHistory(messages);
   }
 
   sendAudio(data: Uint8Array): void {
-    if (this.#ready && this.#session) {
-      this.#session.onAudio(data);
-    }
+    this.#session.onAudio(data);
+  }
+}
+
+/**
+ * Cap'n Web RPC gate target — the initial capability exposed to clients.
+ *
+ * Clients must call {@linkcode authenticate} to obtain a
+ * {@linkcode SessionTarget} capability. Until then, no session
+ * interaction is possible (capability-based security).
+ */
+class SessionGate extends RpcTarget {
+  #sessionId: string;
+  #ws: WebSocket;
+  #clientStub: import("capnweb").RpcStub<ClientRpcApi> | null = null;
+  #createSession: (sessionId: string, client: ClientSink) => Session;
+  #sessions: Map<string, Session>;
+  #onSession: (session: Session) => void;
+  #authenticated = false;
+
+  constructor(opts: {
+    sessionId: string;
+    ws: WebSocket;
+    createSession: (sessionId: string, client: ClientSink) => Session;
+    sessions: Map<string, Session>;
+    onSession: (session: Session) => void;
+  }) {
+    super();
+    this.#sessionId = opts.sessionId;
+    this.#ws = opts.ws;
+    this.#createSession = opts.createSession;
+    this.#sessions = opts.sessions;
+    this.#onSession = opts.onSession;
   }
 
-  #enqueue(method: string, args: unknown[]): void {
-    if (!this.#ready) {
-      this.#pendingMessages.push({ method, args });
-      return;
-    }
-    this.#dispatch(method, args);
+  /** Set the client stub after the RPC session is established. */
+  setClientStub(stub: import("capnweb").RpcStub<ClientRpcApi>): void {
+    this.#clientStub = stub;
   }
 
-  #dispatch(method: string, args: unknown[]): void {
-    if (!this.#session) return;
-    switch (method) {
-      case "audioReady":
-        this.#session.onAudioReady();
-        break;
-      case "cancel":
-        this.#session.onCancel();
-        break;
-      case "reset":
-        this.#session.onReset();
-        break;
-      case "history":
-        this.#session.onHistory(
-          args[0] as readonly { role: "user" | "assistant"; text: string }[],
-        );
-        break;
+  /**
+   * Authenticate and obtain the session capability.
+   *
+   * Returns a {@linkcode SessionTarget} that the client can use to
+   * send audio, cancel turns, reset, etc. The client can pipeline
+   * calls on the returned target without awaiting.
+   */
+  authenticate(): SessionTarget {
+    if (this.#authenticated) {
+      throw new Error("Already authenticated");
     }
+    if (!this.#clientStub) {
+      throw new Error("RPC session not ready");
+    }
+    this.#authenticated = true;
+
+    const client = createClientSink(this.#clientStub, this.#ws);
+    const session = this.#createSession(this.#sessionId, client);
+    this.#sessions.set(this.#sessionId, session);
+    this.#onSession(session);
+
+    void session.start();
+    return new SessionTarget(session);
   }
 }
 
@@ -130,7 +153,7 @@ function createClientSink(
   ws: WebSocket,
 ): ClientSink {
   function fire(fn: () => unknown): void {
-    void Promise.resolve(fn()).catch(() => {});
+    void (fn() as Promise<void>).catch(() => {});
   }
 
   return {
@@ -174,9 +197,10 @@ function createClientSink(
  * Attaches session lifecycle handlers to a native WebSocket using
  * Cap'n Web RPC for bidirectional communication.
  *
- * Creates a capnweb session over the WebSocket, exposing a
- * {@linkcode SessionServerTarget} for client→server calls and
- * obtaining a client stub for server→client messages.
+ * Exposes a {@linkcode SessionGate} as the initial capability — the
+ * client must call `authenticate()` to obtain a {@linkcode SessionTarget}
+ * for session interaction. This uses capnweb's capability-based security
+ * to ensure no session access without explicit authentication.
  */
 export function wireSessionSocket(
   ws: WebSocket,
@@ -193,23 +217,22 @@ export function wireSessionSocket(
     opts.onOpen?.();
     log.info("Session connected", { ...ctx, sid });
 
-    const serverTarget = new SessionServerTarget();
-
-    const clientStub = newWebSocketRpcSession<ClientRpcApi>(
+    const gate = new SessionGate({
+      sessionId,
       ws,
-      serverTarget,
-    );
+      createSession: opts.createSession,
+      sessions,
+      onSession: (s) => {
+        session = s;
+      },
+    });
 
-    const client = createClientSink(clientStub, ws);
+    // Single RPC session: expose gate to client, get client stub back.
+    // The client calls gate.authenticate() to get the SessionTarget.
+    const clientStub = newWebSocketRpcSession<ClientRpcApi>(ws, gate);
+    gate.setClientStub(clientStub);
 
-    session = opts.createSession(sessionId, client);
-    serverTarget.setSession(session);
-    sessions.set(sessionId, session);
-
-    log.info("Session configured", { ...ctx, sid });
-    void session.start();
-
-    serverTarget.setReady();
+    log.info("Session gate ready", { ...ctx, sid });
   });
 
   ws.addEventListener("close", () => {

@@ -16,10 +16,13 @@ const fakeConsole = {
 };
 
 /**
- * Cap'n Web RPC target for the sandboxed code execution worker.
+ * Cap'n Web RPC target for sandboxed code execution.
  *
  * Exposes a single `execute` method that runs arbitrary JavaScript
  * in a locked-down Deno Worker with no permissions.
+ *
+ * Returned by {@linkcode SandboxGate.authenticate} — the host must
+ * authenticate before executing any code.
  */
 class SandboxTarget extends RpcTarget {
   async execute(code: string): Promise<{ output: string; error?: string }> {
@@ -39,4 +42,23 @@ class SandboxTarget extends RpcTarget {
   }
 }
 
-newMessagePortRpcSession(asMessagePort(self), new SandboxTarget());
+/**
+ * Gate target — the initial capability exposed to the host.
+ *
+ * The host must call `authenticate()` to obtain the
+ * {@linkcode SandboxTarget} capability for code execution.
+ * This ensures untrusted code in the sandbox cannot self-activate.
+ */
+class SandboxGate extends RpcTarget {
+  #authenticated = false;
+
+  authenticate(): SandboxTarget {
+    if (this.#authenticated) {
+      throw new Error("Already authenticated");
+    }
+    this.#authenticated = true;
+    return new SandboxTarget();
+  }
+}
+
+newMessagePortRpcSession(asMessagePort(self), new SandboxGate());

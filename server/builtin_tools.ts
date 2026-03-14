@@ -250,10 +250,15 @@ const runCode = defineTool({
     );
 
     try {
-      const stub = newMessagePortRpcSession<{
-        execute(code: string): Promise<{ output: string; error?: string }>;
+      const gate = newMessagePortRpcSession<{
+        authenticate(): {
+          execute(
+            code: string,
+          ): Promise<{ output: string; error?: string }>;
+        };
       }>(asMessagePort(worker));
-      const result = await stub.execute(code);
+      const sandbox = gate.authenticate();
+      const result = await sandbox.execute(code);
 
       if (result.error) {
         return JSON.stringify({ error: result.error });

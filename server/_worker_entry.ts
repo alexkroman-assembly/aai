@@ -201,25 +201,21 @@ export function createWorkerApi(
   function sendEnv(env?: Record<string, string>): void {
     if (env) {
       // Fire-and-forget — setEnv doesn't return a value
-      void Promise.resolve(stub.setEnv(env)).catch(() => {});
+      void (stub.setEnv(env) as Promise<void>).catch(() => {});
     }
   }
 
   return {
     async getConfig() {
       return await withTimeout(
-        Promise.resolve(stub.getConfig()) as Promise<
-          import("@aai/sdk/types").WorkerConfig
-        >,
+        stub.getConfig() as Promise<import("@aai/sdk/types").WorkerConfig>,
         5_000,
       );
     },
     async executeTool(name, args, sessionId, timeoutMs, env, messages) {
       sendEnv(env);
       const raw = await withTimeout(
-        Promise.resolve(
-          stub.executeTool(name, args, sessionId, messages),
-        ) as Promise<string>,
+        stub.executeTool(name, args, sessionId, messages) as Promise<string>,
         timeoutMs,
       );
       return typeof raw === "string" ? raw : String(raw ?? "");
@@ -227,53 +223,51 @@ export function createWorkerApi(
     async onConnect(sessionId, timeoutMs, env) {
       sendEnv(env);
       await withTimeout(
-        Promise.resolve(stub.onConnect(sessionId)) as Promise<void>,
+        stub.onConnect(sessionId) as Promise<void>,
         timeoutMs,
       );
     },
     async onDisconnect(sessionId, timeoutMs, env) {
       sendEnv(env);
       await withTimeout(
-        Promise.resolve(stub.onDisconnect(sessionId)) as Promise<void>,
+        stub.onDisconnect(sessionId) as Promise<void>,
         timeoutMs,
       );
     },
     async onTurn(sessionId, text, timeoutMs, env) {
       sendEnv(env);
       await withTimeout(
-        Promise.resolve(stub.onTurn(sessionId, text)) as Promise<void>,
+        stub.onTurn(sessionId, text) as Promise<void>,
         timeoutMs,
       );
     },
     async onError(sessionId, error, timeoutMs, env) {
       sendEnv(env);
       await withTimeout(
-        Promise.resolve(stub.onError(sessionId, error)) as Promise<void>,
+        stub.onError(sessionId, error) as Promise<void>,
         timeoutMs,
       );
     },
     async onStep(sessionId, step, timeoutMs, env) {
       sendEnv(env);
       await withTimeout(
-        Promise.resolve(stub.onStep(sessionId, step)) as Promise<void>,
+        stub.onStep(sessionId, step) as Promise<void>,
         timeoutMs,
       );
     },
     async resolveMaxSteps(sessionId, timeoutMs, env) {
       sendEnv(env);
       return await withTimeout(
-        Promise.resolve(
-          stub.resolveMaxSteps(sessionId),
-        ) as Promise<number | null>,
+        stub.resolveMaxSteps(sessionId) as Promise<number | null>,
         timeoutMs ?? 5_000,
       );
     },
     async resolveBeforeStep(sessionId, stepNumber, timeoutMs, env) {
       sendEnv(env);
       return await withTimeout(
-        Promise.resolve(
-          stub.resolveBeforeStep(sessionId, stepNumber),
-        ) as Promise<{ activeTools?: string[] } | null>,
+        stub.resolveBeforeStep(sessionId, stepNumber) as Promise<
+          { activeTools?: string[] } | null
+        >,
         timeoutMs ?? 5_000,
       );
     },
