@@ -10,7 +10,6 @@ const SUPPORTED_AUDIO_FORMATS = new Set(["pcm16"]);
 import {
   type AgentState,
   type Message,
-  PING_INTERVAL_MS,
   type SessionError,
   type SessionOptions,
 } from "./types.ts";
@@ -30,7 +29,6 @@ interface ServerRpcApi {
     messages: readonly { role: "user" | "assistant"; text: string }[],
   ): void;
   sendAudio(data: Uint8Array): void;
-  ping(): void;
 }
 
 /**
@@ -93,8 +91,6 @@ class ClientRpcTarget extends RpcTarget {
       mode?: string;
     },
   ) => Promise<void>;
-  #pongReceived: { value: boolean };
-
   constructor(opts: {
     state: Signal<AgentState>;
     messages: Signal<Message[]>;
@@ -108,7 +104,6 @@ class ClientRpcTarget extends RpcTarget {
       tts_sample_rate: number;
       mode?: string;
     }) => Promise<void>;
-    pongReceived: { value: boolean };
   }) {
     super();
     this.#state = opts.state;
@@ -117,7 +112,6 @@ class ClientRpcTarget extends RpcTarget {
     this.#error = opts.error;
     this.#voiceIO = opts.voiceIO;
     this.#onReady = opts.onReady;
-    this.#pongReceived = opts.pongReceived;
   }
 
   ready(config: {
@@ -179,19 +173,12 @@ class ClientRpcTarget extends RpcTarget {
     });
   }
 
-  error(message: string, details?: readonly string[]): void {
-    const fullMessage = details?.length
-      ? `${message}: ${details.join(", ")}`
-      : message;
-    console.error("Agent error:", fullMessage);
+  error(message: string): void {
+    console.error("Agent error:", message);
     batch(() => {
-      this.#error.value = { code: "protocol", message: fullMessage };
+      this.#error.value = { code: "protocol", message };
       this.#state.value = "error";
     });
-  }
-
-  pong(): void {
-    this.#pongReceived.value = true;
   }
 
   playAudio(data: Uint8Array): void {
@@ -223,7 +210,6 @@ export function createVoiceSession(options: SessionOptions): VoiceSession {
   let connectionController: AbortController | null = null;
   let hasConnected = false;
   let audioSetupInFlight = false;
-  const pongReceived = { value: true };
 
   function cleanupAudio(): void {
     audioSetupInFlight = false;
@@ -239,20 +225,6 @@ export function createVoiceSession(options: SessionOptions): VoiceSession {
     });
   }
 
-  function startPing(sig: AbortSignal): void {
-    pongReceived.value = true;
-    const id = setInterval(() => {
-      if (!pongReceived.value) {
-        ws?.close();
-        return;
-      }
-      pongReceived.value = false;
-      if (serverStub) {
-        void Promise.resolve(serverStub.ping()).catch(() => {});
-      }
-    }, PING_INTERVAL_MS);
-    sig.addEventListener("abort", () => clearInterval(id));
-  }
 
   async function handleReady(msg: {
     protocol_version: number;
@@ -383,7 +355,6 @@ export function createVoiceSession(options: SessionOptions): VoiceSession {
           hasConnected = true;
           await handleReady(msg);
         },
-        pongReceived,
       });
 
       // Initialize capnweb RPC session over this WebSocket
@@ -405,7 +376,6 @@ export function createVoiceSession(options: SessionOptions): VoiceSession {
       }
 
       state.value = "ready";
-      startPing(sig);
     }, { signal: sig });
 
     socket.addEventListener("close", () => {

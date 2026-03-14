@@ -10,7 +10,7 @@ import {
 } from "./mulaw.ts";
 import {
   createAudioBuffer,
-  createTwilioTransport,
+  createTwilioClientSink,
   decodeTwilioFrame,
   type WsSink,
 } from "./transport_twilio.ts";
@@ -128,7 +128,7 @@ Deno.test("decodeTwilioFrame produces PCM16 bytes at 16kHz", () => {
 
 // --- twilio transport adapter ---
 
-Deno.test("createTwilioTransport", async (t) => {
+Deno.test("createTwilioClientSink", async (t) => {
   function mockWs(): {
     ws: WsSink;
     sent: string[];
@@ -150,21 +150,30 @@ Deno.test("createTwilioTransport", async (t) => {
     };
   }
 
-  await t.step("drops string messages (UI-only)", () => {
+  await t.step("text methods are no-ops for Twilio", () => {
     const { ws, sent } = mockWs();
-    const t = createTwilioTransport(ws);
-    t.send(JSON.stringify({ type: "ready" }));
+    const sink = createTwilioClientSink(ws);
+    sink.ready({ protocol_version: 1, audio_format: "pcm16", sample_rate: 16000, tts_sample_rate: 24000 });
+    sink.partialTranscript("hello");
+    sink.finalTranscript("hello");
+    sink.turn("hello");
+    sink.ttsDone();
+    sink.cancelled();
+    sink.resetNotify();
+    // chat and error just log, no ws send
+    sink.chat("hi");
+    sink.error("oops");
     assertStrictEquals(sent.length, 0);
   });
 
-  await t.step("converts PCM16 binary to mulaw media event", () => {
+  await t.step("playAudio converts PCM16 to mulaw media event", () => {
     const { ws, sent } = mockWs();
-    const transport = createTwilioTransport(ws);
-    transport.streamSid = "stream-123";
+    const sink = createTwilioClientSink(ws);
+    sink.streamSid = "stream-123";
 
     // Send 4 bytes of PCM16 (2 samples)
     const pcm = new Int16Array([1000, -1000]);
-    transport.send(new Uint8Array(pcm.buffer));
+    sink.playAudio(new Uint8Array(pcm.buffer));
 
     assertStrictEquals(sent.length, 1);
     const msg = JSON.parse(sent[0]!);
@@ -173,19 +182,27 @@ Deno.test("createTwilioTransport", async (t) => {
     assertStrictEquals(typeof msg.media.payload, "string");
   });
 
-  await t.step("skips binary when no streamSid", () => {
+  await t.step("playAudio skips when no streamSid", () => {
     const { ws, sent } = mockWs();
-    const transport = createTwilioTransport(ws);
-    transport.send(new Uint8Array([0, 0, 0, 0]));
+    const sink = createTwilioClientSink(ws);
+    sink.playAudio(new Uint8Array([0, 0, 0, 0]));
     assertStrictEquals(sent.length, 0);
   });
 
-  await t.step("skips when socket not open", () => {
+  await t.step("playAudio skips when socket not open", () => {
     const mock = mockWs();
     mock.setReady(3);
-    const transport = createTwilioTransport(mock.ws);
-    transport.streamSid = "stream-1";
-    transport.send(new Uint8Array([0, 0, 0, 0]));
+    const sink = createTwilioClientSink(mock.ws);
+    sink.streamSid = "stream-1";
+    sink.playAudio(new Uint8Array([0, 0, 0, 0]));
     assertStrictEquals(mock.sent.length, 0);
+  });
+
+  await t.step("open reflects WebSocket readyState", () => {
+    const mock = mockWs();
+    const sink = createTwilioClientSink(mock.ws);
+    assertStrictEquals(sink.open, true);
+    mock.setReady(3);
+    assertStrictEquals(sink.open, false);
   });
 });

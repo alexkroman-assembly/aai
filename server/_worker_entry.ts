@@ -62,8 +62,8 @@ export type HostApi = {
 /**
  * Cap'n Web RPC target that exposes host-side APIs (fetch, kv) to the worker.
  *
- * An instance of this class is passed to the worker via
- * {@linkcode AgentWorkerTarget.initHostApi}.
+ * An instance of this class is passed as the second argument to
+ * `newMessagePortRpcSession`, making it available to the worker at session creation.
  */
 class HostApiTarget extends RpcTarget {
   #api: HostApi;
@@ -155,7 +155,6 @@ export type WorkerApi = {
  * This matches the methods exposed by AgentWorkerTarget in the worker.
  */
 interface WorkerRpcApi {
-  initHostApi(hostApi: HostApiTarget): void;
   setEnv(env: Record<string, string>): void;
   getConfig(): Promise<import("@aai/sdk/types").WorkerConfig>;
   executeTool(
@@ -179,10 +178,9 @@ interface WorkerRpcApi {
 /**
  * Create a {@linkcode WorkerApi} backed by Cap'n Web RPC over a Worker.
  *
- * Sets up a bidirectional capnweb RPC session: the host can call worker
- * methods (getConfig, executeTool, hooks) via the worker's
- * {@linkcode AgentWorkerTarget}, and the worker can call host methods
- * (fetch, kv) via the {@linkcode HostApiTarget} passed during initialization.
+ * Both sides exchange targets at session creation: the host passes its
+ * {@linkcode HostApiTarget} and receives a stub for the worker's
+ * {@linkcode AgentWorkerTarget}. No separate init handshake is needed.
  *
  * @param worker - The Worker (or any object with `postMessage` and event listeners).
  * @param hostApi - Optional host-side API to expose to the worker for fetch/kv proxy.
@@ -197,14 +195,8 @@ export function createWorkerApi(
   hostApi?: HostApi,
 ): WorkerApi {
   const port = asMessagePort(worker);
-  const stub = newMessagePortRpcSession<WorkerRpcApi>(port);
-
-  // Pass host API to the worker if provided
-  if (hostApi) {
-    const hostTarget = new HostApiTarget(hostApi);
-    // Fire-and-forget: initHostApi passes the host API stub to the worker
-    void Promise.resolve(stub.initHostApi(hostTarget)).catch(() => {});
-  }
+  const hostTarget = hostApi ? new HostApiTarget(hostApi) : undefined;
+  const stub = newMessagePortRpcSession<WorkerRpcApi>(port, hostTarget);
 
   function sendEnv(env?: Record<string, string>): void {
     if (env) {

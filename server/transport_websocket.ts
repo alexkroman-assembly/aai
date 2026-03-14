@@ -96,11 +96,11 @@ export async function handleWebSocket(
 
   wireSessionSocket(socket, {
     sessions: ctx.state.sessions,
-    createSession: (sessionId, transport) =>
+    createSession: (sessionId, client) =>
       createSession({
         id: sessionId,
         agent: slug,
-        transport,
+        client,
         ...setup,
         skipGreeting: resume,
       }),

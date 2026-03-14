@@ -1,14 +1,14 @@
 // Copyright 2025 the AAI authors. MIT license.
 import * as log from "@std/log";
 import { newWebSocketRpcSession, RpcTarget } from "capnweb";
-import type { Session, SessionTransport } from "./session.ts";
+import type { ClientSink, Session } from "./session.ts";
 
 /** Options for wiring a WebSocket to a session. */
 export type WsSessionOptions = {
   /** Map of active sessions (session is added on open, removed on close). */
   sessions: Map<string, Session>;
-  /** Factory function to create a session for a given ID and transport. */
-  createSession: (sessionId: string, transport: SessionTransport) => Session;
+  /** Factory function to create a session for a given ID and client sink. */
+  createSession: (sessionId: string, client: ClientSink) => Session;
   /** Additional key-value pairs included in log messages. */
   logContext?: Record<string, string>;
   /** Callback invoked when the WebSocket connection opens. */
@@ -21,7 +21,8 @@ export type WsSessionOptions = {
  * Interface for server→client RPC calls.
  *
  * The server calls these methods on the client stub to push messages
- * and audio to the browser.
+ * and audio to the browser. This matches the {@linkcode ClientSink}
+ * interface used by the session layer.
  */
 export interface ClientRpcApi {
   ready(config: {
@@ -38,8 +39,7 @@ export interface ClientRpcApi {
   ttsDone(): void;
   cancelled(): void;
   resetNotify(): void;
-  error(message: string, details?: readonly string[]): void;
-  pong(): void;
+  error(message: string): void;
   playAudio(data: Uint8Array): void;
 }
 
@@ -53,7 +53,6 @@ class SessionServerTarget extends RpcTarget {
   #session: Session | null = null;
   #pendingMessages: Array<{ method: string; args: unknown[] }> = [];
   #ready = false;
-  #clientStub: import("capnweb").RpcStub<ClientRpcApi> | null = null;
 
   setSession(session: Session): void {
     this.#session = session;
@@ -61,17 +60,10 @@ class SessionServerTarget extends RpcTarget {
 
   setReady(): void {
     this.#ready = true;
-    // Process any messages queued before the session was ready
     for (const { method, args } of this.#pendingMessages) {
       this.#dispatch(method, args);
     }
     this.#pendingMessages.length = 0;
-  }
-
-  setClientStub(
-    stub: import("capnweb").RpcStub<ClientRpcApi>,
-  ): void {
-    this.#clientStub = stub;
   }
 
   audioReady(): void {
@@ -98,19 +90,8 @@ class SessionServerTarget extends RpcTarget {
     }
   }
 
-  ping(): void {
-    // Respond with pong via the client stub
-    if (this.#clientStub) {
-      void Promise.resolve(this.#clientStub.pong()).catch(() => {});
-    }
-  }
-
   #enqueue(method: string, args: unknown[]): void {
     if (!this.#ready) {
-      if (method === "ping" && this.#clientStub) {
-        void Promise.resolve(this.#clientStub.pong()).catch(() => {});
-        return;
-      }
       this.#pendingMessages.push({ method, args });
       return;
     }
@@ -139,90 +120,52 @@ class SessionServerTarget extends RpcTarget {
 }
 
 /**
- * Creates a {@linkcode SessionTransport} adapter that routes messages
- * through a capnweb client stub.
+ * Wraps a capnweb client stub as a {@linkcode ClientSink}.
  *
- * JSON messages are parsed and dispatched to typed client RPC methods.
- * Binary audio data is sent via `playAudio()`.
+ * The stub methods already match the ClientSink interface — this just
+ * adds the `open` check and fire-and-forget error handling.
  */
-function createCapnwebTransport(
-  clientStub: import("capnweb").RpcStub<ClientRpcApi>,
+function createClientSink(
+  stub: import("capnweb").RpcStub<ClientRpcApi>,
   ws: WebSocket,
-): SessionTransport {
+): ClientSink {
+  function fire(fn: () => unknown): void {
+    void Promise.resolve(fn()).catch(() => {});
+  }
+
   return {
-    get readyState() {
-      return ws.readyState as 0 | 1 | 2 | 3;
+    get open() {
+      return ws.readyState === WebSocket.OPEN;
     },
-    send(data: string | ArrayBuffer | Uint8Array) {
-      if (ws.readyState !== WebSocket.OPEN) return;
-
-      if (typeof data === "string") {
-        // Parse the JSON server message and dispatch to typed client methods
-        try {
-          const msg = JSON.parse(data) as Record<string, unknown>;
-          const type = msg.type as string;
-
-          switch (type) {
-            case "ready":
-              void Promise.resolve(
-                clientStub.ready(
-                  msg as unknown as Parameters<ClientRpcApi["ready"]>[0],
-                ),
-              ).catch(() => {});
-              break;
-            case "partial_transcript":
-              void Promise.resolve(
-                clientStub.partialTranscript(msg.text as string),
-              ).catch(() => {});
-              break;
-            case "final_transcript":
-              void Promise.resolve(
-                clientStub.finalTranscript(
-                  msg.text as string,
-                  msg.turn_order as number | undefined,
-                ),
-              ).catch(() => {});
-              break;
-            case "turn":
-              void Promise.resolve(
-                clientStub.turn(
-                  msg.text as string,
-                  msg.turn_order as number | undefined,
-                ),
-              ).catch(() => {});
-              break;
-            case "chat":
-              void Promise.resolve(clientStub.chat(msg.text as string))
-                .catch(() => {});
-              break;
-            case "tts_done":
-              void Promise.resolve(clientStub.ttsDone()).catch(() => {});
-              break;
-            case "cancelled":
-              void Promise.resolve(clientStub.cancelled()).catch(() => {});
-              break;
-            case "reset":
-              void Promise.resolve(clientStub.resetNotify()).catch(() => {});
-              break;
-            case "error":
-              void Promise.resolve(
-                clientStub.error(
-                  msg.message as string,
-                  msg.details as readonly string[] | undefined,
-                ),
-              ).catch(() => {});
-              break;
-            case "pong":
-              void Promise.resolve(clientStub.pong()).catch(() => {});
-              break;
-          }
-        } catch { /* ignore parse failures */ }
-        return;
-      }
-
-      // Binary audio data
-      const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
-      void Promise.resolve(clientStub.playAudio(bytes)).catch(() => {});
+    ready(config) {
+      fire(() => stub.ready(config));
+    },
+    partialTranscript(text) {
+      fire(() => stub.partialTranscript(text));
+    },
+    finalTranscript(text, turnOrder) {
+      fire(() => stub.finalTranscript(text, turnOrder));
+    },
+    turn(text, turnOrder) {
+      fire(() => stub.turn(text, turnOrder));
+    },
+    chat(text) {
+      fire(() => stub.chat(text));
+    },
+    ttsDone() {
+      fire(() => stub.ttsDone());
+    },
+    cancelled() {
+      fire(() => stub.cancelled());
+    },
+    resetNotify() {
+      fire(() => stub.resetNotify());
+    },
+    error(message) {
+      fire(() => stub.error(message));
+    },
+    playAudio(data) {
+      fire(() => stub.playAudio(data));
     },
   };
 }
@@ -250,29 +193,22 @@ export function wireSessionSocket(
     opts.onOpen?.();
     log.info("Session connected", { ...ctx, sid });
 
-    // Create the server-side RPC target
     const serverTarget = new SessionServerTarget();
 
-    // Initialize capnweb RPC session over this WebSocket
     const clientStub = newWebSocketRpcSession<ClientRpcApi>(
       ws,
       serverTarget,
     );
 
-    serverTarget.setClientStub(clientStub);
+    const client = createClientSink(clientStub, ws);
 
-    // Create a transport adapter that routes through capnweb
-    const transport = createCapnwebTransport(clientStub, ws);
-
-    // Create and start the session
-    session = opts.createSession(sessionId, transport);
+    session = opts.createSession(sessionId, client);
     serverTarget.setSession(session);
     sessions.set(sessionId, session);
 
     log.info("Session configured", { ...ctx, sid });
     void session.start();
 
-    // Mark the server target as ready to process queued messages
     serverTarget.setReady();
   });
 

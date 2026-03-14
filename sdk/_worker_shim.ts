@@ -31,8 +31,8 @@ const EMPTY_PARAMS = z.object({});
 /**
  * Type for the host API exposed to the worker via capnweb RPC.
  *
- * The worker receives a stub for this interface from the host
- * when {@linkcode AgentWorkerTarget.initHostApi} is called.
+ * The host passes its {@linkcode RpcTarget} when creating the RPC session,
+ * and the worker receives a stub for this interface as the return value.
  */
 interface HostApiRpc {
   fetch(req: {
@@ -174,13 +174,10 @@ class AgentWorkerTarget extends RpcTarget {
     this.#toolHandlers = new Map(Object.entries(agent.tools));
   }
 
-  /**
-   * Called by the host to pass its API stub for fetch/kv proxy.
-   * Must be called before any tool execution or hook invocation.
-   */
-  initHostApi(hostApi: HostApiRpc): void {
-    this.#proxyKv = createProxyKv(hostApi);
-    installFetchProxy(hostApi);
+  /** Install the fetch and KV proxies backed by the host stub. */
+  setHostApi(hostStub: HostApiRpc): void {
+    this.#proxyKv = createProxyKv(hostStub);
+    installFetchProxy(hostStub);
   }
 
   setEnv(env: Record<string, string>): void {
@@ -302,10 +299,9 @@ class AgentWorkerTarget extends RpcTarget {
 /**
  * Initialize the worker-side Cap'n Web RPC endpoint for an agent.
  *
- * Sets up bidirectional RPC using capnweb: the host can call agent methods
- * (getConfig, executeTool, hooks) via the {@linkcode AgentWorkerTarget},
- * and the worker can call host methods (fetch, kv) via the host API stub
- * passed through {@linkcode AgentWorkerTarget.initHostApi}.
+ * Both sides exchange targets at session creation: the worker passes its
+ * {@linkcode AgentWorkerTarget} and receives a stub for the host's API.
+ * No separate init handshake is needed.
  *
  * @param agent - The agent definition returned by `defineAgent()`.
  */
@@ -313,7 +309,10 @@ export function initWorker(agent: AgentDef): void {
   const selfRef = self;
   const workerTarget = new AgentWorkerTarget(agent);
 
-  // Start the capnweb RPC session over the worker's postMessage channel,
-  // exposing the worker target to the host
-  newMessagePortRpcSession(asMessagePort(selfRef), workerTarget);
+  // Both sides pass their target — worker gets host stub, host gets worker stub
+  const hostStub = newMessagePortRpcSession<HostApiRpc>(
+    asMessagePort(selfRef),
+    workerTarget,
+  );
+  workerTarget.setHostApi(hostStub);
 }

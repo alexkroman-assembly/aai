@@ -14,11 +14,7 @@ import type {
   Transport,
 } from "@aai/sdk/types";
 
-export {
-  ClientMessageSchema,
-  ServerMessageSchema,
-  TwilioMessageSchema,
-} from "@aai/sdk/protocol";
+export { TwilioMessageSchema } from "@aai/sdk/protocol";
 import type { KvRequest } from "@aai/sdk/protocol";
 
 /** Zod schema for validating transport type values. */

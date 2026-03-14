@@ -26,13 +26,42 @@ import type { Message } from "@aai/sdk/types";
 import * as metrics from "./metrics.ts";
 import { AUDIO_FORMAT, PROTOCOL_VERSION } from "@aai/sdk/protocol";
 
-/** Transport abstraction for sending data to a connected client. */
-export type SessionTransport = {
-  /** Sends a message (text or binary) to the client. */
-  send(data: string | ArrayBuffer | Uint8Array): void;
-  /** The current WebSocket ready state. */
-  readonly readyState: 0 | 1 | 2 | 3;
-};
+/**
+ * Typed interface for pushing session events to a connected client.
+ *
+ * For WebSocket sessions this is backed by a capnweb RPC stub;
+ * for Twilio it's a custom implementation that converts audio formats.
+ */
+export interface ClientSink {
+  /** Whether the underlying connection is open and accepting calls. */
+  readonly open: boolean;
+  /** Notify the client that the session is ready with negotiated config. */
+  ready(config: {
+    protocol_version: number;
+    audio_format: string;
+    sample_rate: number;
+    tts_sample_rate: number;
+    mode?: string;
+  }): void;
+  /** Send a partial (in-progress) STT transcript. */
+  partialTranscript(text: string): void;
+  /** Send a finalized STT transcript. */
+  finalTranscript(text: string, turnOrder?: number): void;
+  /** Notify the client that a user turn was committed. */
+  turn(text: string, turnOrder?: number): void;
+  /** Send an assistant chat message. */
+  chat(text: string): void;
+  /** Signal that TTS playback is complete. */
+  ttsDone(): void;
+  /** Signal that the current turn was cancelled. */
+  cancelled(): void;
+  /** Signal that the session was reset. */
+  resetNotify(): void;
+  /** Report an error to the client. */
+  error(message: string): void;
+  /** Stream a chunk of TTS audio to the client. */
+  playAudio(data: Uint8Array): void;
+}
 
 /** Configuration options for creating a new session. */
 export type SessionOptions = {
@@ -40,8 +69,8 @@ export type SessionOptions = {
   id: string;
   /** Agent slug this session belongs to. */
   agent: string;
-  /** Transport used to communicate with the client. */
-  transport: SessionTransport;
+  /** Typed sink for pushing events to the client. */
+  client: ClientSink;
   /** The agent's configuration from `defineAgent()`. */
   agentConfig: AgentConfig;
   /** JSON schemas for agent-defined tools. */
@@ -125,7 +154,7 @@ export function createSession(opts: SessionOptions): Session {
 
   const id = opts.id;
   const agentSlug = opts.agent;
-  const ws = opts.transport;
+  const client = opts.client;
   const agentLabel = { agent: opts.agent };
   const env = { ...opts.env };
   const getWorkerApi = opts.getWorkerApi;
@@ -203,14 +232,11 @@ export function createSession(opts: SessionOptions): Session {
     }
   }
 
-  function trySend(data: string | Uint8Array): void {
+  /** Safely call a method on the client sink, ignoring errors if closed. */
+  function trySend(fn: () => void): void {
     try {
-      if (ws.readyState === WebSocket.OPEN) ws.send(data);
-    } catch { /* ws closed between check and send */ }
-  }
-
-  function trySendJson(data: Record<string, unknown>): void {
-    trySend(JSON.stringify(data));
+      if (client.open) fn();
+    } catch { /* connection closed between check and send */ }
   }
 
   async function callHook(
@@ -234,13 +260,9 @@ export function createSession(opts: SessionOptions): Session {
       handle.onTranscript = ({ text, isFinal, turnOrder }) => {
         log.info("transcript", { text, isFinal, turnOrder });
         if (isFinal) {
-          trySendJson({
-            type: "final_transcript",
-            text,
-            ...(turnOrder !== undefined ? { turn_order: turnOrder } : {}),
-          });
+          trySend(() => client.finalTranscript(text, turnOrder));
         } else {
-          trySendJson({ type: "partial_transcript", text });
+          trySend(() => client.partialTranscript(text));
         }
       };
 
@@ -262,7 +284,7 @@ export function createSession(opts: SessionOptions): Session {
 
       handle.onError = (err) => {
         log.error("STT error:", err.message);
-        trySendJson({ type: "error", message: err.message });
+        trySend(() => client.error(err.message));
       };
 
       handle.onClose = async () => {
@@ -275,7 +297,7 @@ export function createSession(opts: SessionOptions): Session {
           } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
             log.error("STT reconnect failed:", msg);
-            trySendJson({ type: "error", message: msg });
+            trySend(() => client.error(msg));
           }
         }
       };
@@ -284,7 +306,7 @@ export function createSession(opts: SessionOptions): Session {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       log.error("STT connect failed:", msg);
-      trySendJson({ type: "error", message: msg });
+      trySend(() => client.error(msg));
     }
   }
 
@@ -300,16 +322,12 @@ export function createSession(opts: SessionOptions): Session {
     metrics.turnsTotal.inc(agentLabel);
     const turnStart = performance.now();
 
-    trySendJson({
-      type: "turn",
-      text,
-      ...(turnOrder !== undefined ? { turn_order: turnOrder } : {}),
-    });
+    trySend(() => client.turn(text, turnOrder));
 
     callHook("onTurn", (api) => api.onTurn(id, text, 5_000, slotEnv));
 
     if (isSttOnly) {
-      trySendJson({ type: "tts_done" });
+      trySend(() => client.ttsDone());
       metrics.turnDuration.observe(
         (performance.now() - turnStart) / 1000,
         agentLabel,
@@ -381,15 +399,15 @@ export function createSession(opts: SessionOptions): Session {
       if (signal.aborted) return;
 
       if (result) {
-        trySendJson({ type: "chat", text: result });
+        trySend(() => client.chat(result));
         await tts!.synthesizeStream(
           result,
-          (chunk) => trySend(chunk),
+          (chunk) => trySend(() => client.playAudio(chunk)),
           signal,
         );
-        if (!signal.aborted) trySendJson({ type: "tts_done" });
+        if (!signal.aborted) trySend(() => client.ttsDone());
       } else {
-        trySendJson({ type: "tts_done" });
+        trySend(() => client.ttsDone());
       }
     } catch (err: unknown) {
       if (signal.aborted) return;
@@ -407,7 +425,7 @@ export function createSession(opts: SessionOptions): Session {
         log.error("Turn failed:", msg);
       }
       metrics.errorsTotal.inc({ ...agentLabel, component: "turn" });
-      trySendJson({ type: "error", message: msg });
+      trySend(() => client.error(msg));
     } finally {
       if (turnAbort === abort) turnAbort = null;
       metrics.turnDuration.observe(
@@ -427,13 +445,17 @@ export function createSession(opts: SessionOptions): Session {
     const signal = AbortSignal.any([sessionAbort.signal, abort.signal]);
     const p: Promise<void> = (async () => {
       try {
-        await tts.synthesizeStream(text, (chunk) => trySend(chunk), signal);
-        if (!signal.aborted) trySendJson({ type: "tts_done" });
+        await tts.synthesizeStream(
+          text,
+          (chunk) => trySend(() => client.playAudio(chunk)),
+          signal,
+        );
+        if (!signal.aborted) trySend(() => client.ttsDone());
       } catch (err: unknown) {
         if (signal.aborted) return;
         const msg = err instanceof Error ? err.message : String(err);
         log.error("TTS failed:", msg);
-        trySendJson({ type: "error", message: msg });
+        trySend(() => client.error(msg));
       } finally {
         if (turnAbort === abort) turnAbort = null;
       }
@@ -459,14 +481,15 @@ export function createSession(opts: SessionOptions): Session {
       await connectStt();
 
       conn = ConnState.Ready;
-      trySendJson({
-        type: "ready",
-        protocol_version: PROTOCOL_VERSION,
-        audio_format: AUDIO_FORMAT,
-        sample_rate: config.sttConfig.sampleRate,
-        tts_sample_rate: config.ttsConfig.sampleRate,
-        ...(isSttOnly ? { mode: "stt-only" } : {}),
-      });
+      trySend(() =>
+        client.ready({
+          protocol_version: PROTOCOL_VERSION,
+          audio_format: AUDIO_FORMAT,
+          sample_rate: config.sttConfig.sampleRate,
+          tts_sample_rate: config.ttsConfig.sampleRate,
+          ...(isSttOnly ? { mode: "stt-only" } : {}),
+        })
+      );
     },
 
     async stop(): Promise<void> {
@@ -500,7 +523,7 @@ export function createSession(opts: SessionOptions): Session {
       agent = AgentState.Listening;
 
       if (pendingGreeting) {
-        trySendJson({ type: "chat", text: pendingGreeting });
+        trySend(() => client.chat(pendingGreeting!));
         speakText(pendingGreeting);
         pendingGreeting = null;
       }
@@ -509,7 +532,7 @@ export function createSession(opts: SessionOptions): Session {
     onCancel(): void {
       cancelInflight();
       stt?.clear();
-      trySendJson({ type: "cancelled" });
+      trySend(() => client.cancelled());
 
       if (agent === AgentState.Processing) {
         agent = AgentState.Listening;
@@ -521,10 +544,10 @@ export function createSession(opts: SessionOptions): Session {
       stt?.clear();
       messages = [];
       agent = AgentState.Listening;
-      trySendJson({ type: "reset" });
+      trySend(() => client.resetNotify());
 
       if (agentConfig.greeting) {
-        trySendJson({ type: "chat", text: agentConfig.greeting });
+        trySend(() => client.chat(agentConfig.greeting));
         speakText(agentConfig.greeting);
       }
     },

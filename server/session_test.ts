@@ -2,34 +2,53 @@
 import { assert, assertStrictEquals } from "@std/assert";
 import { assertSpyCalls, spy } from "@std/testing/mock";
 import {
+  type ClientSink,
   createSession,
   type SessionOptions,
-  type SessionTransport,
 } from "./session.ts";
 import type { AgentConfig } from "@aai/sdk/types";
 import type { SttConnection } from "./stt.ts";
 import { DEFAULT_STT_CONFIG, DEFAULT_TTS_CONFIG } from "./types.ts";
 import type { PlatformConfig } from "./config.ts";
 
-function createMockTransport(): SessionTransport & {
-  sent: (string | ArrayBuffer | Uint8Array)[];
+function createMockClientSink(): ClientSink & {
+  calls: { method: string; args: unknown[] }[];
 } {
-  const sent: (string | ArrayBuffer | Uint8Array)[] = [];
+  const calls: { method: string; args: unknown[] }[] = [];
   return {
-    sent,
-    readyState: 1,
-    send(data: string | ArrayBuffer | Uint8Array) {
-      sent.push(data);
+    calls,
+    open: true,
+    ready(...args) {
+      calls.push({ method: "ready", args });
+    },
+    partialTranscript(...args) {
+      calls.push({ method: "partialTranscript", args });
+    },
+    finalTranscript(...args) {
+      calls.push({ method: "finalTranscript", args });
+    },
+    turn(...args) {
+      calls.push({ method: "turn", args });
+    },
+    chat(...args) {
+      calls.push({ method: "chat", args });
+    },
+    ttsDone() {
+      calls.push({ method: "ttsDone", args: [] });
+    },
+    cancelled() {
+      calls.push({ method: "cancelled", args: [] });
+    },
+    resetNotify() {
+      calls.push({ method: "resetNotify", args: [] });
+    },
+    error(...args) {
+      calls.push({ method: "error", args });
+    },
+    playAudio(...args) {
+      calls.push({ method: "playAudio", args });
     },
   };
-}
-
-function getSentJson(
-  transport: ReturnType<typeof createMockTransport>,
-): Record<string, unknown>[] {
-  return transport.sent
-    .filter((d): d is string => typeof d === "string")
-    .map((s) => JSON.parse(s));
 }
 
 function createMockPlatformConfig(): PlatformConfig {
@@ -102,7 +121,7 @@ function createMockSessionOptions() {
   const opts: SessionOptions = {
     id: "test-session-id",
     agent: "test/agent",
-    transport: createMockTransport(),
+    client: createMockClientSink(),
     agentConfig: {
       name: "Test Agent",
       instructions: "Test instructions",
@@ -141,14 +160,12 @@ function setup(options?: SetupOptions) {
     mocks.opts.createStt = options.createStt;
   }
 
-  const transport = mocks.opts.transport as ReturnType<
-    typeof createMockTransport
-  >;
+  const client = mocks.opts.client as ReturnType<typeof createMockClientSink>;
   const session = createSession(mocks.opts);
 
   return {
     session,
-    transport,
+    client,
     ...mocks,
   };
 }
@@ -177,36 +194,47 @@ function setupWithSttHandle(options?: SetupOptions) {
 
   mocks.opts.createStt = () => handle;
 
-  const transport = mocks.opts.transport as ReturnType<
-    typeof createMockTransport
-  >;
+  const client = mocks.opts.client as ReturnType<typeof createMockClientSink>;
   const session = createSession(mocks.opts);
 
   return {
     session,
-    transport,
+    client,
     handle,
     ...mocks,
   };
 }
 
-Deno.test("start sends READY message with protocol metadata", async () => {
+function findCall(
+  client: ReturnType<typeof createMockClientSink>,
+  method: string,
+) {
+  return client.calls.find((c) => c.method === method);
+}
+
+function filterCalls(
+  client: ReturnType<typeof createMockClientSink>,
+  method: string,
+) {
+  return client.calls.filter((c) => c.method === method);
+}
+
+Deno.test("start sends ready with protocol metadata", async () => {
   const ctx = setup();
   await ctx.session.start();
-  const messages = getSentJson(ctx.transport);
-  const ready = messages.find((m) => m.type === "ready");
-  assert(ready !== undefined);
-  assertStrictEquals(ready!.protocol_version, 1);
-  assertStrictEquals(ready!.audio_format, "pcm16");
-  assert(ready!.sample_rate !== undefined);
-  assert(ready!.tts_sample_rate !== undefined);
+  const call = findCall(ctx.client, "ready");
+  assert(call !== undefined);
+  const config = call!.args[0] as Record<string, unknown>;
+  assertStrictEquals(config.protocol_version, 1);
+  assertStrictEquals(config.audio_format, "pcm16");
+  assert(config.sample_rate !== undefined);
+  assert(config.tts_sample_rate !== undefined);
 });
 
 Deno.test("start defers greeting until onAudioReady", () => {
   const ctx = setup();
   ctx.session.start();
-  const messages = getSentJson(ctx.transport);
-  assertStrictEquals(messages.filter((m) => m.type === "chat").length, 0);
+  assertStrictEquals(filterCalls(ctx.client, "chat").length, 0);
 });
 
 Deno.test("start sends error on STT connection failure", async () => {
@@ -225,17 +253,15 @@ Deno.test("start sends error on STT connection failure", async () => {
     }),
   });
   await ctx.session.start();
-  assert(
-    getSentJson(ctx.transport).find((m) => m.type === "error") !== undefined,
-  );
+  assert(findCall(ctx.client, "error") !== undefined);
 });
 
 Deno.test("onAudioReady sends greeting and starts TTS", async () => {
   const ctx = setup();
   await ctx.session.start();
   ctx.session.onAudioReady();
-  const chat = getSentJson(ctx.transport).find((m) => m.type === "chat");
-  assertStrictEquals(chat!.text, "Hi there!");
+  const call = findCall(ctx.client, "chat");
+  assertStrictEquals(call!.args[0], "Hi there!");
   assert(ctx.ttsClient.synthesizeStream.calls.length > 0);
 });
 
@@ -274,86 +300,66 @@ Deno.test("onAudio does not throw before STT is connected", () => {
   ctx.session.onAudio(new Uint8Array([1]));
 });
 
-Deno.test("onCancel clears STT and sends CANCELLED", async () => {
+Deno.test("onCancel clears STT and sends cancelled", async () => {
   const ctx = setup();
   await ctx.session.start();
   ctx.session.onCancel();
   assertSpyCalls(ctx.sttHandle.clear, 1);
-  assert(
-    getSentJson(ctx.transport).find((m) => m.type === "cancelled") !==
-      undefined,
-  );
+  assert(findCall(ctx.client, "cancelled") !== undefined);
 });
 
-Deno.test("onReset sends RESET and re-sends greeting", async () => {
+Deno.test("onReset sends resetNotify and re-sends greeting", async () => {
   const ctx = setup();
   await ctx.session.start();
   ctx.session.onReset();
   assertSpyCalls(ctx.sttHandle.clear, 1);
-  const messages = getSentJson(ctx.transport);
-  assert(messages.find((m) => m.type === "reset") !== undefined);
-  assert(messages.filter((m) => m.type === "chat").length > 0);
+  assert(findCall(ctx.client, "resetNotify") !== undefined);
+  assert(filterCalls(ctx.client, "chat").length > 0);
 });
 
-Deno.test("relays STT partial transcript to browser", async () => {
+Deno.test("relays STT partial transcript to client", async () => {
   const ctx = setupWithSttHandle();
   await ctx.session.start();
-  // Session wires onTranscript after connect — invoke it directly
   ctx.handle.onTranscript!({ text: "partial text", isFinal: false });
-  const transcript = getSentJson(ctx.transport).find((m) =>
-    m.type === "partial_transcript"
-  );
-  assertStrictEquals(transcript!.text, "partial text");
+  const call = findCall(ctx.client, "partialTranscript");
+  assertStrictEquals(call!.args[0], "partial text");
 });
 
-Deno.test("relays STT final transcript to browser", async () => {
+Deno.test("relays STT final transcript to client", async () => {
   const ctx = setupWithSttHandle();
   await ctx.session.start();
   ctx.handle.onTranscript!({ text: "done", isFinal: true, turnOrder: 3 });
-  const transcript = getSentJson(ctx.transport).find((m) =>
-    m.type === "final_transcript"
-  );
-  assertStrictEquals(transcript!.text, "done");
-  assertStrictEquals(transcript!.turn_order, 3);
+  const call = findCall(ctx.client, "finalTranscript");
+  assertStrictEquals(call!.args[0], "done");
+  assertStrictEquals(call!.args[1], 3);
 });
 
-Deno.test("omits turn_order on final transcript when undefined", async () => {
+Deno.test("omits turnOrder on final transcript when undefined", async () => {
   const ctx = setupWithSttHandle();
   await ctx.session.start();
   ctx.handle.onTranscript!({ text: "done", isFinal: true });
-  const transcript = getSentJson(ctx.transport).find((m) =>
-    m.type === "final_transcript"
-  );
-  assertStrictEquals(transcript!.turn_order, undefined);
+  const call = findCall(ctx.client, "finalTranscript");
+  assertStrictEquals(call!.args[1], undefined);
 });
 
-Deno.test("forwards turn_order in turn messages", async () => {
+Deno.test("forwards turnOrder in turn messages", async () => {
   const ctx = setupWithSttHandle();
   await ctx.session.start();
   ctx.handle.onTurn!({ text: "What is the weather?", turnOrder: 5 });
-  // Check the turn message was sent immediately (before LLM call)
   await new Promise((r) => setTimeout(r, 10));
-  const turn = getSentJson(ctx.transport).find((m) => m.type === "turn");
-  assertStrictEquals(turn!.turn_order, 5);
-  // Stop session to abort the in-flight LLM call
+  const call = findCall(ctx.client, "turn");
+  assertStrictEquals(call!.args[1], 5);
   await ctx.session.stop();
 });
 
-Deno.test("trySendJson silently drops messages when WS is closed", () => {
+Deno.test("client.open=false silently drops messages", () => {
   const ctx = setup();
-  ctx.opts.transport = {
-    sent: [] as (string | ArrayBuffer | Uint8Array)[],
-    readyState: 3,
-    send(data: string | ArrayBuffer | Uint8Array) {
-      (this as { sent: (string | ArrayBuffer | Uint8Array)[] }).sent.push(data);
-    },
-  } as unknown as ReturnType<typeof createMockTransport>;
+  const closedClient = createMockClientSink();
+  (closedClient as { open: boolean }).open = false;
+  ctx.opts.client = closedClient;
   const session = createSession(ctx.opts);
   session.start();
-  assertStrictEquals(
-    (ctx.opts.transport as unknown as { sent: unknown[] }).sent.length,
-    0,
-  );
+  assertStrictEquals(closedClient.calls.length, 0);
 });
 
 Deno.test("stop closes STT and TTS", async () => {
@@ -390,9 +396,6 @@ Deno.test("skipGreeting suppresses greeting on start", async () => {
   const session = createSession(mocks.opts);
   await session.start();
   session.onAudioReady();
-  const transport = mocks.opts.transport as ReturnType<
-    typeof createMockTransport
-  >;
-  const chatMessages = getSentJson(transport).filter((m) => m.type === "chat");
-  assertStrictEquals(chatMessages.length, 0);
+  const client = mocks.opts.client as ReturnType<typeof createMockClientSink>;
+  assertStrictEquals(filterCalls(client, "chat").length, 0);
 });
