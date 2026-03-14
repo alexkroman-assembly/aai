@@ -59,8 +59,8 @@ export interface ClientSink {
   resetNotify(): void;
   /** Report an error to the client. */
   error(message: string): void;
-  /** Stream a chunk of TTS audio to the client. */
-  playAudio(data: Uint8Array): void;
+  /** Stream TTS audio to the client as a ReadableStream. */
+  playAudioStream(stream: ReadableStream<Uint8Array>): void;
 }
 
 /** Configuration options for creating a new session. */
@@ -390,11 +390,26 @@ export function createSession(opts: SessionOptions): Session {
 
       if (result) {
         trySend(() => client.chat(result));
+        // Wrap TTS callback-based output as a ReadableStream
+        let controller: ReadableStreamDefaultController<Uint8Array>;
+        const audioStream = new ReadableStream<Uint8Array>({
+          start(c) {
+            controller = c;
+          },
+        });
+        trySend(() => client.playAudioStream(audioStream));
         await tts!.synthesizeStream(
           result,
-          (chunk) => trySend(() => client.playAudio(chunk)),
+          (chunk) => {
+            try {
+              controller.enqueue(chunk);
+            } catch { /* stream may be closed */ }
+          },
           signal,
         );
+        try {
+          controller!.close();
+        } catch { /* already closed */ }
         if (!signal.aborted) trySend(() => client.ttsDone());
       } else {
         trySend(() => client.ttsDone());
@@ -435,11 +450,25 @@ export function createSession(opts: SessionOptions): Session {
     const signal = AbortSignal.any([sessionAbort.signal, abort.signal]);
     const p: Promise<void> = (async () => {
       try {
+        let controller: ReadableStreamDefaultController<Uint8Array>;
+        const audioStream = new ReadableStream<Uint8Array>({
+          start(c) {
+            controller = c;
+          },
+        });
+        trySend(() => client.playAudioStream(audioStream));
         await tts.synthesizeStream(
           text,
-          (chunk) => trySend(() => client.playAudio(chunk)),
+          (chunk) => {
+            try {
+              controller.enqueue(chunk);
+            } catch { /* stream may be closed */ }
+          },
           signal,
         );
+        try {
+          controller!.close();
+        } catch { /* already closed */ }
         if (!signal.aborted) trySend(() => client.ttsDone());
       } catch (err: unknown) {
         if (signal.aborted) return;

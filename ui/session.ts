@@ -35,7 +35,7 @@ interface SessionRpcApi {
   sendHistory(
     messages: readonly { role: "user" | "assistant"; text: string }[],
   ): void;
-  sendAudio(data: Uint8Array): void;
+  sendAudioStream(stream: ReadableStream<Uint8Array>): void;
 }
 
 /**
@@ -188,10 +188,23 @@ class ClientRpcTarget extends RpcTarget {
     });
   }
 
-  playAudio(data: Uint8Array): void {
-    if (this.#state.value === "speaking") {
-      this.#voiceIO()?.enqueue(data.buffer as ArrayBuffer);
-    }
+  playAudioStream(stream: ReadableStream<Uint8Array>): void {
+    const state = this.#state;
+    const voiceIO = this.#voiceIO;
+    void (async () => {
+      const reader = stream.getReader();
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (state.value === "speaking") {
+            voiceIO()?.enqueue(value.buffer as ArrayBuffer);
+          }
+        }
+      } finally {
+        reader.releaseLock();
+      }
+    })();
   }
 }
 
@@ -218,9 +231,16 @@ export function createVoiceSession(options: SessionOptions): VoiceSession {
   let connectionController: AbortController | null = null;
   let hasConnected = false;
   let audioSetupInFlight = false;
+  /** Controller for the mic audio ReadableStream sent to the server. */
+  let micStreamController: ReadableStreamDefaultController<Uint8Array> | null =
+    null;
 
   function cleanupAudio(): void {
     audioSetupInFlight = false;
+    try {
+      micStreamController?.close();
+    } catch { /* already closed */ }
+    micStreamController = null;
     void voiceIO?.close();
     voiceIO = null;
   }
@@ -295,11 +315,9 @@ export function createVoiceSession(options: SessionOptions): VoiceSession {
         captureWorkletSrc: captureWorklet,
         playbackWorkletSrc: playbackWorklet,
         onMicData: (pcm16: ArrayBuffer) => {
-          // Send audio via capnweb RPC
-          if (sessionStub) {
-            void (sessionStub.sendAudio(new Uint8Array(pcm16)) as
-              Promise<void>).catch(() => {});
-          }
+          try {
+            micStreamController?.enqueue(new Uint8Array(pcm16));
+          } catch { /* stream may be closed */ }
         },
       });
       if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -307,8 +325,15 @@ export function createVoiceSession(options: SessionOptions): VoiceSession {
         return;
       }
       voiceIO = io;
-      // Notify server that audio is ready
+      // Create mic audio stream and send it to the server
       if (sessionStub) {
+        const micStream = new ReadableStream<Uint8Array>({
+          start(c) {
+            micStreamController = c;
+          },
+        });
+        void (sessionStub.sendAudioStream(micStream) as
+          Promise<void>).catch(() => {});
         void (sessionStub.audioReady() as Promise<void>).catch(() => {});
       }
       state.value = "listening";

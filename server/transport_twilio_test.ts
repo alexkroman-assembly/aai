@@ -166,14 +166,22 @@ Deno.test("createTwilioClientSink", async (t) => {
     assertStrictEquals(sent.length, 0);
   });
 
-  await t.step("playAudio converts PCM16 to mulaw media event", () => {
+  await t.step("playAudioStream converts PCM16 to mulaw media event", async () => {
     const { ws, sent } = mockWs();
     const sink = createTwilioClientSink(ws);
     sink.streamSid = "stream-123";
 
-    // Send 4 bytes of PCM16 (2 samples)
+    // Send 4 bytes of PCM16 (2 samples) via a ReadableStream
     const pcm = new Int16Array([1000, -1000]);
-    sink.playAudio(new Uint8Array(pcm.buffer));
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(pcm.buffer));
+        controller.close();
+      },
+    });
+    sink.playAudioStream(stream);
+    // Allow the async reader to consume
+    await new Promise((r) => setTimeout(r, 10));
 
     assertStrictEquals(sent.length, 1);
     const msg = JSON.parse(sent[0]!);
@@ -182,19 +190,33 @@ Deno.test("createTwilioClientSink", async (t) => {
     assertStrictEquals(typeof msg.media.payload, "string");
   });
 
-  await t.step("playAudio skips when no streamSid", () => {
+  await t.step("playAudioStream skips when no streamSid", async () => {
     const { ws, sent } = mockWs();
     const sink = createTwilioClientSink(ws);
-    sink.playAudio(new Uint8Array([0, 0, 0, 0]));
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([0, 0, 0, 0]));
+        controller.close();
+      },
+    });
+    sink.playAudioStream(stream);
+    await new Promise((r) => setTimeout(r, 10));
     assertStrictEquals(sent.length, 0);
   });
 
-  await t.step("playAudio skips when socket not open", () => {
+  await t.step("playAudioStream skips when socket not open", async () => {
     const mock = mockWs();
     mock.setReady(3);
     const sink = createTwilioClientSink(mock.ws);
     sink.streamSid = "stream-1";
-    sink.playAudio(new Uint8Array([0, 0, 0, 0]));
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([0, 0, 0, 0]));
+        controller.close();
+      },
+    });
+    sink.playAudioStream(stream);
+    await new Promise((r) => setTimeout(r, 10));
     assertStrictEquals(mock.sent.length, 0);
   });
 

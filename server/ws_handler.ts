@@ -40,7 +40,7 @@ export interface ClientRpcApi {
   cancelled(): void;
   resetNotify(): void;
   error(message: string): void;
-  playAudio(data: Uint8Array): void;
+  playAudioStream(stream: ReadableStream<Uint8Array>): void;
 }
 
 /**
@@ -75,8 +75,19 @@ class SessionTarget extends RpcTarget {
     this.#session.onHistory(messages);
   }
 
-  sendAudio(data: Uint8Array): void {
-    this.#session.onAudio(data);
+  sendAudioStream(stream: ReadableStream<Uint8Array>): void {
+    void (async () => {
+      const reader = stream.getReader();
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          this.#session.onAudio(value);
+        }
+      } finally {
+        reader.releaseLock();
+      }
+    })();
   }
 }
 
@@ -187,8 +198,8 @@ function createClientSink(
     error(message) {
       fire(() => stub.error(message));
     },
-    playAudio(data) {
-      fire(() => stub.playAudio(data));
+    playAudioStream(stream) {
+      fire(() => stub.playAudioStream(stream));
     },
   };
 }

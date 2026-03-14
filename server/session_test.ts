@@ -45,8 +45,8 @@ function createMockClientSink(): ClientSink & {
     error(...args) {
       calls.push({ method: "error", args });
     },
-    playAudio(...args) {
-      calls.push({ method: "playAudio", args });
+    playAudioStream(...args) {
+      calls.push({ method: "playAudioStream", args });
     },
   };
 }

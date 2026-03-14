@@ -61,27 +61,38 @@ export function createTwilioClientSink(ws: WsSink): ClientSink & {
       log.error("Session error", { message });
     },
 
-    // Audio — convert PCM16 to mu-law and send as Twilio media frame
-    playAudio(data) {
-      if (ws.readyState !== WebSocket.OPEN) return;
-      if (!streamSid || data.length < 2) return;
+    // Audio — consume ReadableStream, convert PCM16 to mu-law Twilio frames
+    playAudioStream(stream) {
+      void (async () => {
+        const reader = stream.getReader();
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (ws.readyState !== WebSocket.OPEN) break;
+            if (!streamSid || value.length < 2) continue;
 
-      const pcm16 = new Int16Array(
-        data.buffer,
-        data.byteOffset,
-        data.byteLength >> 1,
-      );
-      const mulaw = pcm16ToMulaw(
-        resample(pcm16, {
-          fromRate: DEFAULT_TTS_SAMPLE_RATE,
-          toRate: MULAW_RATE,
-        }),
-      );
-      ws.send(JSON.stringify({
-        event: "media",
-        streamSid,
-        media: { payload: encodeBase64(mulaw) },
-      }));
+            const pcm16 = new Int16Array(
+              value.buffer,
+              value.byteOffset,
+              value.byteLength >> 1,
+            );
+            const mulaw = pcm16ToMulaw(
+              resample(pcm16, {
+                fromRate: DEFAULT_TTS_SAMPLE_RATE,
+                toRate: MULAW_RATE,
+              }),
+            );
+            ws.send(JSON.stringify({
+              event: "media",
+              streamSid,
+              media: { payload: encodeBase64(mulaw) },
+            }));
+          }
+        } finally {
+          reader.releaseLock();
+        }
+      })();
     },
   };
 }
