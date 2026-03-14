@@ -3,10 +3,8 @@ import { assertEquals, assertStrictEquals } from "@std/assert";
 import {
   AgentConfigSchema,
   AgentMetadataSchema,
-  ClientMessageSchema,
   DeployBodySchema,
   EnvSchema,
-  ServerMessageSchema,
   ToolSchemaSchema,
 } from "./_schemas.ts";
 
@@ -144,75 +142,6 @@ Deno.test("EnvSchema", async (t) => {
   });
 });
 
-Deno.test("ServerMessageSchema", async (t) => {
-  const validMessages: [string, unknown][] = [
-    ["ready", {
-      type: "ready",
-      protocol_version: 1,
-      audio_format: "pcm16",
-      sample_rate: 16000,
-      tts_sample_rate: 24000,
-    }],
-    ["partial_transcript", { type: "partial_transcript", text: "hello" }],
-    [
-      "final_transcript",
-      { type: "final_transcript", text: "hello world", turn_order: 1 },
-    ],
-    ["turn", { type: "turn", text: "response" }],
-    ["chat", { type: "chat", text: "hi" }],
-    ["tts_done", { type: "tts_done" }],
-    ["cancelled", { type: "cancelled" }],
-    ["reset", { type: "reset" }],
-    [
-      "error",
-      { type: "error", message: "broke", details: ["detail1", "detail2"] },
-    ],
-    ["pong", { type: "pong" }],
-  ];
-
-  for (const [label, msg] of validMessages) {
-    await t.step(`accepts ${label}`, () => {
-      assertStrictEquals(ServerMessageSchema.safeParse(msg).success, true);
-    });
-  }
-
-  await t.step("rejects unknown type", () => {
-    assertStrictEquals(
-      ServerMessageSchema.safeParse({ type: "unknown" }).success,
-      false,
-    );
-  });
-});
-
-Deno.test("ClientMessageSchema", async (t) => {
-  for (const type of ["audio_ready", "cancel", "reset", "ping"]) {
-    await t.step(`accepts ${type}`, () => {
-      assertStrictEquals(
-        ClientMessageSchema.safeParse({ type }).success,
-        true,
-      );
-    });
-  }
-
-  await t.step("accepts history with messages", () => {
-    const result = ClientMessageSchema.safeParse({
-      type: "history",
-      messages: [
-        { role: "user", text: "hello" },
-        { role: "assistant", text: "hi" },
-      ],
-    });
-    assertStrictEquals(result.success, true);
-  });
-
-  await t.step("rejects history with invalid role", () => {
-    const result = ClientMessageSchema.safeParse({
-      type: "history",
-      messages: [{ role: "system", text: "hello" }],
-    });
-    assertStrictEquals(result.success, false);
-  });
-});
 
 Deno.test("AgentMetadataSchema", async (t) => {
   await t.step("accepts minimal metadata", () => {

@@ -39,53 +39,20 @@ function hostApi(overrides?: Partial<HostApi>): HostApi {
 }
 
 function createPairedChannel() {
-  type Handler = ((e: MessageEvent) => void) | null;
-
-  let workerHandler: Handler = null;
-  let hostHandler: Handler = null;
-
-  const workerSide = {
-    get onmessage() {
-      return workerHandler;
-    },
-    set onmessage(h: Handler) {
-      workerHandler = h;
-    },
-    postMessage(msg: unknown) {
-      // Worker posts → host receives
-      queueMicrotask(() => {
-        const event = new MessageEvent("message", { data: msg });
-        if (hostHandler) hostHandler(event);
-      });
-    },
-  };
-
-  const hostSide = {
-    get onmessage() {
-      return hostHandler;
-    },
-    set onmessage(h: Handler) {
-      hostHandler = h;
-    },
-    postMessage(msg: unknown) {
-      // Host posts → worker receives
-      queueMicrotask(() => {
-        const event = new MessageEvent("message", { data: msg });
-        if (workerHandler) workerHandler(event);
-      });
-    },
-  };
-
-  return { workerSide, hostSide };
+  // Use a real MessageChannel so capnweb's newMessagePortRpcSession works
+  const channel = new MessageChannel();
+  return { workerSide: channel.port1, hostSide: channel.port2 };
 }
 
 function setupWorker(
   agent: Parameters<typeof initWorker>[0],
   hostApiVal?: HostApi,
+  env?: Record<string, string>,
 ) {
   const { workerSide, hostSide } = createPairedChannel();
 
-  // Monkey-patch self for initWorker
+  // Monkey-patch self for initWorker — capnweb's newMessagePortRpcSession
+  // expects a MessagePort-like object with addEventListener/postMessage
   const origSelf = globalThis.self;
   Object.defineProperty(globalThis, "self", {
     value: workerSide,
@@ -101,7 +68,8 @@ function setupWorker(
     configurable: true,
   });
 
-  const api = createWorkerApi(hostSide, hostApiVal);
+  // Host side uses the other port — capnweb handles the RPC protocol
+  const api = createWorkerApi(hostSide, hostApiVal, env);
   return { api };
 }
 
@@ -599,7 +567,7 @@ Deno.test("createWorkerApi with hostApi", async (t) => {
     },
   );
 
-  await t.step("setEnv sends env to worker", async () => {
+  await t.step("withEnv sets env once at creation", async () => {
     let capturedEnv: Record<string, string> | undefined;
     const { api } = setupWorker(
       {
@@ -622,9 +590,10 @@ Deno.test("createWorkerApi with hostApi", async (t) => {
         },
       },
       dummyHostApi(),
+      { KEY: "val" },
     );
 
-    await api.executeTool("check_env", {}, "s1", 5000, { KEY: "val" });
+    await api.executeTool("check_env", {}, "s1", 5000);
     assertStrictEquals(capturedEnv?.KEY, "val");
     api.dispose?.();
   });

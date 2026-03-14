@@ -91,7 +91,7 @@ async function spawnAgent(
     }) as EventListener,
   );
 
-  const api = createWorkerApi(worker, createHostApi(kvCtx));
+  const api = createWorkerApi(worker, createHostApi(kvCtx), slot.env);
   slot.worker = { handle: worker, api };
 
   if (!slot.configLoaded) {
@@ -290,7 +290,7 @@ export async function prepareSession(
   };
   const executeTool: ExecuteTool = async (name, args, sessionId, messages) => {
     const api = await getWorkerApi();
-    return api.executeTool(name, args, sessionId, 30_000, slot.env, messages);
+    return api.executeTool(name, args, sessionId, 30_000, messages);
   };
 
   // Boot worker and extract config from agent definition

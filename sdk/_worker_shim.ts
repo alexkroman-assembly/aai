@@ -1,9 +1,9 @@
 // Copyright 2025 the AAI authors. MIT license.
 /**
- * Worker-side agent wiring over postMessage RPC.
+ * Worker-side agent wiring over Cap'n Web RPC.
  *
  * Called inside a bundled Deno Worker to wire up the agent's tools, hooks,
- * and configuration.
+ * and configuration using capnweb's object-capability RPC system.
  *
  * @module
  */
@@ -20,18 +20,34 @@ import type {
 import type { Kv, KvEntry } from "./kv.ts";
 import type { KvRequest } from "./protocol.ts";
 import { executeToolCall } from "./worker_entry.ts";
-import {
-  createRpcClient,
-  createRpcServer,
-  isRpcMessage,
-  type RpcClient,
-  type RpcHandlers,
-} from "./_rpc.ts";
+import { newMessagePortRpcSession, RpcTarget } from "capnweb";
+import { asMessagePort } from "./_capnweb_transport.ts";
 import { withTimeout } from "./_timeout.ts";
 
 const FETCH_TIMEOUT_MS = 30_000;
 const KV_TIMEOUT_MS = 10_000;
 const EMPTY_PARAMS = z.object({});
+
+/**
+ * Type for the host API exposed to the worker via capnweb RPC.
+ *
+ * The host passes its {@linkcode RpcTarget} when creating the RPC session,
+ * and the worker receives a stub for this interface as the return value.
+ */
+interface HostApiRpc {
+  fetch(req: {
+    url: string;
+    method: string;
+    headers: Record<string, string>;
+    body: string | null;
+  }): Promise<{
+    status: number;
+    statusText: string;
+    headers: Record<string, string>;
+    body: string;
+  }>;
+  kv(req: KvRequest): Promise<{ result: unknown }>;
+}
 
 function headersToRecord(h?: HeadersInit): Record<string, string> {
   return Object.fromEntries(new Headers(h).entries());
@@ -51,10 +67,10 @@ async function serializeBody(body: BodyInit | null): Promise<string | null> {
   return String(body);
 }
 
-function createProxyKv(rpcClient: RpcClient): Kv {
+function createProxyKv(hostStub: HostApiRpc): Kv {
   async function kvCall(req: KvRequest): Promise<unknown> {
     const resp = await withTimeout(
-      rpcClient.call("kv", req) as Promise<{ result: unknown }>,
+      hostStub.kv(req),
       KV_TIMEOUT_MS,
     );
     return (resp as { result: unknown }).result;
@@ -100,7 +116,7 @@ function createProxyKv(rpcClient: RpcClient): Kv {
   };
 }
 
-function installFetchProxy(rpcClient: RpcClient): void {
+function installFetchProxy(hostStub: HostApiRpc): void {
   globalThis.fetch = async (
     input: string | URL | Request,
     init?: RequestInit,
@@ -127,12 +143,7 @@ function installFetchProxy(rpcClient: RpcClient): void {
     }
 
     const result = await withTimeout(
-      rpcClient.call("fetch", { url, method, headers, body }) as Promise<{
-        status: number;
-        statusText: string;
-        headers: Record<string, string>;
-        body: string;
-      }>,
+      hostStub.fetch({ url, method, headers, body }),
       FETCH_TIMEOUT_MS,
     );
 
@@ -145,157 +156,177 @@ function installFetchProxy(rpcClient: RpcClient): void {
 }
 
 /**
- * Initialize the worker-side RPC endpoint for an agent.
+ * Cap'n Web RPC target exposed by the worker to the host.
  *
- * Sets up bidirectional postMessage RPC: the host can call agent methods
- * (getConfig, executeTool, hooks), and the worker can call host methods
- * (fetch, kv).
- *
- * @param agent - The agent definition returned by `defineAgent()`.
+ * The host receives a stub for this class and can call its methods
+ * to interact with the agent (get config, execute tools, trigger hooks).
  */
-export function initWorker(agent: AgentDef): void {
-  const toolHandlers = new Map(Object.entries(agent.tools));
-  const sessions = new Map<string, unknown>();
-  let mergedEnv: Record<string, string> = {};
+class AgentWorkerTarget extends RpcTarget {
+  #agent: AgentDef;
+  #toolHandlers: Map<string, AgentDef["tools"][string]>;
+  #sessions = new Map<string, unknown>();
+  #mergedEnv: Record<string, string> = {};
+  #proxyKv: Kv | null = null;
 
-  // Set up RPC client for calling host (fetch, kv).
-  // Capture postMessage at init time so it works in tests where self is swapped.
-  const selfRef = self;
-  const post = (msg: unknown) => selfRef.postMessage(msg);
-  const rpcClient = createRpcClient(post);
-
-  // Install fetch proxy and KV proxy via the RPC client
-  const proxyKv = createProxyKv(rpcClient);
-  installFetchProxy(rpcClient);
-
-  function getState(sessionId: string): unknown {
-    if (!sessions.has(sessionId) && agent.state) {
-      sessions.set(sessionId, agent.state());
-    }
-    return sessions.get(sessionId) ?? {};
+  constructor(agent: AgentDef) {
+    super();
+    this.#agent = agent;
+    this.#toolHandlers = new Map(Object.entries(agent.tools));
   }
 
-  function makeCtx(sessionId: string): HookContext {
+  /** Install the fetch and KV proxies backed by the host stub. */
+  setHostApi(hostStub: HostApiRpc): void {
+    this.#proxyKv = createProxyKv(hostStub);
+    installFetchProxy(hostStub);
+  }
+
+  /**
+   * Set environment variables and return this target as a scoped capability.
+   *
+   * The host calls this once after session creation. Returning `this`
+   * passes it by reference via capnweb — the host gets a stub that
+   * guarantees env is set before any pipelined calls execute.
+   */
+  withEnv(env: Record<string, string>): this {
+    this.#mergedEnv = { ...this.#mergedEnv, ...env };
+    return this;
+  }
+
+  getConfig(): WorkerConfig {
+    const toolSchemas: ToolSchema[] = Object.entries(this.#agent.tools).map(
+      ([name, def]) => ({
+        name,
+        description: def.description,
+        parameters: z.toJSONSchema(
+          def.parameters ?? EMPTY_PARAMS,
+        ) as ToolSchema["parameters"],
+      }),
+    );
+    const config: AgentConfig = {
+      name: this.#agent.name,
+      mode: this.#agent.mode,
+      instructions: this.#agent.instructions,
+      greeting: this.#agent.greeting,
+      voice: this.#agent.voice,
+    };
+    if (this.#agent.sttPrompt !== undefined) {
+      config.sttPrompt = this.#agent.sttPrompt;
+    }
+    if (typeof this.#agent.maxSteps !== "function") {
+      config.maxSteps = this.#agent.maxSteps;
+    }
+    if (this.#agent.toolChoice !== undefined) {
+      config.toolChoice = this.#agent.toolChoice;
+    }
+    if (this.#agent.builtinTools) {
+      config.builtinTools = [...this.#agent.builtinTools];
+    }
+    return { config, toolSchemas };
+  }
+
+  async executeTool(
+    name: string,
+    args: Readonly<Record<string, unknown>>,
+    sessionId: string | undefined,
+    messages: readonly Message[] | undefined,
+  ): Promise<string> {
+    const tool = this.#toolHandlers.get(name);
+    if (!tool) return `Error: Unknown tool "${name}"`;
+    return await executeToolCall(name, args, {
+      tool,
+      env: this.#mergedEnv,
+      sessionId,
+      state: this.#getState(sessionId ?? ""),
+      kv: this.#proxyKv!,
+      messages,
+    });
+  }
+
+  async onConnect(sessionId: string): Promise<void> {
+    await this.#agent.onConnect?.(this.#makeCtx(sessionId));
+  }
+
+  async onDisconnect(sessionId: string): Promise<void> {
+    await this.#agent.onDisconnect?.(this.#makeCtx(sessionId));
+    this.#sessions.delete(sessionId);
+  }
+
+  async onTurn(sessionId: string, text: string): Promise<void> {
+    await this.#agent.onTurn?.(text, this.#makeCtx(sessionId));
+  }
+
+  onError(sessionId: string, error: string): void {
+    this.#agent.onError?.(new Error(error), this.#makeCtx(sessionId));
+  }
+
+  async onStep(
+    sessionId: string,
+    step: Parameters<NonNullable<AgentDef["onStep"]>>[0],
+  ): Promise<void> {
+    await this.#agent.onStep?.(step, this.#makeCtx(sessionId));
+  }
+
+  async resolveTurnConfig(
+    sessionId: string,
+  ): Promise<{ maxSteps?: number; activeTools?: string[] } | null> {
+    let maxSteps: number | undefined;
+    let activeTools: string[] | undefined;
+
+    if (typeof this.#agent.maxSteps === "function") {
+      maxSteps = await this.#agent.maxSteps(this.#makeCtx(sessionId)) ??
+        undefined;
+    }
+
+    if (this.#agent.onBeforeStep) {
+      const result = await this.#agent.onBeforeStep(
+        0,
+        this.#makeCtx(sessionId),
+      );
+      activeTools = result?.activeTools;
+    }
+
+    if (maxSteps === undefined && activeTools === undefined) return null;
+    return { maxSteps, activeTools };
+  }
+
+  #getState(sessionId: string): unknown {
+    if (!this.#sessions.has(sessionId) && this.#agent.state) {
+      this.#sessions.set(sessionId, this.#agent.state());
+    }
+    return this.#sessions.get(sessionId) ?? {};
+  }
+
+  #makeCtx(sessionId: string): HookContext {
+    const proxyKv = this.#proxyKv;
     return {
       sessionId,
-      env: { ...mergedEnv },
-      state: getState(sessionId) as Record<string, unknown>,
+      env: { ...this.#mergedEnv },
+      state: this.#getState(sessionId) as Record<string, unknown>,
       get kv() {
         if (!proxyKv) throw new Error("KV not available");
         return proxyKv;
       },
     };
   }
+}
 
-  // RPC server handlers for host → worker calls
-  const handlers: RpcHandlers = {
-    setEnv(env: unknown): void {
-      mergedEnv = { ...mergedEnv, ...(env as Record<string, string>) };
-    },
+/**
+ * Initialize the worker-side Cap'n Web RPC endpoint for an agent.
+ *
+ * Both sides exchange targets at session creation: the worker passes its
+ * {@linkcode AgentWorkerTarget} and receives a stub for the host's API.
+ * No separate init handshake is needed.
+ *
+ * @param agent - The agent definition returned by `defineAgent()`.
+ */
+export function initWorker(agent: AgentDef): void {
+  const selfRef = self;
+  const workerTarget = new AgentWorkerTarget(agent);
 
-    getConfig(): WorkerConfig {
-      const toolSchemas: ToolSchema[] = Object.entries(agent.tools).map(
-        ([name, def]) => ({
-          name,
-          description: def.description,
-          parameters: z.toJSONSchema(
-            def.parameters ?? EMPTY_PARAMS,
-          ) as ToolSchema["parameters"],
-        }),
-      );
-      const config: AgentConfig = {
-        name: agent.name,
-        mode: agent.mode,
-        instructions: agent.instructions,
-        greeting: agent.greeting,
-        voice: agent.voice,
-      };
-      if (agent.sttPrompt !== undefined) config.sttPrompt = agent.sttPrompt;
-      if (typeof agent.maxSteps !== "function") {
-        config.maxSteps = agent.maxSteps;
-      }
-      if (agent.toolChoice !== undefined) config.toolChoice = agent.toolChoice;
-      if (agent.builtinTools) config.builtinTools = [...agent.builtinTools];
-      return { config, toolSchemas };
-    },
-
-    async executeTool(
-      name: unknown,
-      args: unknown,
-      sessionId: unknown,
-      messages: unknown,
-    ): Promise<string> {
-      const n = name as string;
-      const a = args as Readonly<Record<string, unknown>>;
-      const sid = sessionId as string | undefined;
-      const tool = toolHandlers.get(n);
-      if (!tool) return `Error: Unknown tool "${n}"`;
-      return await executeToolCall(n, a, {
-        tool,
-        env: mergedEnv,
-        sessionId: sid,
-        state: getState(sid ?? ""),
-        kv: proxyKv,
-        messages: messages as readonly Message[] | undefined,
-      });
-    },
-
-    async onConnect(sessionId: unknown): Promise<void> {
-      await agent.onConnect?.(makeCtx(sessionId as string));
-    },
-
-    async onDisconnect(sessionId: unknown): Promise<void> {
-      const sid = sessionId as string;
-      await agent.onDisconnect?.(makeCtx(sid));
-      sessions.delete(sid);
-    },
-
-    async onTurn(sessionId: unknown, text: unknown): Promise<void> {
-      await agent.onTurn?.(text as string, makeCtx(sessionId as string));
-    },
-
-    onError(sessionId: unknown, error: unknown): void {
-      agent.onError?.(
-        new Error(error as string),
-        makeCtx(sessionId as string),
-      );
-    },
-
-    async onStep(sessionId: unknown, step: unknown): Promise<void> {
-      await agent.onStep?.(
-        step as Parameters<NonNullable<AgentDef["onStep"]>>[0],
-        makeCtx(sessionId as string),
-      );
-    },
-
-    async resolveMaxSteps(sessionId: unknown): Promise<number | null> {
-      if (typeof agent.maxSteps !== "function") return null;
-      return agent.maxSteps(makeCtx(sessionId as string));
-    },
-
-    async resolveBeforeStep(
-      sessionId: unknown,
-      stepNumber: unknown,
-    ): Promise<{ activeTools?: string[] } | null> {
-      if (!agent.onBeforeStep) return null;
-      const result = await agent.onBeforeStep(
-        stepNumber as number,
-        makeCtx(sessionId as string),
-      );
-      return result ?? null;
-    },
-  };
-
-  const rpcServer = createRpcServer(handlers, post);
-
-  // Route all messages to the appropriate handler
-  selfRef.onmessage = (e: MessageEvent) => {
-    const data = e.data;
-    if (!isRpcMessage(data)) return;
-    if (data.type === "rpc-request") {
-      rpcServer.handleRequest(data);
-    } else {
-      rpcClient.handleResponse(data);
-    }
-  };
+  // Both sides pass their target — worker gets host stub, host gets worker stub
+  const hostStub = newMessagePortRpcSession<HostApiRpc>(
+    asMessagePort(selfRef),
+    workerTarget,
+  );
+  workerTarget.setHostApi(hostStub);
 }

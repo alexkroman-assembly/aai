@@ -7,7 +7,8 @@ import {
   type ToolExecutionOptions,
   type ToolSet,
 } from "ai";
-import { createRpcClient, isRpcMessage } from "@aai/sdk/rpc";
+import { newMessagePortRpcSession } from "capnweb";
+import { asMessagePort } from "@aai/sdk/capnweb-transport";
 import type {
   BuiltinTool as BuiltinToolName,
   ToolSchema,
@@ -249,16 +250,10 @@ const runCode = defineTool({
     );
 
     try {
-      const rpcClient = createRpcClient((msg) => worker.postMessage(msg));
-      worker.onmessage = (e: MessageEvent) => {
-        if (isRpcMessage(e.data) && e.data.type === "rpc-response") {
-          rpcClient.handleResponse(e.data);
-        }
-      };
-      const result = await rpcClient.call("execute", code) as {
-        output: string;
-        error?: string;
-      };
+      const stub = newMessagePortRpcSession<{
+        execute(code: string): Promise<{ output: string; error?: string }>;
+      }>(asMessagePort(worker));
+      const result = await stub.execute(code);
 
       if (result.error) {
         return JSON.stringify({ error: result.error });

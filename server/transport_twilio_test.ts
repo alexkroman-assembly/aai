@@ -10,7 +10,7 @@ import {
 } from "./mulaw.ts";
 import {
   createAudioBuffer,
-  createTwilioTransport,
+  createTwilioClientSink,
   decodeTwilioFrame,
   type WsSink,
 } from "./transport_twilio.ts";
@@ -128,7 +128,7 @@ Deno.test("decodeTwilioFrame produces PCM16 bytes at 16kHz", () => {
 
 // --- twilio transport adapter ---
 
-Deno.test("createTwilioTransport", async (t) => {
+Deno.test("createTwilioClientSink", async (t) => {
   function mockWs(): {
     ws: WsSink;
     sent: string[];
@@ -150,21 +150,37 @@ Deno.test("createTwilioTransport", async (t) => {
     };
   }
 
-  await t.step("drops string messages (UI-only)", () => {
+  await t.step("event method does not send to ws for text events", () => {
     const { ws, sent } = mockWs();
-    const t = createTwilioTransport(ws);
-    t.send(JSON.stringify({ type: "ready" }));
+    const sink = createTwilioClientSink(ws);
+    sink.event({ type: "transcript", text: "hello", isFinal: false });
+    sink.event({ type: "transcript", text: "hello", isFinal: true });
+    sink.event({ type: "turn", text: "hello" });
+    sink.event({ type: "tts_done" });
+    sink.event({ type: "cancelled" });
+    sink.event({ type: "reset" });
+    // chat and error just log, no ws send
+    sink.event({ type: "chat", text: "hi" });
+    sink.event({ type: "error", message: "oops" });
     assertStrictEquals(sent.length, 0);
   });
 
-  await t.step("converts PCM16 binary to mulaw media event", () => {
+  await t.step("playAudioStream converts PCM16 to mulaw media event", async () => {
     const { ws, sent } = mockWs();
-    const transport = createTwilioTransport(ws);
-    transport.streamSid = "stream-123";
+    const sink = createTwilioClientSink(ws);
+    sink.streamSid = "stream-123";
 
-    // Send 4 bytes of PCM16 (2 samples)
+    // Send 4 bytes of PCM16 (2 samples) via a ReadableStream
     const pcm = new Int16Array([1000, -1000]);
-    transport.send(new Uint8Array(pcm.buffer));
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(pcm.buffer));
+        controller.close();
+      },
+    });
+    sink.playAudioStream(stream);
+    // Allow the async reader to consume
+    await new Promise((r) => setTimeout(r, 10));
 
     assertStrictEquals(sent.length, 1);
     const msg = JSON.parse(sent[0]!);
@@ -173,19 +189,41 @@ Deno.test("createTwilioTransport", async (t) => {
     assertStrictEquals(typeof msg.media.payload, "string");
   });
 
-  await t.step("skips binary when no streamSid", () => {
+  await t.step("playAudioStream skips when no streamSid", async () => {
     const { ws, sent } = mockWs();
-    const transport = createTwilioTransport(ws);
-    transport.send(new Uint8Array([0, 0, 0, 0]));
+    const sink = createTwilioClientSink(ws);
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([0, 0, 0, 0]));
+        controller.close();
+      },
+    });
+    sink.playAudioStream(stream);
+    await new Promise((r) => setTimeout(r, 10));
     assertStrictEquals(sent.length, 0);
   });
 
-  await t.step("skips when socket not open", () => {
+  await t.step("playAudioStream skips when socket not open", async () => {
     const mock = mockWs();
     mock.setReady(3);
-    const transport = createTwilioTransport(mock.ws);
-    transport.streamSid = "stream-1";
-    transport.send(new Uint8Array([0, 0, 0, 0]));
+    const sink = createTwilioClientSink(mock.ws);
+    sink.streamSid = "stream-1";
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([0, 0, 0, 0]));
+        controller.close();
+      },
+    });
+    sink.playAudioStream(stream);
+    await new Promise((r) => setTimeout(r, 10));
     assertStrictEquals(mock.sent.length, 0);
+  });
+
+  await t.step("open reflects WebSocket readyState", () => {
+    const mock = mockWs();
+    const sink = createTwilioClientSink(mock.ws);
+    assertStrictEquals(sink.open, true);
+    mock.setReady(3);
+    assertStrictEquals(sink.open, false);
   });
 });

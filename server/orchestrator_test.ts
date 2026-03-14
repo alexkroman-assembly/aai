@@ -276,7 +276,10 @@ Deno.test("websocket upgrades for deployed agent", async () => {
           voice: "",
         },
         toolSchemas: [],
-        platformConfig: {} as never,
+        platformConfig: {
+          sttConfig: { sampleRate: 16000 },
+          ttsConfig: { sampleRate: 24000 },
+        } as never,
         executeTool: () => Promise.resolve("ok"),
         getWorkerApi: () => Promise.resolve({} as never),
       })) as never,

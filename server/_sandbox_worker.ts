@@ -1,5 +1,6 @@
 // Copyright 2025 the AAI authors. MIT license.
-import { createRpcServer, isRpcMessage, type RpcHandlers } from "@aai/sdk/rpc";
+import { newMessagePortRpcSession, RpcTarget } from "capnweb";
+import { asMessagePort } from "@aai/sdk/capnweb-transport";
 
 const output: string[] = [];
 function capture(...args: unknown[]) {
@@ -14,12 +15,18 @@ const fakeConsole = {
   debug: capture,
 };
 
-const handlers: RpcHandlers = {
-  async execute(code: unknown) {
+/**
+ * Cap'n Web RPC target for the sandboxed code execution worker.
+ *
+ * Exposes a single `execute` method that runs arbitrary JavaScript
+ * in a locked-down Deno Worker with no permissions.
+ */
+class SandboxTarget extends RpcTarget {
+  async execute(code: string): Promise<{ output: string; error?: string }> {
     output.length = 0;
     const AsyncFunction = Object.getPrototypeOf(async function () {})
       .constructor;
-    const fn = new AsyncFunction("console", code as string);
+    const fn = new AsyncFunction("console", code);
     try {
       await fn(fakeConsole);
       return { output: output.join("\n") };
@@ -29,17 +36,7 @@ const handlers: RpcHandlers = {
         error: err instanceof Error ? err.message : String(err),
       };
     }
-  },
-};
-
-function post(msg: unknown) {
-  self.postMessage(msg);
-}
-const rpcServer = createRpcServer(handlers, post);
-
-self.onmessage = (e: MessageEvent) => {
-  const data = e.data;
-  if (isRpcMessage(data) && data.type === "rpc-request") {
-    rpcServer.handleRequest(data);
   }
-};
+}
+
+newMessagePortRpcSession(asMessagePort(self), new SandboxTarget());

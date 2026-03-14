@@ -1,7 +1,7 @@
 // Copyright 2025 the AAI authors. MIT license.
 /**
  * Host-side worker API — communicates with sandboxed agent workers via
- * postMessage RPC.
+ * Cap'n Web RPC over postMessage.
  *
  * @module
  */
@@ -9,12 +9,8 @@
 import type { Message } from "@aai/sdk/types";
 import type { KvRequest } from "@aai/sdk/protocol";
 import { withTimeout } from "@aai/sdk/timeout";
-import {
-  createRpcClient,
-  createRpcServer,
-  isRpcMessage,
-  type RpcHandlers,
-} from "@aai/sdk/rpc";
+import { newMessagePortRpcSession, RpcTarget } from "capnweb";
+import { asMessagePort } from "@aai/sdk/capnweb-transport";
 
 export {
   type ExecuteTool,
@@ -64,10 +60,44 @@ export type HostApi = {
 };
 
 /**
+ * Cap'n Web RPC target that exposes host-side APIs (fetch, kv) to the worker.
+ *
+ * An instance of this class is passed as the second argument to
+ * `newMessagePortRpcSession`, making it available to the worker at session creation.
+ */
+class HostApiTarget extends RpcTarget {
+  #api: HostApi;
+
+  constructor(api: HostApi) {
+    super();
+    this.#api = api;
+  }
+
+  fetch(req: {
+    url: string;
+    method: string;
+    headers: Record<string, string>;
+    body: string | null;
+  }): Promise<{
+    status: number;
+    statusText: string;
+    headers: Record<string, string>;
+    body: string;
+  }> {
+    return this.#api.fetch(req);
+  }
+
+  kv(req: KvRequest): Promise<{ result: unknown }> {
+    return this.#api.kv(req);
+  }
+}
+
+/**
  * High-level API for communicating with a sandboxed agent worker.
  *
  * This is the host-side interface returned by {@linkcode createWorkerApi}.
- * All methods support optional RPC timeouts.
+ * All methods support optional RPC timeouts. Environment variables are
+ * set once at creation via the `withEnv` capability — no per-call env.
  */
 export type WorkerApi = {
   getConfig(): Promise<import("@aai/sdk/types").WorkerConfig>;
@@ -76,180 +106,150 @@ export type WorkerApi = {
     args: Readonly<Record<string, unknown>>,
     sessionId?: string,
     timeoutMs?: number,
-    env?: Record<string, string>,
     messages?: readonly Message[],
   ): Promise<string>;
-  onConnect(
-    sessionId: string,
-    timeoutMs?: number,
-    env?: Record<string, string>,
-  ): Promise<void>;
-  onDisconnect(
-    sessionId: string,
-    timeoutMs?: number,
-    env?: Record<string, string>,
-  ): Promise<void>;
+  onConnect(sessionId: string, timeoutMs?: number): Promise<void>;
+  onDisconnect(sessionId: string, timeoutMs?: number): Promise<void>;
   onTurn(
     sessionId: string,
     text: string,
     timeoutMs?: number,
-    env?: Record<string, string>,
   ): Promise<void>;
   onError(
     sessionId: string,
     error: string,
     timeoutMs?: number,
-    env?: Record<string, string>,
   ): Promise<void>;
   onStep(
     sessionId: string,
     step: StepInfoRpc,
     timeoutMs?: number,
-    env?: Record<string, string>,
   ): Promise<void>;
-  resolveMaxSteps(
+  resolveTurnConfig(
     sessionId: string,
     timeoutMs?: number,
-    env?: Record<string, string>,
-  ): Promise<number | null>;
-  resolveBeforeStep(
-    sessionId: string,
-    stepNumber: number,
-    timeoutMs?: number,
-    env?: Record<string, string>,
-  ): Promise<{ activeTools?: string[] } | null>;
+  ): Promise<TurnConfig | null>;
   dispose?: () => void;
 };
 
+/** Combined turn configuration resolved from the worker before a turn starts. */
+export type TurnConfig = {
+  maxSteps?: number;
+  activeTools?: string[];
+};
+
 /**
- * Create a {@linkcode WorkerApi} backed by postMessage RPC over a Worker.
+ * Type representing the worker-side RPC target interface.
+ * This matches the methods exposed by AgentWorkerTarget in the worker.
+ */
+interface WorkerRpcApi {
+  withEnv(env: Record<string, string>): WorkerRpcApi;
+  getConfig(): Promise<import("@aai/sdk/types").WorkerConfig>;
+  executeTool(
+    name: string,
+    args: Readonly<Record<string, unknown>>,
+    sessionId: string | undefined,
+    messages: readonly Message[] | undefined,
+  ): Promise<string>;
+  onConnect(sessionId: string): Promise<void>;
+  onDisconnect(sessionId: string): Promise<void>;
+  onTurn(sessionId: string, text: string): Promise<void>;
+  onError(sessionId: string, error: string): void;
+  onStep(sessionId: string, step: StepInfoRpc): Promise<void>;
+  resolveTurnConfig(sessionId: string): Promise<TurnConfig | null>;
+}
+
+/**
+ * Create a {@linkcode WorkerApi} backed by Cap'n Web RPC over a Worker.
  *
- * @param worker - The Worker (or any object with `postMessage` and `onmessage`).
+ * Both sides exchange targets at session creation: the host passes its
+ * {@linkcode HostApiTarget} and receives a stub for the worker's
+ * {@linkcode AgentWorkerTarget}. No separate init handshake is needed.
+ *
+ * If `env` is provided, the host calls `withEnv(env)` once to obtain
+ * a scoped capability with env baked in. All subsequent calls are
+ * pipelined through this scoped stub — no per-call env parameter.
+ *
+ * @param worker - The Worker (or any object with `postMessage` and event listeners).
  * @param hostApi - Optional host-side API to expose to the worker for fetch/kv proxy.
+ * @param env - Optional environment variables to set once on the worker.
  * @returns A {@linkcode WorkerApi} instance with timeout-wrapped RPC methods.
  */
 export function createWorkerApi(
   worker: {
     postMessage(msg: unknown): void;
-    onmessage: ((e: MessageEvent) => void) | null;
+    addEventListener(type: string, listener: (event: Event) => void): void;
+    removeEventListener(type: string, listener: (event: Event) => void): void;
   },
   hostApi?: HostApi,
+  env?: Record<string, string>,
 ): WorkerApi {
-  const rpcClient = createRpcClient((msg) => worker.postMessage(msg));
+  const port = asMessagePort(worker);
+  const hostTarget = hostApi ? new HostApiTarget(hostApi) : undefined;
+  const stub = newMessagePortRpcSession<WorkerRpcApi>(port, hostTarget);
 
-  // Set up RPC server for worker → host calls (fetch, kv)
-  const hostHandlers: RpcHandlers = {};
-  if (hostApi) {
-    hostHandlers.fetch = (req: unknown) =>
-      hostApi.fetch(
-        req as {
-          url: string;
-          method: string;
-          headers: Readonly<Record<string, string>>;
-          body: string | null;
-        },
-      );
-    hostHandlers.kv = (req: unknown) => hostApi.kv(req as KvRequest);
-  }
-  const rpcServer = createRpcServer(
-    hostHandlers,
-    (msg) => worker.postMessage(msg),
+  // Set env once via capability pattern — returns a scoped stub.
+  // Both withEnv and getConfig are issued in the same microtask,
+  // so capnweb batches them in a single postMessage round trip.
+  const scoped = env
+    ? stub.withEnv(env) as unknown as import("capnweb").RpcStub<WorkerRpcApi>
+    : stub;
+
+  // Eagerly start getConfig — pipelined with withEnv in the same batch.
+  const configPromise = withTimeout(
+    stub.getConfig() as Promise<import("@aai/sdk/types").WorkerConfig>,
+    5_000,
   );
-
-  // Route incoming messages
-  worker.onmessage = (e: MessageEvent) => {
-    const data = e.data;
-    if (!isRpcMessage(data)) return;
-    if (data.type === "rpc-response") {
-      rpcClient.handleResponse(data);
-    } else {
-      rpcServer.handleRequest(data);
-    }
-  };
-
-  function sendEnv(env?: Record<string, string>): void {
-    if (env) {
-      // Fire-and-forget — setEnv doesn't return a value
-      rpcClient.call("setEnv", env);
-    }
-  }
 
   return {
     async getConfig() {
-      return await withTimeout(
-        rpcClient.call("getConfig") as Promise<
-          import("@aai/sdk/types").WorkerConfig
-        >,
-        5_000,
-      );
+      return await configPromise;
     },
-    async executeTool(name, args, sessionId, timeoutMs, env, messages) {
-      sendEnv(env);
+    async executeTool(name, args, sessionId, timeoutMs, messages) {
       const raw = await withTimeout(
-        rpcClient.call(
-          "executeTool",
-          name,
-          args,
-          sessionId,
-          messages,
-        ) as Promise<string>,
+        scoped.executeTool(name, args, sessionId, messages) as Promise<string>,
         timeoutMs,
       );
       return typeof raw === "string" ? raw : String(raw ?? "");
     },
-    async onConnect(sessionId, timeoutMs, env) {
-      sendEnv(env);
+    async onConnect(sessionId, timeoutMs) {
       await withTimeout(
-        rpcClient.call("onConnect", sessionId) as Promise<void>,
+        scoped.onConnect(sessionId) as Promise<void>,
         timeoutMs,
       );
     },
-    async onDisconnect(sessionId, timeoutMs, env) {
-      sendEnv(env);
+    async onDisconnect(sessionId, timeoutMs) {
       await withTimeout(
-        rpcClient.call("onDisconnect", sessionId) as Promise<void>,
+        scoped.onDisconnect(sessionId) as Promise<void>,
         timeoutMs,
       );
     },
-    async onTurn(sessionId, text, timeoutMs, env) {
-      sendEnv(env);
+    async onTurn(sessionId, text, timeoutMs) {
       await withTimeout(
-        rpcClient.call("onTurn", sessionId, text) as Promise<void>,
+        scoped.onTurn(sessionId, text) as Promise<void>,
         timeoutMs,
       );
     },
-    async onError(sessionId, error, timeoutMs, env) {
-      sendEnv(env);
+    async onError(sessionId, error, timeoutMs) {
       await withTimeout(
-        rpcClient.call("onError", sessionId, error) as Promise<void>,
+        scoped.onError(sessionId, error) as Promise<void>,
         timeoutMs,
       );
     },
-    async onStep(sessionId, step, timeoutMs, env) {
-      sendEnv(env);
+    async onStep(sessionId, step, timeoutMs) {
       await withTimeout(
-        rpcClient.call("onStep", sessionId, step) as Promise<void>,
+        scoped.onStep(sessionId, step) as Promise<void>,
         timeoutMs,
       );
     },
-    async resolveMaxSteps(sessionId, timeoutMs, env) {
-      sendEnv(env);
+    async resolveTurnConfig(sessionId, timeoutMs) {
       return await withTimeout(
-        rpcClient.call("resolveMaxSteps", sessionId) as Promise<number | null>,
-        timeoutMs ?? 5_000,
-      );
-    },
-    async resolveBeforeStep(sessionId, stepNumber, timeoutMs, env) {
-      sendEnv(env);
-      return await withTimeout(
-        rpcClient.call("resolveBeforeStep", sessionId, stepNumber) as Promise<
-          { activeTools?: string[] } | null
-        >,
+        scoped.resolveTurnConfig(sessionId) as Promise<TurnConfig | null>,
         timeoutMs ?? 5_000,
       );
     },
     dispose() {
-      worker.onmessage = null;
+      stub[Symbol.dispose]();
     },
   };
 }

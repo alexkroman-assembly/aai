@@ -147,3 +147,4 @@ The host side (`server/_worker_entry.ts`) uses `createWorkerApi()` to produce a
   styles, docs — copied without overwriting template-specific files).
 - **Scripts**: `scripts/check_boundaries.ts` enforces the workspace dependency
   rule; `scripts/bump_versions.ts` handles version bumps
+
