@@ -72,7 +72,7 @@ function isS3Error(err: unknown, codeOrStatus: string): boolean {
 
 export function createBundleStore(
   s3: S3Client,
-  opts: { bucket: string; credentialKey?: CredentialKey },
+  opts: { bucket: string; credentialKey: CredentialKey },
 ): BundleStore {
   const { bucket, credentialKey } = opts;
   const cache = new Map<string, CacheEntry>();
@@ -154,16 +154,12 @@ export function createBundleStore(
     async putAgent(bundle) {
       await deleteAgent(bundle.slug);
 
-      const envValue = credentialKey
-        ? await encryptEnv(credentialKey, bundle.env)
-        : bundle.env;
-
       const manifest = {
         slug: bundle.slug,
-        env: envValue,
+        env: await encryptEnv(credentialKey, bundle.env),
         transport: bundle.transport,
         "credential_hashes": bundle.credential_hashes,
-        ...(credentialKey ? { envEncrypted: true } : {}),
+        envEncrypted: true,
       };
       await put(
         objectKey(bundle.slug, "manifest.json"),
@@ -189,11 +185,8 @@ export function createBundleStore(
       if (data === null) return null;
       const raw = JSON.parse(data);
 
-      // Decrypt env if it was stored encrypted
-      if (raw.envEncrypted && credentialKey && typeof raw.env === "string") {
-        raw.env = await decryptEnv(credentialKey, raw.env);
-        delete raw.envEncrypted;
-      }
+      raw.env = await decryptEnv(credentialKey, raw.env);
+      delete raw.envEncrypted;
 
       const parsed = AgentMetadataSchema.safeParse(raw);
       if (!parsed.success) return null;
@@ -211,10 +204,7 @@ export function createBundleStore(
       const data = await get(objectKey(slug, "manifest.json"));
       if (data === null) return null;
       const raw = JSON.parse(data);
-      if (raw.envEncrypted && credentialKey && typeof raw.env === "string") {
-        return await decryptEnv(credentialKey, raw.env);
-      }
-      return raw.env ?? null;
+      return await decryptEnv(credentialKey, raw.env);
     },
 
     async putEnv(slug, env) {
@@ -223,8 +213,8 @@ export function createBundleStore(
       if (data === null) throw new Error(`Agent ${slug} not found`);
       const manifest = JSON.parse(data);
 
-      manifest.env = credentialKey ? await encryptEnv(credentialKey, env) : env;
-      if (credentialKey) manifest.envEncrypted = true;
+      manifest.env = await encryptEnv(credentialKey, env);
+      manifest.envEncrypted = true;
 
       await put(
         objectKey(slug, "manifest.json"),
