@@ -1,7 +1,7 @@
 // Copyright 2025 the AAI authors. MIT license.
 /**
  * Host-side worker API — communicates with sandboxed agent workers via
- * postMessage RPC.
+ * Cap'n Web RPC over postMessage.
  *
  * @module
  */
@@ -9,12 +9,8 @@
 import type { Message } from "@aai/sdk/types";
 import type { KvRequest } from "@aai/sdk/protocol";
 import { withTimeout } from "@aai/sdk/timeout";
-import {
-  createRpcClient,
-  createRpcServer,
-  isRpcMessage,
-  type RpcHandlers,
-} from "@aai/sdk/rpc";
+import { newMessagePortRpcSession, RpcTarget } from "capnweb";
+import { asMessagePort } from "@aai/sdk/capnweb-transport";
 
 export {
   type ExecuteTool,
@@ -62,6 +58,39 @@ export type HostApi = {
   }>;
   kv(req: KvRequest): Promise<{ result: unknown }>;
 };
+
+/**
+ * Cap'n Web RPC target that exposes host-side APIs (fetch, kv) to the worker.
+ *
+ * An instance of this class is passed to the worker via
+ * {@linkcode AgentWorkerTarget.initHostApi}.
+ */
+class HostApiTarget extends RpcTarget {
+  #api: HostApi;
+
+  constructor(api: HostApi) {
+    super();
+    this.#api = api;
+  }
+
+  fetch(req: {
+    url: string;
+    method: string;
+    headers: Record<string, string>;
+    body: string | null;
+  }): Promise<{
+    status: number;
+    statusText: string;
+    headers: Record<string, string>;
+    body: string;
+  }> {
+    return this.#api.fetch(req);
+  }
+
+  kv(req: KvRequest): Promise<{ result: unknown }> {
+    return this.#api.kv(req);
+  }
+}
 
 /**
  * High-level API for communicating with a sandboxed agent worker.
@@ -122,62 +151,72 @@ export type WorkerApi = {
 };
 
 /**
- * Create a {@linkcode WorkerApi} backed by postMessage RPC over a Worker.
+ * Type representing the worker-side RPC target interface.
+ * This matches the methods exposed by AgentWorkerTarget in the worker.
+ */
+interface WorkerRpcApi {
+  initHostApi(hostApi: HostApiTarget): void;
+  setEnv(env: Record<string, string>): void;
+  getConfig(): Promise<import("@aai/sdk/types").WorkerConfig>;
+  executeTool(
+    name: string,
+    args: Readonly<Record<string, unknown>>,
+    sessionId: string | undefined,
+    messages: readonly Message[] | undefined,
+  ): Promise<string>;
+  onConnect(sessionId: string): Promise<void>;
+  onDisconnect(sessionId: string): Promise<void>;
+  onTurn(sessionId: string, text: string): Promise<void>;
+  onError(sessionId: string, error: string): void;
+  onStep(sessionId: string, step: StepInfoRpc): Promise<void>;
+  resolveMaxSteps(sessionId: string): Promise<number | null>;
+  resolveBeforeStep(
+    sessionId: string,
+    stepNumber: number,
+  ): Promise<{ activeTools?: string[] } | null>;
+}
+
+/**
+ * Create a {@linkcode WorkerApi} backed by Cap'n Web RPC over a Worker.
  *
- * @param worker - The Worker (or any object with `postMessage` and `onmessage`).
+ * Sets up a bidirectional capnweb RPC session: the host can call worker
+ * methods (getConfig, executeTool, hooks) via the worker's
+ * {@linkcode AgentWorkerTarget}, and the worker can call host methods
+ * (fetch, kv) via the {@linkcode HostApiTarget} passed during initialization.
+ *
+ * @param worker - The Worker (or any object with `postMessage` and event listeners).
  * @param hostApi - Optional host-side API to expose to the worker for fetch/kv proxy.
  * @returns A {@linkcode WorkerApi} instance with timeout-wrapped RPC methods.
  */
 export function createWorkerApi(
   worker: {
     postMessage(msg: unknown): void;
-    onmessage: ((e: MessageEvent) => void) | null;
+    addEventListener(type: string, listener: (event: Event) => void): void;
+    removeEventListener(type: string, listener: (event: Event) => void): void;
   },
   hostApi?: HostApi,
 ): WorkerApi {
-  const rpcClient = createRpcClient((msg) => worker.postMessage(msg));
+  const port = asMessagePort(worker);
+  const stub = newMessagePortRpcSession<WorkerRpcApi>(port);
 
-  // Set up RPC server for worker → host calls (fetch, kv)
-  const hostHandlers: RpcHandlers = {};
+  // Pass host API to the worker if provided
   if (hostApi) {
-    hostHandlers.fetch = (req: unknown) =>
-      hostApi.fetch(
-        req as {
-          url: string;
-          method: string;
-          headers: Readonly<Record<string, string>>;
-          body: string | null;
-        },
-      );
-    hostHandlers.kv = (req: unknown) => hostApi.kv(req as KvRequest);
+    const hostTarget = new HostApiTarget(hostApi);
+    // Fire-and-forget: initHostApi passes the host API stub to the worker
+    void Promise.resolve(stub.initHostApi(hostTarget)).catch(() => {});
   }
-  const rpcServer = createRpcServer(
-    hostHandlers,
-    (msg) => worker.postMessage(msg),
-  );
-
-  // Route incoming messages
-  worker.onmessage = (e: MessageEvent) => {
-    const data = e.data;
-    if (!isRpcMessage(data)) return;
-    if (data.type === "rpc-response") {
-      rpcClient.handleResponse(data);
-    } else {
-      rpcServer.handleRequest(data);
-    }
-  };
 
   function sendEnv(env?: Record<string, string>): void {
     if (env) {
       // Fire-and-forget — setEnv doesn't return a value
-      rpcClient.call("setEnv", env);
+      void Promise.resolve(stub.setEnv(env)).catch(() => {});
     }
   }
 
   return {
     async getConfig() {
       return await withTimeout(
-        rpcClient.call("getConfig") as Promise<
+        Promise.resolve(stub.getConfig()) as Promise<
           import("@aai/sdk/types").WorkerConfig
         >,
         5_000,
@@ -186,12 +225,8 @@ export function createWorkerApi(
     async executeTool(name, args, sessionId, timeoutMs, env, messages) {
       sendEnv(env);
       const raw = await withTimeout(
-        rpcClient.call(
-          "executeTool",
-          name,
-          args,
-          sessionId,
-          messages,
+        Promise.resolve(
+          stub.executeTool(name, args, sessionId, messages),
         ) as Promise<string>,
         timeoutMs,
       );
@@ -200,56 +235,58 @@ export function createWorkerApi(
     async onConnect(sessionId, timeoutMs, env) {
       sendEnv(env);
       await withTimeout(
-        rpcClient.call("onConnect", sessionId) as Promise<void>,
+        Promise.resolve(stub.onConnect(sessionId)) as Promise<void>,
         timeoutMs,
       );
     },
     async onDisconnect(sessionId, timeoutMs, env) {
       sendEnv(env);
       await withTimeout(
-        rpcClient.call("onDisconnect", sessionId) as Promise<void>,
+        Promise.resolve(stub.onDisconnect(sessionId)) as Promise<void>,
         timeoutMs,
       );
     },
     async onTurn(sessionId, text, timeoutMs, env) {
       sendEnv(env);
       await withTimeout(
-        rpcClient.call("onTurn", sessionId, text) as Promise<void>,
+        Promise.resolve(stub.onTurn(sessionId, text)) as Promise<void>,
         timeoutMs,
       );
     },
     async onError(sessionId, error, timeoutMs, env) {
       sendEnv(env);
       await withTimeout(
-        rpcClient.call("onError", sessionId, error) as Promise<void>,
+        Promise.resolve(stub.onError(sessionId, error)) as Promise<void>,
         timeoutMs,
       );
     },
     async onStep(sessionId, step, timeoutMs, env) {
       sendEnv(env);
       await withTimeout(
-        rpcClient.call("onStep", sessionId, step) as Promise<void>,
+        Promise.resolve(stub.onStep(sessionId, step)) as Promise<void>,
         timeoutMs,
       );
     },
     async resolveMaxSteps(sessionId, timeoutMs, env) {
       sendEnv(env);
       return await withTimeout(
-        rpcClient.call("resolveMaxSteps", sessionId) as Promise<number | null>,
+        Promise.resolve(
+          stub.resolveMaxSteps(sessionId),
+        ) as Promise<number | null>,
         timeoutMs ?? 5_000,
       );
     },
     async resolveBeforeStep(sessionId, stepNumber, timeoutMs, env) {
       sendEnv(env);
       return await withTimeout(
-        rpcClient.call("resolveBeforeStep", sessionId, stepNumber) as Promise<
-          { activeTools?: string[] } | null
-        >,
+        Promise.resolve(
+          stub.resolveBeforeStep(sessionId, stepNumber),
+        ) as Promise<{ activeTools?: string[] } | null>,
         timeoutMs ?? 5_000,
       );
     },
     dispose() {
-      worker.onmessage = null;
+      stub[Symbol.dispose]();
     },
   };
 }

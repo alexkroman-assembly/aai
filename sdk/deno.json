@@ -9,14 +9,15 @@
     "./kv-tools": "./kv_tools.ts",
     "./protocol": "./protocol.ts",
     "./worker-entry": "./worker_entry.ts",
-    "./rpc": "./_rpc.ts",
     "./worker-shim": "./_worker_shim.ts",
     "./timeout": "./_timeout.ts",
-    "./testing": "./_mock_ws.ts"
+    "./testing": "./_mock_ws.ts",
+    "./capnweb-transport": "./_capnweb_transport.ts"
   },
   "imports": {
     "zod": "jsr:@zod/zod@^4.3.6",
-    "json-schema": "npm:@types/json-schema@^7.0.15"
+    "json-schema": "npm:@types/json-schema@^7.0.15",
+    "capnweb": "npm:capnweb@^0.1"
   },
   "publish": {
     "exclude": [

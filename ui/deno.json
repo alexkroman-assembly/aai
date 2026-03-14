@@ -19,7 +19,9 @@
     "preact/hooks": "npm:preact@^10.29.0/hooks",
     "@preact/signals": "npm:@preact/signals@^2.8.2",
     "linkedom": "npm:linkedom@^0.18.10",
-    "@aai/sdk": "workspace:@aai/sdk"
+    "@aai/sdk": "workspace:@aai/sdk",
+    "capnweb": "npm:capnweb@^0.1",
+    "partysocket": "npm:partysocket@^1.1"
   },
   "compilerOptions": {
     "lib": [
